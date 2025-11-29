@@ -50,6 +50,7 @@ const App: React.FC = () => {
 
   const permissions: { [key in UserRole]: View[] } = {
     Admin: ['dashboard', 'quotes', 'newQuote', 'quoteDetail', 'sales', 'inventory', 'products', 'cashflow', 'financials', 'reports', 'assistant', 'clients', 'settings'],
+    Manager: ['dashboard', 'quotes', 'newQuote', 'quoteDetail', 'sales', 'inventory', 'products', 'cashflow', 'financials', 'reports', 'assistant', 'clients', 'settings'],
     Finance: ['dashboard', 'sales', 'cashflow', 'financials', 'reports'],
     Sales: ['dashboard', 'quotes', 'newQuote', 'quoteDetail', 'sales', 'inventory', 'products', 'reports', 'clients'],
   };

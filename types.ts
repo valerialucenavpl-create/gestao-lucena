@@ -1,6 +1,6 @@
 export type View = 'dashboard' | 'quotes' | 'newQuote' | 'quoteDetail' | 'sales' | 'inventory' | 'products' | 'financials' | 'assistant' | 'reports' | 'cashflow' | 'clients' | 'settings' | 'accessDenied';
 
-export type UserRole = 'Admin' | 'Finance' | 'Sales';
+export type UserRole = 'Admin' | 'Finance' | 'Sales' | 'Manager';
 
 export interface User {
   id: string;

@@ -63,7 +63,7 @@ const Settings: React.FC<SettingsProps> = ({ companySettings, setCompanySettings
                 email: userEmail,
                 password: userPassword,
                 role: userRole,
-                monthlyGoal: userRole === 'Sales' ? userGoal : undefined
+                monthlyGoal: (userRole === 'Sales' || userRole === 'Manager') ? userGoal : undefined
             } : u));
         } else {
             // Create
@@ -73,7 +73,7 @@ const Settings: React.FC<SettingsProps> = ({ companySettings, setCompanySettings
                 email: userEmail,
                 password: userPassword,
                 role: userRole,
-                monthlyGoal: userRole === 'Sales' ? userGoal : undefined,
+                monthlyGoal: (userRole === 'Sales' || userRole === 'Manager') ? userGoal : undefined,
                 avatar: `https://api.dicebear.com/8.x/initials/svg?seed=${userName}`
             };
             setUsers([...users, newUser]);
@@ -139,6 +139,7 @@ const Settings: React.FC<SettingsProps> = ({ companySettings, setCompanySettings
                         <td className="px-6 py-4">
                             <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
                                 user.role === 'Admin' ? 'bg-purple-100 text-purple-800' :
+                                user.role === 'Manager' ? 'bg-indigo-100 text-indigo-800' :
                                 user.role === 'Finance' ? 'bg-green-100 text-green-800' :
                                 'bg-blue-100 text-blue-800'
                             }`}>
@@ -243,11 +244,12 @@ const Settings: React.FC<SettingsProps> = ({ companySettings, setCompanySettings
                           <label className="block text-sm font-medium text-gray-700">Função / Cargo</label>
                           <select value={userRole} onChange={e => setUserRole(e.target.value as UserRole)} className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500">
                               <option value="Admin">Admin (Acesso Total)</option>
+                              <option value="Manager">Gerente de Vendas (Acesso Total + Meta)</option>
                               <option value="Finance">Financeiro (Acesso Financeiro)</option>
                               <option value="Sales">Vendas (Acesso Vendas/Orçamentos)</option>
                           </select>
                       </div>
-                      {userRole === 'Sales' && (
+                      {(userRole === 'Sales' || userRole === 'Manager') && (
                           <div>
                               <label className="block text-sm font-medium text-gray-700">Meta Mensal (R$)</label>
                               <input type="number" value={userGoal} onChange={e => setUserGoal(parseFloat(e.target.value))} className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500" />
