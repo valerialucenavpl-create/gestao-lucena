@@ -24,7 +24,7 @@ jobs:
       - name: Build project
         run: npm run build
 
-        - name: Deploy to FTP
+      - name: Deploy to FTP
         uses: milanmk/actions-ftp-deploy@v1.2.0
         with:
           server: ${{ secrets.FTP_HOST }}
