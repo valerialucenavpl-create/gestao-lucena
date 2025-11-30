@@ -25,10 +25,13 @@ jobs:
         run: npm run build
 
       - name: Deploy to FTP
-        uses: sand4rt/ftp-deploy-action@v1.3.2
+        uses: milanmk/actions-ftp-deploy@v1.2.0
         with:
           server: ${{ secrets.FTP_HOST }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          local-dir: './dist/'
-          server-dir: './'
+          port: 21
+          local_dir: dist/
+          remote_dir: /
+          secure: false
+
