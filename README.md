@@ -20,3 +20,4 @@ View your app in AI Studio: https://ai.studio/apps/drive/1ybr7L6QSlspjhR27jtmi_C
 3. Run the app:
    `npm run dev`
 Atualização para disparar o deploy
+git commit -m "build deploy"
