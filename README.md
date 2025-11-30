@@ -23,3 +23,4 @@ Atualização para disparar o deploy
 git commit -m "build deploy"
 disparando deploy novamente
 update deploy 2
+git commit -m "deploy"
