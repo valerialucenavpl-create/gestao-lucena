@@ -24,13 +24,12 @@ jobs:
       - name: Build project
         run: npm run build
 
-      # Upload da pasta dist/ para a Hostinger
-      - name: Deploy to FTP
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.4
+      - name: Deploy via FTP
+        uses: SamKirkland/FTP-Deploy-Action@4.3.4
         with:
           server: ${{ secrets.FTP_HOST }}
           username: ${{ secrets.FTP_USER }}
           password: ${{ secrets.FTP_PASSWORD }}
-          local-dir: dist/
-          server-dir: public_html/
-          protocol: ftp
+          local-dir: dist
+          server-dir: ./
+
