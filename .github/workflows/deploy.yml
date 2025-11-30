@@ -2,33 +2,36 @@ name: Deploy via FTP
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
 
 jobs:
   deploy:
-    name: Deploy to Hostinger
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: "18"
+          node-version: '18'
 
       - name: Install dependencies
         run: npm install
 
-      - name: Build project
+      - name: Build project (Vite)
         run: npm run build
 
-      - name: Deploy dist folder via FTP
+      - name: Deploy via FTP
         uses: SamKirkland/FTP-Deploy-Action@4.3.3
         with:
           server: ${{ secrets.FTP_HOST }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
+          # Onde está o build gerado pelo Vite:
           local-dir: dist/
+          # Pasta da Hostinger onde os arquivos precisam ir:
           server-dir: public_html/
+
