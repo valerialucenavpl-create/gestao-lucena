@@ -22,3 +22,4 @@ View your app in AI Studio: https://ai.studio/apps/drive/1ybr7L6QSlspjhR27jtmi_C
 Atualização para disparar o deploy
 git commit -m "build deploy"
 disparando deploy novamente
+update deploy 2
