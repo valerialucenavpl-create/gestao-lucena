@@ -2,23 +2,29 @@ name: Deploy via FTP
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
 
 jobs:
   deploy:
+    name: Deploy to Hostinger
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Build project
-        run: |
-          npm install
-          npm run build
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18"
 
-      - name: Deploy to FTP
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build project
+        run: npm run build
+
+      - name: Deploy dist folder via FTP
         uses: SamKirkland/FTP-Deploy-Action@4.3.3
         with:
           server: ${{ secrets.FTP_HOST }}
@@ -26,4 +32,3 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           local-dir: dist/
           server-dir: public_html/
-
