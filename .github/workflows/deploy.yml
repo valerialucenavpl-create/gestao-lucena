@@ -23,7 +23,7 @@ jobs:
         protocol: ftp
         port: 21
         local-dir: ./
-        server-dir: /public_html/gestao/
+        server-dir: /public_html/
         exclude: |
           **/.git*
           **/.github*
