@@ -1,8 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { getBusinessAdvice } from '../services/geminiService';
 import { Message } from '../types';
 import { Icon } from './icons/Icon';
+import { sendMessageToAI } from "../services/chatService";
 
 const Assistant: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([
@@ -18,29 +18,36 @@ const Assistant: React.FC = () => {
 
   useEffect(scrollToBottom, [messages]);
 
-  const handleSend = async () => {
-    if (input.trim() === '' || isLoading) return;
+const handleSend = async () => {
+  if (!input.trim() || isLoading) return;
 
-    const userMessage: Message = { id: Date.now(), text: input, sender: 'user' };
-    setMessages(prev => [...prev, userMessage]);
-    setInput('');
-    setIsLoading(true);
-
-    const botTypingMessage: Message = { id: Date.now() + 1, text: '', sender: 'bot', isTyping: true };
-    setMessages(prev => [...prev, botTypingMessage]);
-
-    try {
-      const responseText = await getBusinessAdvice(input);
-      const botMessage: Message = { id: Date.now() + 2, text: responseText, sender: 'bot' };
-      setMessages(prev => [...prev.filter(m => !m.isTyping), botMessage]);
-    } catch (error) {
-      const errorMessage: Message = { id: Date.now() + 2, text: 'Ocorreu um erro ao contatar o assistente. Tente novamente.', sender: 'bot' };
-      setMessages(prev => [...prev.filter(m => !m.isTyping), errorMessage]);
-    } finally {
-      setIsLoading(false);
-    }
+  const userMessage = {
+    role: "user",
+    content: input,
   };
-  
+
+  setMessages((prev) => [...prev, { text: input, sender: "user" }]);
+  setInput("");
+  setIsLoading(true);
+
+  try {
+    const data = await sendMessageToAI([
+      { role: "system", content: "Você é um assistente de negócios." },
+      userMessage,
+    ]);
+
+    setMessages((prev) => [
+      ...prev,
+      { text: data.reply, sender: "bot" },
+    ]);
+  } catch (err) {
+    console.error(err);
+    alert("Erro ao conversar com a IA");
+  } finally {
+    setIsLoading(false);
+  }
+};
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -67,17 +74,45 @@ const Assistant: React.FC = () => {
     const botTypingMessage: Message = { id: Date.now() + 1, text: '', sender: 'bot', isTyping: true };
     setMessages(prev => [...prev, botTypingMessage]);
 
-    getBusinessAdvice(suggestion).then(responseText => {
-        const botMessage: Message = { id: Date.now() + 2, text: responseText, sender: 'bot' };
-        setMessages(prev => [...prev.filter(m => !m.isTyping), botMessage]);
-        setIsLoading(false);
-    }).catch(error => {
-        const errorMessage: Message = { id: Date.now() + 2, text: 'Ocorreu um erro ao contatar o assistente. Tente novamente.', sender: 'bot' };
-        setMessages(prev => [...prev.filter(m => !m.isTyping), errorMessage]);
-        setIsLoading(false);
-    });
-  }
 
+const handleSuggestionClick = async (suggestion: string) => {
+  setInput(suggestion);
+
+  const userMessage: Message = {
+    id: Date.now(),
+    text: suggestion,
+    sender: "user",
+  };
+
+  setMessages((prev) => [...prev, userMessage]);
+  setInput("");
+  setIsLoading(true);
+
+  const botTypingMessage: Message = {
+    id: Date.now() + 1,
+    text: "",
+    sender: "bot",
+    isTyping: true,
+  };
+
+  setMessages((prev) => [...prev, botTypingMessage]);
+
+  const data = await sendMessageToAI([
+    { role: "system", content: "Você é um assistente de gestão para marmoraria." },
+    { role: "user", content: suggestion },
+  ]);
+
+  const botMessage: Message = {
+    id: Date.now() + 2,
+    text: data.reply,
+    sender: "bot",
+  };
+
+  setMessages((prev) => [...prev.filter(m => !m.isTyping), botMessage]);
+  setIsLoading(false);
+};
+
+};
 
   return (
     <div className="bg-white rounded-xl shadow-md h-full flex flex-col">

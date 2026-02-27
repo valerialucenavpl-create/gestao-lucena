@@ -1,0 +1,67 @@
+import { supabase } from "./supabase";
+import { CompanySettings } from "../types";
+
+/* =======================
+   CARREGAR CONFIGURAÇÕES
+======================= */
+export const loadCompanySettings = async () => {
+  try {
+    const { data: authData } = await supabase.auth.getUser();
+    if (!authData.user) return { ok: false };
+
+    const { data, error } = await supabase
+      .from("company_settings")
+      .select("*")
+      .eq("user_id", authData.user.id)
+      .maybeSingle();
+
+    if (error) return { ok: false, error };
+
+    if (!data) return { ok: true, data: null };
+
+    const mapped: CompanySettings = {
+      name: data.name ?? "",
+      legalName: data.legal_name ?? "",
+      cnpj: data.cnpj ?? "",
+      address: data.address ?? "",
+      phone: data.phone ?? "",
+      email: data.email ?? "",
+      logo: data.logo ?? undefined,
+    };
+
+    return { ok: true, data: mapped };
+  } catch (e) {
+    return { ok: false, error: e };
+  }
+};
+
+/* =======================
+   SALVAR CONFIGURAÇÕES
+======================= */
+export const saveCompanySettings = async (settings: CompanySettings) => {
+  try {
+    const { data: authData } = await supabase.auth.getUser();
+    if (!authData.user) return { ok: false };
+
+    const payload = {
+      user_id: authData.user.id,
+      name: settings.name,
+      legal_name: settings.legalName,
+      cnpj: settings.cnpj,
+      address: settings.address,
+      phone: settings.phone,
+      email: settings.email,
+      logo: settings.logo ?? null,
+    };
+
+    const { error } = await supabase
+      .from("company_settings")
+      .upsert(payload, { onConflict: "user_id" });
+
+    if (error) return { ok: false, error };
+
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e };
+  }
+};

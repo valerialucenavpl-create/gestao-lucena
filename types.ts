@@ -1,167 +1,210 @@
-export type View = 'dashboard' | 'quotes' | 'newQuote' | 'quoteDetail' | 'sales' | 'inventory' | 'products' | 'financials' | 'assistant' | 'reports' | 'cashflow' | 'clients' | 'settings' | 'accessDenied';
+// ---------------------------------------------
+// Views do sistema
+// ---------------------------------------------
+export type View =
+  | "dashboard"
+  | "quotes"
+  | "sales"
+  | "clients"
+  | "products"
+  | "inventory"
+  | "cashflow"
+  | "financials"
+  | "employees"      // ✅ ADICIONADO
+  | "employee-new"   // ✅ ADICIONADO
+  | "assistant"
+  | "reports"
+  | "settings"
+  | "sellers";
 
-export type UserRole = 'Admin' | 'Finance' | 'Sales' | 'Manager';
 
+// ---------------------------------------------
+// Usuário
+// ---------------------------------------------
 export interface User {
   id: string;
   name: string;
-  role: UserRole;
-  avatar: string;
-  email?: string;     // New field for login
-  password?: string;  // New field for login
-  monthlyGoal?: number; 
+  email: string;
+  role: "Admin" | "Sales" | "Finance";
+  avatar?: string;
+  monthlyGoal?: number;
 }
 
-export interface CompanySettings {
-    name: string;
-    legalName: string;
-    cnpj: string;
-    email: string;
-    phone: string;
-    address: string;
-    logo?: string;
-}
-
-export type UnitOfMeasure = 'un' | 'm' | 'm²' | 'g' | 'kg' | 'cm' | 'mm';
-export type UsageCategory = 'Linear' | 'Chapa/Placa' | 'Componente' | 'Peso' | 'Serviço';
-
+// ---------------------------------------------
+// Materiais / Estoque
+// ---------------------------------------------
 export interface ColorVariant {
-    name: string;
-    cost: number;
-    salePrice: number;
+  name: string;
+  cost: number;
+  salePrice: number;
 }
+export type UnitType = "un" | "m" | "m²";
 
 export interface InventoryItem {
   id: string;
   name: string;
-  usageCategory: UsageCategory;
-  unit: UnitOfMeasure;
-  colorVariants: ColorVariant[];
-  stockQuantity: number;
-  standardSize?: string;
-  image?: string; 
+  unit: UnitType;
+  quantity: number;
+  minStock: number;
+  usageCategory?: string;
+  colorVariants?: ColorVariant[];
 }
 
-export type CalculationRule = 'perimeter' | 'height_multiplier' | 'width_multiplier' | 'fill' | 'fixed_quantity' | 'area_multiplier';
+// ---------------------------------------------
+// Produtos
+// ---------------------------------------------
+export type CalculationRule =
+  | "perimeter"
+  | "height_multiplier"
+  | "width_multiplier"
+  | "area_multiplier"
+  | "fill"
+  | "fixed_quantity";
 
 export interface ProductCompositionItem {
-    id: string;
-    materialId: string;
-    rule: CalculationRule;
-    multiplier?: number;
-    factor?: number;
-    quantity?: number;
+  id: string;
+  materialId: string;
+  rule: CalculationRule;
+  multiplier?: number;
+  quantity?: number;
+  factor?: number;
+  variantName?: string; // 🔘 cor da variação do material
 }
-
 
 export interface Product {
-    id: string;
-    name: string;
-    category: string;
-    image?: string; 
-    composition: ProductCompositionItem[];
-    laborCost?: number; 
-    desiredProfitMargin: number;
+  id: string;
+  name: string;
+  desiredProfitMargin: number;
+  composition: ProductCompositionItem[];
+  category?: string;
+  laborCost?: number;
 }
 
-
+// ---------------------------------------------
+// Clientes
+// ---------------------------------------------
 export interface Client {
-    id: string;
-    name: string;
-    phone?: string;
-    birthDate?: string;
-    address: {
-        cep?: string;
-        street?: string;
-        number?: string;
-        complement?: string;
-        neighborhood?: string;
-        city?: string;
-        state?: string;
-        referencePoint?: string;
-    }
+  id: string;
+  name: string;
+  phone?: string;
+  email?: string;
+
+  // ✅ Observação do cliente
+  notes?: string;
+
+  address?: {
+    street?: string;
+    number?: string;
+    neighborhood?: string;
+    city?: string;
+    state?: string;
+    referencePoint?: string;
+  };
 }
 
+// ---------------------------------------------
+// Despesas Variáveis
+// ---------------------------------------------
+export interface VariableExpense {
+  id: string;
+  name: string;
+  type: "percent" | "fixed";
+  value: number;
+}
+
+// ---------------------------------------------
+// Itens do Orçamento
+// ---------------------------------------------
 export interface QuoteItem {
-    id: string;
-    productId: string;
-    productName: string;
-    selectedColor: string;
-    description: string;
-    width: number; 
-    height: number; 
-    quantity: number;
-    price: number;
-    cost: number;
+  id: string;
+  productId: string;
+  productName: string;
+  selectedColor: string;
+  description: string;
+  width: number;
+  height: number;
+  quantity: number;
+  price: number;
+  cost: number;
 }
-
-
+// ---------------------------------------------
+// Orçamentos
+// ---------------------------------------------
 export interface Quote {
   id: string;
   clientId: string;
-  customerName: string; 
+
+  customerName: string;
+  salesperson: string;
+  date: string | Date;
+  status: "Pendente" | "Aprovado" | "Recusado";
+
   items: QuoteItem[];
+
   subtotal: number;
   discount: number;
-  freight?: number; 
-  installation?: number; 
+  freight: number;
+  installation: number;
   totalPrice: number;
-  paymentMethod: 'PIX' | 'Cartão' | 'Dinheiro' | 'A Definir';
-  assemblyNotes: string;
+
+  paymentMethod: "A Definir" | "PIX" | "Cartão" | "Dinheiro";
+
+  costOfGoods: number;
+  fixedCosts: number;
+  machineFee: number;
+  taxes: number;
+
   measurementNotes: string;
-  date: Date;
-  status: 'Pendente' | 'Aprovado' | 'Recusado';
-  salesperson: string;
-  costOfGoods: number;
-  fixedCosts?: number;
-  machineFee?: number;
-  taxes?: number;
+  assemblyNotes: string;
+
+  // ✅ SUA COMISSÃO DE INDICAÇÃO
+  referralCommissionRate?: number;
+  referralCommissionValue?: number;
 }
 
-export interface Sale {
-  id: string;
-  quoteId: string;
-  customerName: string;
-  amount: number;
-  saleDate: Date;
-  salesperson: string;
-  costOfGoods: number;
+
+// ---------------------------------------------
+// Configurações da Empresa
+// ---------------------------------------------
+export interface CompanySettings {
+  name: string;
+  legalName: string;
+  cnpj: string;
+  address: string;
+  phone: string;
+  email: string;
+  logo?: string;
 }
 
-export interface FinancialRecord {
-    month: string;
-    income: number;
-    expenses: number;
-}
-
+// ---------------------------------------------
+// Fluxo de Caixa
+// ---------------------------------------------
 export interface CashFlowEntry {
   id: string;
-  date: Date;
-  description: string;
+  type: "income" | "expense";
   amount: number;
-  type: 'income' | 'expense';
   category: string;
-  subcategory: string;
+  subcategory?: string;
+  description: string;
+  date: string;
 }
 
-export interface FixedExpense {
-    id: string;
-    name: string;
-    date: Date;
-    amount: number;
-    category: 'Funcionários' | 'Estrutura' | 'Impostos' | 'Outros';
+// ---------------------------------------------
+// Vendas (Ligadas a Orçamentos)
+// ---------------------------------------------
+export interface Sale {
+  id: string; // UUID gerado pelo Supabase
+  quoteId: string; // referência ao orçamento aprovado
+  customerName: string;
+  salesperson: string;
+  saleDate: Date;
+  amount: number; // total do orçamento
+  status: "Aprovado" | "Concluído" | "Pendente" | "Cancelado";
 }
-
-export interface VariableExpense {
-    id: string;
-    name: string;
-    type: 'percent' | 'fixed';
-    value: number;
-}
-
-export interface Message {
+export type Message = {
   id: number;
   text: string;
-  sender: 'user' | 'bot';
-  isTyping?: boolean;
-}
+  sender: "bot" | "user";
+  isTyping?: boolean; // ✅ adiciona isso
+};
+
