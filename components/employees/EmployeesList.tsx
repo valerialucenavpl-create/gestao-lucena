@@ -21,7 +21,7 @@ const EmployeesList: React.FC<Props> = ({ setActiveView }) => {
     const { data, error } = await supabase
       .from("employees")
       .select("id, name, role, base_salary")
-      .order("id", { ascending: false });
+      .order("name", { ascending: true });
 
     if (error) {
       console.error(error);

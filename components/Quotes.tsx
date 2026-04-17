@@ -5,9 +5,10 @@ import { Quote, View } from "../types";
 interface QuotesProps {
   quotes?: Quote[]; // <- pode vir undefined em runtime
   setActiveView: (view: View, id?: string) => void;
+  onDeleteQuote?: (id: string) => void;
 }
 
-const Quotes: React.FC<QuotesProps> = ({ quotes, setActiveView }) => {
+const Quotes: React.FC<QuotesProps> = ({ quotes, setActiveView, onDeleteQuote }) => {
   // garante sempre array
   const safeQuotes = useMemo(() => (Array.isArray(quotes) ? quotes : []), [quotes]);
 
@@ -32,7 +33,7 @@ const Quotes: React.FC<QuotesProps> = ({ quotes, setActiveView }) => {
         <table className="w-full text-sm text-gray-700">
           <thead className="bg-gray-100 text-gray-600 uppercase text-xs">
             <tr>
-              <th className="px-4 py-3">ID</th>
+              <th className="px-4 py-3">N°</th>
               <th className="px-4 py-3">Cliente</th>
               <th className="px-4 py-3">Vendedor</th>
               <th className="px-4 py-3">Status</th>
@@ -44,20 +45,32 @@ const Quotes: React.FC<QuotesProps> = ({ quotes, setActiveView }) => {
           <tbody>
             {safeQuotes.map((q) => (
               <tr key={q.id} className="border-b hover:bg-gray-50">
-                <td className="px-4 py-3 font-medium">{q.id}</td>
+                <td className="px-4 py-3 font-medium">N° {q.quoteNumber ?? "—"}</td>
                 <td className="px-4 py-3">{q.customerName}</td>
                 <td className="px-4 py-3">{q.salesperson}</td>
                 <td className="px-4 py-3">{q.status}</td>
                 <td className="px-4 py-3">
                   R$ {Number(q.totalPrice ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
                 </td>
-                <td className="px-4 py-3 text-center">
+                <td className="px-4 py-3 text-center flex items-center justify-center gap-3">
                   <button
                     onClick={() => setActiveView("quoteDetail", q.id)}
                     className="text-blue-600 hover:underline"
                   >
                     Abrir
                   </button>
+                  {onDeleteQuote && (
+                    <button
+                      onClick={() => {
+                        if (window.confirm("Deseja excluir este orçamento?")) {
+                          onDeleteQuote(q.id);
+                        }
+                      }}
+                      className="text-red-500 hover:underline"
+                    >
+                      Excluir
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

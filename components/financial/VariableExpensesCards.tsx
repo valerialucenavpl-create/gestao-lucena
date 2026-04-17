@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "../../services/supabase";
+import { formatMoneyInputBR, parseMoneyInputBR } from "../../utils/money";
 
 type VariableExpense = {
   id: number;
@@ -8,7 +9,11 @@ type VariableExpense = {
   value: number;
 };
 
-const VariableExpensesCards: React.FC = () => {
+interface VariableExpensesCardsProps {
+  onExpensesChange?: (expenses: VariableExpense[]) => void;
+}
+
+const VariableExpensesCards: React.FC<VariableExpensesCardsProps> = ({ onExpensesChange }) => {
   const [items, setItems] = useState<VariableExpense[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +32,9 @@ const VariableExpensesCards: React.FC = () => {
       console.error(error);
       setError("Erro ao carregar despesas variáveis");
     } else {
-      setItems(data || []);
+      const loaded = data || [];
+      setItems(loaded);
+      onExpensesChange?.(loaded);
     }
     setLoading(false);
   };
@@ -45,11 +52,14 @@ const VariableExpensesCards: React.FC = () => {
 
     const newValue = prompt(
       `Novo valor (${item.type === "Percentual" ? "%" : "R$"}):`,
-      String(item.value)
+      item.type === "Percentual" ? String(item.value) : formatMoneyInputBR(item.value)
     );
     if (!newValue) return;
 
-    const valueNum = Number(newValue.replace(",", "."));
+    const valueNum =
+      item.type === "Percentual"
+        ? Number(newValue.replace(",", "."))
+        : parseMoneyInputBR(newValue);
     if (isNaN(valueNum)) {
       alert("Valor inválido");
       return;

@@ -1,5 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../services/supabase";
+import {
+  formatMoneyInputBR,
+  parseMoneyInputBR,
+  sanitizeMoneyInputBR,
+} from "../../utils/money";
 
 type BillingSettings = {
   id: string;
@@ -9,9 +14,6 @@ type BillingSettings = {
   variable_percent: number | null;
   min_profit_percent: number | null;
 };
-
-const parseBR = (v: string) =>
-  Number(String(v).replace(/\./g, "").replace(",", ".")) || 0;
 
 const formatBRL = (n: number) =>
   Number(n || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -47,12 +49,7 @@ const MarkupFaturamentoTab: React.FC = () => {
       if (s) {
         setRowId(s.id);
         if (s.monthly_revenue_target != null)
-          setMonthlyRevenue(
-            Number(s.monthly_revenue_target).toLocaleString("pt-BR", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })
-          );
+          setMonthlyRevenue(formatMoneyInputBR(Number(s.monthly_revenue_target)));
         if (s.work_days != null) setWorkDays(String(s.work_days));
         if (s.hours_per_day != null) setHoursPerDay(String(s.hours_per_day));
         if (s.variable_percent != null) setVariablePercent(String(s.variable_percent));
@@ -81,7 +78,7 @@ const MarkupFaturamentoTab: React.FC = () => {
     load();
   }, []);
 
-  const monthlyRevenueNum = useMemo(() => parseBR(monthlyRevenue), [monthlyRevenue]);
+  const monthlyRevenueNum = useMemo(() => parseMoneyInputBR(monthlyRevenue), [monthlyRevenue]);
   const workDaysNum = useMemo(() => Number(workDays) || 0, [workDays]);
   const hoursPerDayNum = useMemo(() => Number(hoursPerDay) || 0, [hoursPerDay]);
   const variablePct = useMemo(() => Number(variablePercent) || 0, [variablePercent]);
@@ -155,7 +152,8 @@ const MarkupFaturamentoTab: React.FC = () => {
             <input
               className="w-full p-2 border rounded"
               value={monthlyRevenue}
-              onChange={(e) => setMonthlyRevenue(e.target.value)}
+              onChange={(e) => setMonthlyRevenue(sanitizeMoneyInputBR(e.target.value))}
+              onBlur={() => setMonthlyRevenue(formatMoneyInputBR(parseMoneyInputBR(monthlyRevenue)))}
               placeholder="120.000,00"
             />
           </div>

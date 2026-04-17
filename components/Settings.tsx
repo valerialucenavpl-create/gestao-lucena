@@ -1,10 +1,15 @@
 import React, { useMemo, useState } from "react";
 import { User, CompanySettings } from "../types";
-import { supabase } from "../services/supabase";
 import {
   uploadCompanyLogo,
   saveCompanySettings,
 } from "../services/companySettingsServices";
+import { createUser, uploadUserAvatar } from "../services/userService";
+import {
+  formatMoneyInputBR,
+  parseMoneyInputBR,
+  sanitizeMoneyInputBR,
+} from "../utils/money";
 
 interface SettingsProps {
   companySettings: CompanySettings;
@@ -71,6 +76,16 @@ const Settings: React.FC<SettingsProps> = ({
   const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState<User["role"]>("Sales");
   const [newGoal, setNewGoal] = useState<number>(0);
+  const [newGoalInput, setNewGoalInput] = useState<string>(formatMoneyInputBR(0));
+  const [newAvatarFile, setNewAvatarFile] = useState<File | null>(null);
+  const [newAvatarPreview, setNewAvatarPreview] = useState<string>("");
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setNewAvatarFile(file);
+    setNewAvatarPreview(URL.createObjectURL(file));
+  };
 
   const resetCreateForm = () => {
     setNewName("");
@@ -78,6 +93,9 @@ const Settings: React.FC<SettingsProps> = ({
     setNewPassword("");
     setNewRole("Sales");
     setNewGoal(0);
+    setNewGoalInput(formatMoneyInputBR(0));
+    setNewAvatarFile(null);
+    setNewAvatarPreview("");
   };
 
   const canShowGoal = useMemo(
@@ -96,50 +114,74 @@ const Settings: React.FC<SettingsProps> = ({
 
     setCreating(true);
     try {
+      // Upload avatar first if provided
+      let avatarUrl: string | undefined;
+      if (newAvatarFile) {
+        const up = await uploadUserAvatar(newAvatarFile);
+        if (up.ok && up.url) avatarUrl = up.url;
+      }
+
       const payload = {
         name: newName.trim(),
         email: newEmail.trim().toLowerCase(),
         password: newPassword,
         role: newRole,
         monthlyGoal: canShowGoal ? Number(newGoal || 0) : 0,
+        avatar: avatarUrl,
       };
 
-      const { data, error } = await supabase.functions.invoke("create-user", {
-        body: payload,
-      });
-
-      if (error) {
-        alert(`Erro ao cadastrar: ${error.message}`);
+      const result = await createUser(payload);
+      if (!result.ok) {
+        const message =
+          typeof result.error === "string"
+            ? result.error
+            : result.error?.message ?? "Falha desconhecida";
+        alert(`Erro ao cadastrar: ${message}`);
         return;
       }
 
+      const data = result.data;
       if (!data?.success) {
         alert(`Erro ao cadastrar: ${data?.error ?? "Falha desconhecida"}`);
         return;
       }
 
-      const newUser: User = {
-        id: data.auth_user_id ?? `u-${Date.now()}`,
-        name: payload.name,
-        email: payload.email,
-        role: payload.role,
-        monthlyGoal:
-          payload.role === "Sales" || payload.role === "Finance"
-            ? payload.monthlyGoal
-            : undefined,
-        avatar: `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(
-          payload.name
-        )}`,
-      };
+      if (data.auth_user_id) {
+        const newUser: User = {
+          id: data.auth_user_id,
+          name: payload.name,
+          email: payload.email,
+          role: payload.role,
+          monthlyGoal:
+            payload.role === "Sales" || payload.role === "Finance"
+              ? payload.monthlyGoal
+              : undefined,
+          avatar: avatarUrl ?? `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(payload.name)}`,
+        };
 
-      setUsers((prev) => {
-        const exists = prev.some(
-          (u) => u.email.toLowerCase() === newUser.email.toLowerCase()
+        setUsers((prev) => {
+          const exists = prev.some(
+            (u) => u.email.toLowerCase() === newUser.email.toLowerCase()
+          );
+          return exists ? prev : [newUser, ...prev];
+        });
+      }
+
+      if ((data as any)?.existing_user) {
+        alert(
+          "Este e-mail já está cadastrado no Auth. Use outro e-mail ou redefina a senha da usuária para reutilizar este login."
         );
-        return exists ? prev : [newUser, ...prev];
-      });
-
-      alert("Usuária cadastrada com sucesso ✅");
+      } else if ((data as any)?.rate_limited) {
+        alert(
+          "Cadastro recebido, mas o Supabase limitou envios de e-mail temporariamente. Aguarde alguns minutos e peça para a usuária verificar a caixa de entrada/spam."
+        );
+      } else if ((data as any)?.profile_pending) {
+        alert(
+          "Usuária criada com sucesso no Auth ✅\nConfirme o e-mail da usuária e faça o primeiro login para finalizar o perfil no sistema."
+        );
+      } else {
+        alert("Usuária cadastrada com sucesso ✅");
+      }
       resetCreateForm();
       setIsCreateModalOpen(false);
     } catch (err: any) {
@@ -327,6 +369,30 @@ const Settings: React.FC<SettingsProps> = ({
                 </div>
 
                 <form onSubmit={handleCreateUser} className="space-y-4">
+                  {/* Avatar */}
+                  <div className="flex items-center gap-4">
+                    {newAvatarPreview ? (
+                      <img
+                        src={newAvatarPreview}
+                        alt="Avatar"
+                        className="w-16 h-16 rounded-full object-cover border"
+                      />
+                    ) : (
+                      <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center text-gray-400 text-2xl border">
+                        👤
+                      </div>
+                    )}
+                    <div>
+                      <label className="block font-medium mb-1">Foto (opcional)</label>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleAvatarChange}
+                        className="text-sm"
+                      />
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block font-medium mb-1">Nome</label>
                     <input
@@ -386,13 +452,18 @@ const Settings: React.FC<SettingsProps> = ({
                         Meta Mensal (R$)
                       </label>
                       <input
-                        type="number"
+                        type="text"
+                        inputMode="decimal"
                         className={inputClass}
-                        value={newGoal}
-                        onChange={(e) => setNewGoal(Number(e.target.value))}
+                        value={newGoalInput}
+                        onChange={(e) => {
+                          const rawValue = sanitizeMoneyInputBR(e.target.value);
+                          setNewGoalInput(rawValue);
+                          setNewGoal(parseMoneyInputBR(rawValue));
+                        }}
+                        onBlur={() => setNewGoalInput(formatMoneyInputBR(newGoal))}
                         disabled={!canShowGoal}
                         placeholder="Ex: 5000"
-                        min={0}
                       />
                       {!canShowGoal && (
                         <p className="text-xs text-gray-500 mt-1">

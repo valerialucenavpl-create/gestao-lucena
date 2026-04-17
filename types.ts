@@ -28,6 +28,7 @@ export interface User {
   role: "Admin" | "Sales" | "Finance";
   avatar?: string;
   monthlyGoal?: number;
+  password?: string;
 }
 
 // ---------------------------------------------
@@ -38,16 +39,19 @@ export interface ColorVariant {
   cost: number;
   salePrice: number;
 }
-export type UnitType = "un" | "m" | "m²";
+export type UnitType = "un" | "m" | "m²" | "kg" | "g" | "cm" | "mm";
 
 export interface InventoryItem {
   id: string;
   name: string;
   unit: UnitType;
-  quantity: number;
-  minStock: number;
+  quantity?: number;
+  minStock?: number;
   usageCategory?: string;
   colorVariants?: ColorVariant[];
+  stockQuantity?: number;
+  standardSize?: string;
+  purchaseLengthMeters?: number;
 }
 
 // ---------------------------------------------
@@ -61,6 +65,15 @@ export type CalculationRule =
   | "fill"
   | "fixed_quantity";
 
+export type ProductCompositionAxis = "height" | "width" | "accessory" | "area";
+export type ProductCompositionAdjustmentMode = "none" | "add" | "subtract";
+export type ProductCompositionQuantityMode = "normal" | "made_to_measure";
+
+export interface ProductCompositionMeasureFormula {
+  target: ProductCompositionAxis;
+  intervalMm: number;
+}
+
 export interface ProductCompositionItem {
   id: string;
   materialId: string;
@@ -68,7 +81,15 @@ export interface ProductCompositionItem {
   multiplier?: number;
   quantity?: number;
   factor?: number;
+  lambrilWidthCm?: number;
   variantName?: string; // 🔘 cor da variação do material
+  applyOn?: ProductCompositionAxis;
+  adjustmentType?: ProductCompositionAdjustmentMode;
+  adjustmentMm?: number;
+  divideBy?: number;
+  multiplyBy?: number;
+  quantityMode?: ProductCompositionQuantityMode;
+  measureFormula?: ProductCompositionMeasureFormula;
 }
 
 export interface Product {
@@ -77,7 +98,29 @@ export interface Product {
   desiredProfitMargin: number;
   composition: ProductCompositionItem[];
   category?: string;
+  productCategory?: string;
+  productType?: string;
+  productSubCategory1?: string;
+  productSubCategory2?: string;
+  productSubCategory3?: string;
+  image?: string;
   laborCost?: number;
+  productionHours?: number;
+  assemblyHours?: number;
+  hourlyRate?: number;
+  // Mão de obra detalhada
+  professionalCount?: number;
+  professionalHours?: number;
+  professionalRate?: number;
+  helperCount?: number;
+  helperHours?: number;
+  helperRate?: number;
+  fixedCostRate?: number;
+  absorptionRate?: number;
+  quantityReference?: number;
+  selectedCategoryColor?: string;
+  referenceWidthMm?: number;
+  referenceHeightMm?: number;
 }
 
 // ---------------------------------------------
@@ -112,6 +155,22 @@ export interface VariableExpense {
   value: number;
 }
 
+
+export interface FixedExpense {
+  id: string;
+  name: string;
+  value: number;
+}
+
+export interface FinancialRecord {
+  month: string;
+  income: number;
+  expenses: number;
+}
+
+export type UsageCategory = "Chapa/Placa" | "Linear" | "Componente" | "Peso" | "Serviço";
+export type UnitOfMeasure = UnitType;
+
 // ---------------------------------------------
 // Itens do Orçamento
 // ---------------------------------------------
@@ -126,18 +185,31 @@ export interface QuoteItem {
   quantity: number;
   price: number;
   cost: number;
+  materialCost?: number;
+  laborCost?: number;
+  absorptionCost?: number;
 }
 // ---------------------------------------------
 // Orçamentos
 // ---------------------------------------------
+export type QuoteInternalStatus =
+  | "Pedido"
+  | "Na Produção"
+  | "Aguardando Material"
+  | "Falta Entregar"
+  | "Entregue";
+
 export interface Quote {
   id: string;
   clientId: string;
+  quoteNumber?: number;
 
   customerName: string;
   salesperson: string;
-  date: string | Date;
+  date: string;
+  deliveryDate?: string;
   status: "Pendente" | "Aprovado" | "Recusado";
+  internalStatus?: QuoteInternalStatus;
 
   items: QuoteItem[];
 
@@ -147,7 +219,7 @@ export interface Quote {
   installation: number;
   totalPrice: number;
 
-  paymentMethod: "A Definir" | "PIX" | "Cartão" | "Dinheiro";
+  paymentMethod: "A Definir" | "PIX" | "Cartão" | "Dinheiro" | "Transferência" | "Boleto";
 
   costOfGoods: number;
   fixedCosts: number;
@@ -157,7 +229,6 @@ export interface Quote {
   measurementNotes: string;
   assemblyNotes: string;
 
-  // ✅ SUA COMISSÃO DE INDICAÇÃO
   referralCommissionRate?: number;
   referralCommissionValue?: number;
 }

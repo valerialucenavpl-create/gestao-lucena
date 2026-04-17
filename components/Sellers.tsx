@@ -1,5 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../services/supabase"; // ajuste se o seu caminho for outro
+import {
+  formatMoneyInputBR,
+  parseMoneyInputBR,
+  sanitizeMoneyInputBR,
+} from "../utils/money";
 
 type Seller = {
   id: number;
@@ -25,7 +30,7 @@ const Sellers: React.FC = () => {
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [commission, setCommission] = useState<string>("0");
-  const [monthlyTarget, setMonthlyTarget] = useState<string>("0");
+  const [monthlyTarget, setMonthlyTarget] = useState<string>(formatMoneyInputBR(0));
   const [active, setActive] = useState(true);
 
   const resetForm = () => {
@@ -33,7 +38,7 @@ const Sellers: React.FC = () => {
     setName("");
     setRole("");
     setCommission("0");
-    setMonthlyTarget("0");
+    setMonthlyTarget(formatMoneyInputBR(0));
     setActive(true);
   };
 
@@ -70,7 +75,7 @@ const Sellers: React.FC = () => {
     setName(s.name ?? "");
     setRole(s.role ?? "");
     setCommission(String(Number(s.commission ?? 0)));
-    setMonthlyTarget(String(Number(s.monthly_target ?? 0)));
+    setMonthlyTarget(formatMoneyInputBR(Number(s.monthly_target ?? 0)));
     setActive(Boolean(s.active));
   };
 
@@ -113,7 +118,7 @@ const Sellers: React.FC = () => {
       name: name.trim(),
       role: role.trim() || null,
       commission: Number(commission || 0),
-      monthly_target: Number(monthlyTarget || 0),
+      monthly_target: parseMoneyInputBR(monthlyTarget),
       active,
     };
 
@@ -212,11 +217,13 @@ const Sellers: React.FC = () => {
             <label className={labelCls}>Meta mensal (R$)</label>
             <input
               className={inputCls}
-              type="number"
-              min="0"
-              step="0.01"
+              type="text"
+              inputMode="decimal"
               value={monthlyTarget}
-              onChange={(e) => setMonthlyTarget(e.target.value)}
+              onChange={(e) => setMonthlyTarget(sanitizeMoneyInputBR(e.target.value))}
+              onBlur={() =>
+                setMonthlyTarget(formatMoneyInputBR(parseMoneyInputBR(monthlyTarget)))
+              }
               placeholder="Ex: 50000"
             />
           </div>

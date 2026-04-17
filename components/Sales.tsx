@@ -1,203 +1,450 @@
-// components/Sales.tsx
-import React, { useMemo, useState, useEffect } from "react";
-import { Sale, Quote, Client, CashFlowEntry } from "../types";
-import { Icon } from "./icons/Icon";
-import { supabase } from "../services/supabase";
+import React, { useEffect, useMemo, useState } from "react";
+import { CashFlowEntry, Client, Quote, Sale } from "../types";
+import {
+  formatMoneyInputBR,
+  parseMoneyInputBR,
+  sanitizeMoneyInputBR,
+} from "../utils/money";
 
-/* =========================
-   TIPOS
-========================= */
-type SaleStatusFilter =
-  | "Todos"
-  | "Aprovado"
-  | "Concluído"
-  | "Pendente"
-  | "Cancelado";
-
-type Seller = {
-  id: number;
-  name: string;
-};
-
-/* =========================
-   PROPS
-========================= */
 interface SalesProps {
   sales?: Sale[] | null;
   quotes?: Quote[] | null;
   clients?: Client[] | null;
   cashFlow?: CashFlowEntry[] | null;
+  onOpenQuote?: (quoteId: string) => void;
 }
+type FastStatus =
+  | "Todos"
+  | "Aguardando"
+  | "Pendente em aprovação"
+  | "Cancelado"
+  | "Aprovado"
+  | "Concluindo";
 
-/* =========================
-   HELPERS DATA
-========================= */
-function toDate(value: any): Date | null {
+type SaleWithComputed = Sale & {
+  computedStatus: Exclude<FastStatus, "Todos">;
+};
+
+const statusOrder: FastStatus[] = [
+  "Todos",
+  "Aguardando",
+  "Pendente em aprovação",
+  "Cancelado",
+  "Aprovado",
+  "Concluindo",
+];
+
+const statusStyles: Record<Exclude<FastStatus, "Todos">, string> = {
+  Aguardando: "bg-amber-50 text-amber-700 border-amber-200",
+  "Pendente em aprovação": "bg-sky-50 text-sky-700 border-sky-200",
+  Cancelado: "bg-rose-50 text-rose-700 border-rose-200",
+  Aprovado: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  Concluindo: "bg-violet-50 text-violet-700 border-violet-200",
+};
+
+function toDate(value: unknown): Date | null {
+
   if (!value) return null;
-  if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
-  const d = new Date(value);
-  return isNaN(d.getTime()) ? null : d;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  const d = new Date(String(value));
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function formatDateBR(value: any): string {
+function toSafeText(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item ?? ""))
+      .join(" ")
+      .trim();
+  }
+
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
+function formatDateBR(value: unknown): string {
   const d = toDate(value);
   return d ? d.toLocaleDateString("pt-BR") : "—";
 }
 
-function getYear(value: any): string {
-  const d = toDate(value);
-  return d ? String(d.getFullYear()) : "—";
+function getOSNumber(sale: Sale): string {
+  const raw = toSafeText((sale as any).quoteId || (sale as any).id);
+  const onlyDigits = raw.replace(/\D/g, "");
+  return onlyDigits || raw;
 }
 
-/* =========================
-   COMPONENTE
-========================= */
-const Sales: React.FC<SalesProps> = (props) => {
-  const sales = Array.isArray(props.sales) ? props.sales : [];
-  const quotes = Array.isArray(props.quotes) ? props.quotes : [];
-  const clients = Array.isArray(props.clients) ? props.clients : [];
-  const cashFlow = Array.isArray(props.cashFlow) ? props.cashFlow : [];
+function mapFastStatusToSaleStatus(status: Exclude<FastStatus, "Todos">): string {
+  if (status === "Pendente em aprovação") return "Pendente";
+  if (status === "Concluindo") return "Concluído";
+  return status;
+}
 
-  const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
-  const [activeTab, setActiveTab] = useState<"details" | "financial">("details");
-  const [filterStatus, setFilterStatus] =
-    useState<SaleStatusFilter>("Todos");
+function getSaleQuoteId(sale: any): string {
+  return toSafeText(sale?.quoteId ?? sale?.quote_id);
+}
 
-  const [sellers, setSellers] = useState<Seller[]>([]);
+/** Encontra o UUID real do orçamento, mesmo quando o sale vem do banco com quote_id numérico */
+function resolveQuoteUUID(sale: any, quotes: Quote[]): string {
+  // 1. quoteId direto (UUID gerado pelo front)
+  const directId = toSafeText(sale?.quoteId);
+  if (directId && quotes.find((q) => q.id === directId)) return directId;
 
-  /* =========================
-     LOAD SELLERS
-  ========================= */
+  // 2. quote_id numérico → tenta bater com quoteNumber
+  const qNum = sale?.quote_id;
+  if (qNum != null) {
+    const byNum = quotes.find((q) => Number(q.quoteNumber) === Number(qNum));
+    if (byNum) return byNum.id;
+  }
+
+  // 3. fallback: bate pelo nome do cliente
+  const customer = toSafeText(sale?.customerName ?? sale?.customer_name).toLowerCase();
+  if (customer) {
+    const byName = quotes.find((q) => (q.customerName || "").toLowerCase() === customer);
+    if (byName) return byName.id;
+  }
+
+  return "";
+}
+
+  function getSaleDate(sale: any): unknown {
+  return sale?.saleDate ?? sale?.date;
+}
+
+function getSaleAmount(sale: any): number {
+  return Number(sale?.amount ?? sale?.total ?? 0) || 0;
+}
+
+  function getSaleCustomerName(sale: any, quote?: Quote): string {
+  return toSafeText(sale?.customerName) || toSafeText(quote?.customerName);
+}
+const Sales: React.FC<SalesProps> = ({ sales, quotes, cashFlow, onOpenQuote }) => {
+  const safeSales = Array.isArray(sales) ? sales : [];
+  const safeQuotes = Array.isArray(quotes) ? quotes : [];
+  const safeCashFlow = Array.isArray(cashFlow) ? cashFlow : [];
+
+  const [filterStatus, setFilterStatus] = useState<FastStatus>("Todos");
+  const [localSales, setLocalSales] = useState<Sale[]>(safeSales);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [editingSale, setEditingSale] = useState<SaleWithComputed | null>(null);
+  const [editAmount, setEditAmount] = useState<number>(0);
+  const [editAmountInput, setEditAmountInput] = useState<string>(formatMoneyInputBR(0));
+  const [editDate, setEditDate] = useState<string>("");
+  const [editStatus, setEditStatus] = useState<Exclude<FastStatus, "Todos">>("Aguardando");
+
   useEffect(() => {
-    const loadSellers = async () => {
-      const { data, error } = await supabase
-        .from("sellers")
-        .select("id, name")
-        .eq("active", true)
-        .order("name");
+    if (safeSales.length > 0) {
+      setLocalSales(safeSales);
+      return;
+    }
 
-      if (!error) setSellers((data as Seller[]) ?? []);
-    };
+    // Tenta carregar status personalizados do localStorage
+    let savedStatuses: Record<string, string> = {};
+    try {
+      const raw = localStorage.getItem("local_sales_statuses");
+      if (raw) savedStatuses = JSON.parse(raw);
+    } catch {}
 
-    loadSellers();
-  }, []);
+    const salesFromApprovedQuotes: Sale[] = safeQuotes
+      .filter((q) => q.status !== "Recusado")
+      .map((q) => ({
+        id: `quote-${q.id}`,
+        quoteId: String(q.id),
+        customerName: q.customerName,
+        salesperson: q.salesperson,
+        saleDate: new Date(q.date),
+        amount: Number(q.totalPrice || 0),
+        status: (savedStatuses[`quote-${q.id}`] || q.status || "Pendente") as any,
+      }));
 
-  const getSellerName = (sellerId?: number | null) => {
-    if (!sellerId) return "—";
-    return sellers.find((s) => s.id === sellerId)?.name || "—";
-  };
+    setLocalSales(salesFromApprovedQuotes);
+  }, [safeSales, safeQuotes]);
 
-  /* =========================
-     HELPERS EXISTENTES
-  ========================= */
-  const getQuote = (quoteId: string) =>
-    quotes.find((q) => (q as any).id === quoteId);
-
-  const getClientById = (clientId: string) =>
-    clients.find((c) => (c as any).id === clientId);
-
-  const getClientByName = (name: string) =>
-    clients.find(
-      (c) =>
-        (c.name || "").toLowerCase().trim() ===
-        name.toLowerCase().trim()
-    );
-
+  const getQuote = (quoteId: string) => safeQuotes.find((q: any) => String(q.id) === String(quoteId));
   const getFinancialInfo = (sale: Sale) => {
-    const saleDate = toDate((sale as any).saleDate);
+     const saleDate = toDate(getSaleDate(sale));
     const saleDateMs = saleDate ? saleDate.getTime() : null;
 
-    const payments = cashFlow.filter((entry) => {
-      if ((entry as any).type !== "income") return false;
+    const payments = safeCashFlow.filter((entry: any) => {
+      if (entry.type !== "income") return false;
 
-      const desc = ((entry as any).description || "").toLowerCase();
-      const customer = ((sale as any).customerName || "").toLowerCase();
-      if (!desc.includes(customer)) return false;
+       const desc = toSafeText(entry.description).toLowerCase();
+      const quote = getQuote(getSaleQuoteId(sale));
+      const customer = getSaleCustomerName(sale, quote).toLowerCase();
+      if (customer && !desc.includes(customer)) return false;
 
-      const entryDate = toDate((entry as any).date);
+      const entryDate = toDate(entry.date);
       if (!entryDate) return false;
-
       if (saleDateMs === null) return true;
       return entryDate.getTime() >= saleDateMs;
     });
 
-    const totalPaidRaw = payments.reduce(
-      (sum, p) => sum + ((p as any).amount || 0),
-      0
-    );
-    const saleAmount = Number((sale as any).amount || 0);
+    const totalPaidRaw = payments.reduce((sum, p: any) => sum + (Number(p.amount) || 0), 0);
+    const saleAmount = getSaleAmount(sale);
 
     const totalPaid = Math.min(totalPaidRaw, saleAmount);
-    const remaining = Math.max(saleAmount - totalPaid, 0);
-    const percentage =
-      saleAmount > 0 ? (totalPaid / saleAmount) * 100 : 0;
+    const percentage = saleAmount > 0 ? (totalPaid / saleAmount) * 100 : 0;
 
-    return { payments, totalPaid, remaining, percentage };
+   return { totalPaid, percentage };
   };
 
-  const getSaleStatus = (sale: Sale): SaleStatusFilter => {
-    const quote = getQuote((sale as any).quoteId);
+const getComputedStatus = (sale: Sale): Exclude<FastStatus, "Todos"> => {
+    const explicitStatus = toSafeText((sale as any).status);
+    if (explicitStatus === "Cancelado") return "Cancelado";
+    if (explicitStatus === "Pendente") return "Pendente em aprovação";
 
-    if (quote && (quote as any).status === "Recusado")
-      return "Cancelado";
-    if (quote && (quote as any).status === "Pendente")
-      return "Pendente";
+
+     const quote = getQuote(getSaleQuoteId(sale));
+    if (quote?.status === "Recusado") return "Cancelado";
+    if (quote?.status === "Pendente") return "Pendente em aprovação";
 
     const { percentage } = getFinancialInfo(sale);
-    if (percentage >= 99.9) return "Concluído";
-    return "Aprovado";
+    if (percentage >= 99.9) return "Concluindo";
+    if (percentage > 0) return "Aprovado";
+    return "Aguardando";
   };
 
-  /* =========================
-     FILTROS
-  ========================= */
+  const computedSales = useMemo<SaleWithComputed[]>(
+    () =>
+      localSales.map((sale) => ({
+        ...sale,
+        computedStatus: getComputedStatus(sale),
+      })),
+    [localSales, safeQuotes, safeCashFlow]
+  );
+
+  const statusCount = useMemo(() => {
+    const base: Record<FastStatus, number> = {
+      Todos: computedSales.length,
+      Aguardando: 0,
+      "Pendente em aprovação": 0,
+      Cancelado: 0,
+      Aprovado: 0,
+      Concluindo: 0,
+    };
+
+    computedSales.forEach((sale) => {
+      base[sale.computedStatus] += 1;
+    });
+
+    return base;
+  }, [computedSales]);
   const filteredSales = useMemo(() => {
-    if (filterStatus === "Todos") return sales;
-    return sales.filter((s) => getSaleStatus(s) === filterStatus);
-  }, [sales, filterStatus]);
+     if (filterStatus === "Todos") return computedSales;
+    return computedSales.filter((sale) => sale.computedStatus === filterStatus);
+  }, [computedSales, filterStatus]);
 
-  /* =========================
-     RENDER
-  ========================= */
+  const openEdit = (sale: SaleWithComputed) => {
+    setEditingSale(sale);
+    const saleAmount = getSaleAmount(sale);
+    setEditAmount(saleAmount);
+    setEditAmountInput(formatMoneyInputBR(saleAmount));
+    const date = toDate(getSaleDate(sale));
+    setEditDate(date ? date.toISOString().slice(0, 10) : "");
+    setEditStatus(sale.computedStatus);
+    setMenuOpenId(null);
+  };
+
+  const saveEdit = () => {
+    if (!editingSale) return;
+
+    setLocalSales((prev) => {
+      const next = prev.map((sale) => {
+        if ((sale as any).id !== (editingSale as any).id) return sale;
+        return {
+          ...sale,
+          amount: Number(editAmount) || 0,
+          saleDate: editDate ? (new Date(`${editDate}T00:00:00`) as any) : sale.saleDate,
+          status: mapFastStatusToSaleStatus(editStatus) as any,
+        } as Sale;
+      });
+
+      // Persiste os status no localStorage
+      try {
+        const statuses: Record<string, string> = {};
+        next.forEach((s: any) => { if (s.id && s.status) statuses[s.id] = s.status; });
+        localStorage.setItem("local_sales_statuses", JSON.stringify(statuses));
+      } catch {}
+
+      return next;
+    });
+
+    setEditingSale(null);
+  };
+
+  const handleDelete = (saleId: string) => {
+    const ok = window.confirm("Deseja realmente excluir esta venda da lista?");
+    if (!ok) return;
+
+    setLocalSales((prev) => prev.filter((sale: any) => sale.id !== saleId));
+    setMenuOpenId(null);
+  };
+
+
   return (
-    <div className="space-y-6">
-      <h3 className="text-2xl font-bold">Painel de Vendas</h3>
+    <div className="space-y-5">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h3 className="text-3xl font-bold text-gray-800">Painel de Vendas</h3>
+          <span className="inline-flex items-center rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-xs font-semibold text-primary-700">
+            Layout novo ativo
+          </span>
+        </div>
+        <p className="text-sm text-gray-500 mt-1">Acompanhe vendas por status e gerencie rapidamente.</p>
+      </div>
 
-      {filteredSales.map((sale) => (
-        <div
-          key={(sale as any).id}
-          className="bg-white p-4 rounded-lg shadow border-l-4 border-primary-500"
-        >
-          <div className="flex justify-between">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {statusOrder.map((status) => {
+          const active = filterStatus === status;
+          return (
+            <button
+              key={status}
+              type="button"
+              onClick={() => setFilterStatus(status)}
+              className={`rounded-xl border px-4 py-3 text-left transition-all ${
+                active
+                  ? "border-primary-600 bg-primary-600 text-white shadow"
+                  : "border-gray-200 bg-white hover:border-primary-300"
+              }`}
+            >
+              <p className={`text-xs font-semibold uppercase ${active ? "text-blue-100" : "text-gray-500"}`}>{status}</p>
+              <p className={`text-2xl font-bold ${active ? "text-white" : "text-gray-800"}`}>{statusCount[status]}</p>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="space-y-3">
+        {filteredSales.length === 0 ? (
+          <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-gray-500">
+            Nenhuma venda encontrada para este filtro.
+          </div>
+        ) : (
+          filteredSales.map((sale) => (
+            <div key={(sale as any).id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div
+                  className={onOpenQuote && resolveQuoteUUID(sale, safeQuotes) ? "cursor-pointer" : ""}
+                  onClick={() => { const uid = resolveQuoteUUID(sale, safeQuotes); if (onOpenQuote && uid) onOpenQuote(uid); }}
+                >
+                  <p className="text-sm font-semibold text-primary-700">OS #{getOSNumber(sale)}</p>
+                  <p className="text-sm text-gray-500">Data da compra: {formatDateBR(getSaleDate(sale))}</p>
+                  <h4 className="text-lg font-bold text-gray-800 hover:text-primary-700 transition-colors">
+                    {getSaleCustomerName(sale, getQuote(resolveQuoteUUID(sale, safeQuotes))) || "Cliente não identificado"}
+                  </h4>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <p className="text-xs uppercase text-gray-500">Valor</p>
+                    <p className="text-xl font-bold text-green-600">
+                      {getSaleAmount(sale).toLocaleString("pt-BR", {
+                        style: "currency",
+                        currency: "BRL",
+                      })}
+                    </p>
+                  </div>
+
+                  <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusStyles[sale.computedStatus]}`}>
+                    {sale.computedStatus}
+                  </span>
+
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setMenuOpenId((prev) => (prev === (sale as any).id ? null : (sale as any).id))}
+                      className="h-9 w-9 rounded-full border border-gray-300 font-bold text-gray-600 hover:bg-gray-50"
+                      title="Ações"
+                    >
+                      ⋮
+                    </button>
+
+                    {menuOpenId === (sale as any).id && (
+                      <div className="absolute right-0 z-10 mt-2 w-44 rounded-lg border border-gray-200 bg-white shadow-lg">
+                        {onOpenQuote && resolveQuoteUUID(sale, safeQuotes) && (
+                          <button
+                            type="button"
+                            onClick={() => { onOpenQuote(resolveQuoteUUID(sale, safeQuotes)); setMenuOpenId(null); }}
+                            className="w-full px-3 py-2 text-left text-sm text-blue-700 hover:bg-blue-50"
+                          >
+                            Ver detalhes
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDelete((sale as any).id)}
+                          className="w-full px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50"
+                        >
+                          Excluir
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {editingSale && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md space-y-4 rounded-xl border border-gray-200 bg-white p-5 shadow-xl">
+            <h4 className="text-lg font-bold text-gray-800">Editar venda</h4>
+
             <div>
-              <h4 className="font-bold">
-                Pedido nº{" "}
-                {((sale as any).quoteId || "").replace(/\D/g, "")} -{" "}
-                {getYear((sale as any).saleDate)}
-              </h4>
-
-              <p className="text-sm text-gray-500">
-                {formatDateBR((sale as any).saleDate)} •{" "}
-                {(sale as any).customerName}
-              </p>
-
-              <p className="text-xs uppercase font-semibold text-gray-400">
-                Vendedora: {getSellerName((sale as any).seller_id)}
-              </p>
+              <label className="block text-sm font-medium text-gray-700">Data</label>
+              <input
+                type="date"
+                value={editDate}
+                onChange={(e) => setEditDate(e.target.value)}
+                className="mt-1 w-full rounded border p-2"
+              />
             </div>
 
-            <div className="text-right">
-              <p className="text-green-600 font-bold text-lg">
-                R{" "}
-                {Number((sale as any).amount || 0).toLocaleString(
-                  "pt-BR",
-                  { minimumFractionDigits: 2 }
-                )}
-              </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Valor</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={editAmountInput}
+                onChange={(e) => {
+                  const rawValue = sanitizeMoneyInputBR(e.target.value);
+                  setEditAmountInput(rawValue);
+                  setEditAmount(parseMoneyInputBR(rawValue));
+                }}
+                onBlur={() => setEditAmountInput(formatMoneyInputBR(editAmount))}
+                className="mt-1 w-full rounded border p-2"
+              />
             </div>
+          <label className="block text-sm font-medium text-gray-700">Status</label>
+              <select
+                value={editStatus}
+                onChange={(e) => setEditStatus(e.target.value as Exclude<FastStatus, "Todos">)}
+                className="mt-1 w-full rounded border p-2"
+              >
+                {statusOrder
+                  .filter((status) => status !== "Todos")
+                  .map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+              </select>   
+               <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditingSale(null)}
+                className="rounded border border-gray-300 px-4 py-2 text-gray-700"
+              >
+                Cancelar
+              </button>
+              <button type="button" onClick={saveEdit} className="rounded bg-primary-600 px-4 py-2 text-white">
+                Salvar
+              </button>
+              </div>
           </div>
         </div>
-      ))}
+      )}
     </div>
   );
 };

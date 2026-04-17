@@ -119,6 +119,26 @@ export const deleteCashFlowEntry = async (id: string) => {
       .eq("user_id", authData.user.id);
 
     if (error) return { ok: false, error };
+
+    // validação pós-delete para evitar falso positivo/falso negativo
+    const { data: stillExists, error: checkError } = await supabase
+      .from(TABLE)
+      .select("id")
+      .eq("id", id)
+      .eq("user_id", authData.user.id)
+      .maybeSingle();
+
+    if (checkError) return { ok: false, error: checkError };
+
+    if (stillExists) {
+      return {
+        ok: false,
+        error: new Error(
+          "Nenhum lançamento foi removido. Verifique permissão de exclusão (RLS) ou se o registro ainda existe."
+        ),
+      };
+    }
+
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e };

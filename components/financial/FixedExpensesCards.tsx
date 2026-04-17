@@ -1,5 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../services/supabase";
+import {
+  formatMoneyInputBR,
+  parseMoneyInputBR,
+  sanitizeMoneyInputBR,
+} from "../../utils/money";
 
 type FixedExpense = {
   id: number;
@@ -50,11 +55,12 @@ const FixedExpensesCards: React.FC = () => {
   }, []);
 
   const save = async () => {
-    if (!name || !value || !paymentDate) return;
+    const parsedValue = parseMoneyInputBR(value);
+    if (!name || !paymentDate || parsedValue <= 0) return;
 
     const payload = {
       name,
-      value: Number(value.replace(",", ".")),
+      value: parsedValue,
       payment_date: paymentDate,
     };
 
@@ -80,7 +86,7 @@ const FixedExpensesCards: React.FC = () => {
   const edit = (it: FixedExpense) => {
     setEditing(it);
     setName(it.name);
-    setValue(String(it.value).replace(".", ","));
+    setValue(formatMoneyInputBR(Number(it.value || 0)));
     setPaymentDate(it.payment_date);
   };
 
@@ -122,7 +128,8 @@ const FixedExpensesCards: React.FC = () => {
           className="p-2 border rounded"
           placeholder="Valor (R$)"
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => setValue(sanitizeMoneyInputBR(e.target.value))}
+          onBlur={() => setValue(formatMoneyInputBR(parseMoneyInputBR(value)))}
         />
 
         <input

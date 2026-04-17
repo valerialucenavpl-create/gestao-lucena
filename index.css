@@ -26,3 +26,226 @@ textarea {
   display: block !important;
   box-sizing: border-box !important;
 }
+
+/* =============================================
+   DARK MODE — overrides globais
+   Aplicado quando .dark está no elemento raiz
+   ============================================= */
+
+/* Fundo principal e texto base */
+.dark,
+.dark body {
+  background-color: #0f1117;
+  color: #e5e7eb;
+  color-scheme: dark;
+}
+
+/* Área de conteúdo principal */
+.dark main {
+  background-color: #0f1117 !important;
+}
+
+/* ── Fundos brancos e cinzas claros ── */
+.dark .bg-white {
+  background-color: #1a2035 !important;
+  color: #e5e7eb;
+}
+.dark .bg-gray-50 {
+  background-color: #141927 !important;
+}
+.dark .bg-gray-100 {
+  background-color: #0f1117 !important;
+}
+.dark .bg-gray-200 {
+  background-color: #1e2535 !important;
+}
+
+/* ── Textos ── */
+.dark .text-gray-900,
+.dark .text-gray-800 {
+  color: #f1f5f9 !important;
+}
+.dark .text-gray-700 {
+  color: #cbd5e1 !important;
+}
+.dark .text-gray-600 {
+  color: #94a3b8 !important;
+}
+.dark .text-gray-500 {
+  color: #64748b !important;
+}
+.dark .text-gray-400 {
+  color: #4b5563 !important;
+}
+
+/* ── Bordas ── */
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .border-gray-300 {
+  border-color: #2d3748 !important;
+}
+
+/* ── Divisores ── */
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #2d3748 !important;
+}
+
+/* ── Inputs, selects, textareas ── */
+.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.dark select,
+.dark textarea {
+  background-color: #1e2d3d !important;
+  border-color: #2d3f55 !important;
+  color: #e2e8f0 !important;
+}
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #4b5563 !important;
+}
+.dark input:focus,
+.dark select:focus,
+.dark textarea:focus {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25) !important;
+}
+.dark .input {
+  background-color: #1e2d3d !important;
+  border-color: #2d3f55 !important;
+  color: #e2e8f0 !important;
+}
+
+/* ── Tabelas ── */
+.dark thead,
+.dark thead tr,
+.dark thead th {
+  background-color: #161d2e !important;
+  color: #94a3b8 !important;
+  border-color: #2d3748 !important;
+}
+.dark tbody tr {
+  border-color: #2d3748 !important;
+}
+.dark tbody tr:hover {
+  background-color: #1e2a3e !important;
+}
+.dark tbody td {
+  color: #cbd5e1 !important;
+  border-color: #2d3748 !important;
+}
+
+/* ── Sombras (evita brilho branco) ── */
+.dark .shadow,
+.dark .shadow-sm,
+.dark .shadow-md,
+.dark .shadow-lg,
+.dark .shadow-xl {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* ── Hover de botões e elementos neutros ── */
+.dark .hover\:bg-gray-100:hover {
+  background-color: #1e2535 !important;
+}
+.dark .hover\:bg-gray-50:hover {
+  background-color: #161d2e !important;
+}
+
+/* ── Badges/pills neutras ── */
+.dark .bg-gray-100.text-gray-800 {
+  background-color: #2d3748 !important;
+  color: #cbd5e1 !important;
+}
+
+/* ── Fundo do header (sobrescreve bg-white no Header.tsx) ── */
+.dark header {
+  background-color: #161d2e !important;
+  border-color: #2d3748 !important;
+}
+
+/* ── Modais / overlays ── */
+.dark .fixed.inset-0.bg-black\/50,
+.dark .fixed.inset-0.bg-black\/40 {
+  background-color: rgba(0, 0, 0, 0.75) !important;
+}
+
+/* ── Cartões com rounded-xl border (padrão do projeto) ── */
+.dark .rounded-xl.border {
+  border-color: #2d3748 !important;
+}
+
+/* ── Tabela rows com bg-white explícito ── */
+.dark table tr.bg-white,
+.dark tbody tr.bg-white {
+  background-color: #1a2035 !important;
+}
+.dark table tr.bg-white:hover,
+.dark tbody tr.bg-white:hover,
+.dark tbody tr.hover\:bg-gray-50:hover {
+  background-color: #1e2a3e !important;
+}
+
+/* ── bg-white em inputs explícitos do CashFlow ── */
+.dark input.bg-white,
+.dark select.bg-white {
+  background-color: #1e2d3d !important;
+  border-color: #2d3f55 !important;
+  color: #e2e8f0 !important;
+}
+
+/* ── Labels de formulário ── */
+.dark label {
+  color: #cbd5e1;
+}
+
+/* ── Botões de toggle (tipo/entrada/saída) ── */
+.dark button.bg-white:not(.bg-primary-600):not(.bg-red-600):not(.bg-blue-600):not(.bg-green-600) {
+  background-color: #1e2d3d !important;
+  color: #e2e8f0 !important;
+  border-color: #2d3f55 !important;
+}
+
+/* ── Fundo da sidebar no modo escuro ── */
+.dark aside {
+  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.5);
+}
+
+/* ── Resumo cards do caixa (borda colorida) ── */
+.dark .border-l-4.bg-white {
+  background-color: #1a2035 !important;
+}
+
+/* ── Badges neutras bg-gray-100 text-gray-800 ── */
+.dark .bg-gray-100 {
+  background-color: #253044 !important;
+}
+.dark .bg-gray-100.text-gray-800,
+.dark .bg-gray-100.text-gray-700 {
+  color: #cbd5e1 !important;
+}
+
+/* ── Texto placeholder dos inputs ── */
+.dark ::placeholder {
+  color: #4b5563 !important;
+}
+
+/* ── Opções dos selects ── */
+.dark select option {
+  background-color: #1e2d3d;
+  color: #e2e8f0;
+}
+
+/* ── Scrollbar ── */
+.dark ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.dark ::-webkit-scrollbar-track {
+  background: #0f1117;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 3px;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #4b5563;
+}

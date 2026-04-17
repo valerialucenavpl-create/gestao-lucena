@@ -3,6 +3,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { CashFlowEntry } from '../types';
 import { CASH_FLOW_CATEGORIES } from '../constants';
 import { Icon } from './icons/Icon';
+import {
+    formatMoneyInputBR,
+    parseMoneyInputBR,
+    sanitizeMoneyInputBR,
+} from '../utils/money';
 
 interface CashFlowProps {
     cashFlowEntries: CashFlowEntry[];
@@ -13,7 +18,8 @@ const CashFlow: React.FC<CashFlowProps> = ({ cashFlowEntries, setCashFlowEntries
     const [type, setType] = useState<'income' | 'expense'>('expense');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
     const [description, setDescription] = useState('');
-    const [amount, setAmount] = useState<number | ''>('');
+    const [amount, setAmount] = useState<number>(0);
+    const [amountInput, setAmountInput] = useState<string>(formatMoneyInputBR(0));
     const [category, setCategory] = useState('');
     const [subcategory, setSubcategory] = useState('');
 
@@ -46,7 +52,7 @@ const CashFlow: React.FC<CashFlowProps> = ({ cashFlowEntries, setCashFlowEntries
 
         const newEntry: CashFlowEntry = {
             id: `cf${Date.now()}`,
-            date: new Date(date + 'T00:00:00'),
+            date,
             description,
             amount: Number(amount),
             type,
@@ -54,11 +60,16 @@ const CashFlow: React.FC<CashFlowProps> = ({ cashFlowEntries, setCashFlowEntries
             subcategory,
         };
 
-        setCashFlowEntries(prevEntries => [newEntry, ...prevEntries].sort((a,b) => b.date.getTime() - a.date.getTime()));
+         setCashFlowEntries(prevEntries =>
+            [newEntry, ...prevEntries].sort((a, b) =>
+                new Date(String(b.date)).getTime() - new Date(String(a.date)).getTime()
+            )
+        );
 
         // Reset form
         setDescription('');
-        setAmount('');
+        setAmount(0);
+        setAmountInput(formatMoneyInputBR(0));
     };
     
     const formatCurrency = (value: number) => `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -129,7 +140,21 @@ const CashFlow: React.FC<CashFlowProps> = ({ cashFlowEntries, setCashFlowEntries
                         </div>
                         <div>
                             <label htmlFor="amount" className="block text-sm font-medium text-gray-700">Valor</label>
-                            <input type="number" id="amount" value={amount} onChange={e => setAmount(parseFloat(e.target.value) || '')} min="0.01" step="0.01" className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500" placeholder="0,00" required />
+                            <input
+                                type="text"
+                                inputMode="decimal"
+                                id="amount"
+                                value={amountInput}
+                                onChange={(e) => {
+                                    const rawValue = sanitizeMoneyInputBR(e.target.value);
+                                    setAmountInput(rawValue);
+                                    setAmount(parseMoneyInputBR(rawValue));
+                                }}
+                                onBlur={() => setAmountInput(formatMoneyInputBR(amount))}
+                                className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                                placeholder="0,00"
+                                required
+                            />
                         </div>
                     </div>
 

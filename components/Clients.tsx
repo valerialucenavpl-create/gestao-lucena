@@ -12,40 +12,109 @@ type Client = {
   notes: string | null;
 };
 
+const CLIENTS_TABLE_CANDIDATES = ["clients", "clientes"] as const;
+
+const emptyForm: Omit<Client, "id"> = {
+  name: "",
+  street: "",
+  number: "",
+  neighborhood: "",
+  complement: "",
+  phone: "",
+  notes: "",
+};
+
 const Clients: React.FC = () => {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
+  const [form, setForm] = useState<Omit<Client, "id">>(emptyForm);
 
-  const [form, setForm] = useState<Omit<Client, "id">>({
-    name: "",
-    street: "",
-    number: "",
-    neighborhood: "",
-    complement: "",
-    phone: "",
-    notes: "",
-  });
+  const isTableNotFound = (message: string) => {
+    const text = message.toLowerCase();
+    return text.includes("could not find the table") || text.includes("relation") || text.includes("does not exist");
+  };
 
-  /* ======================
-     LOAD CLIENTS
-  ====================== */
+  const runWithTableFallback = async <T,>(
+    action: (tableName: string) => any
+  ): Promise<{ data?: T; tableName?: string; error?: any }> => {
+    let lastError: any = null;
+
+    for (const tableName of CLIENTS_TABLE_CANDIDATES) {
+      const { data, error } = await action(tableName);
+      if (!error) return { data, tableName };
+
+      lastError = error;
+      const message = String(error?.message ?? "");
+      if (!isTableNotFound(message)) {
+        return { error };
+      }
+    }
+
+    return { error: lastError };
+  };
+
+  const getMissingColumnFromError = (error: any): string | null => {
+    const message = String(error?.message ?? "");
+    const match = message.match(/Could not find the '([^']+)' column/i);
+    return match?.[1] ?? null;
+  };
+
+  const saveWithColumnFallback = async (
+    tableName: string,
+    mode: "insert" | "update",
+    payload: Record<string, any>,
+    id?: string
+  ) => {
+    const workingPayload: Record<string, any> = { ...payload };
+
+    for (let i = 0; i < 6; i += 1) {
+      const query =
+        mode === "insert"
+          ? supabase.from(tableName).insert(workingPayload)
+          : supabase.from(tableName).update(workingPayload).eq("id", id);
+
+      const { error } = await query;
+      if (!error) return { error: null };
+
+      const missingColumn = getMissingColumnFromError(error);
+      if (!missingColumn || !(missingColumn in workingPayload)) {
+        return { error };
+      }
+
+      delete workingPayload[missingColumn];
+    }
+
+    return { error: { message: "Falha ao ajustar payload para schema da tabela." } };
+  };
+
   const loadClients = async () => {
     setLoading(true);
 
-    const { data, error } = await supabase
-      .from("clients")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const { data, tableName, error } = await runWithTableFallback<Client[]>(async (candidate) => {
+      const ordered = await supabase.from(candidate).select("*").order("created_at", { ascending: false });
+      if (!ordered.error) return ordered;
+
+      const message = String(ordered.error?.message ?? "").toLowerCase();
+      if (message.includes("created_at")) {
+        // fallback para schemas que não possuem created_at
+        return await supabase.from(candidate).select("*");
+      }
+
+      return ordered;
+    });
 
     if (error) {
       console.error("Erro ao carregar clientes:", error);
+      alert(`Erro ao carregar clientes: ${error.message}`);
       setClients([]);
-    } else {
-      setClients((data as Client[]) || []);
+      setLoading(false);
+      return;
     }
 
+    console.log(`Clientes carregados da tabela: ${tableName}`);
+    setClients((data as Client[]) || []);
     setLoading(false);
   };
 
@@ -53,158 +122,147 @@ const Clients: React.FC = () => {
     loadClients();
   }, []);
 
-  /* ======================
-     SAVE (INSERT / UPDATE)
-  ====================== */
   const handleSave = async () => {
     if (!form.name.trim()) {
       alert("Nome é obrigatório");
       return;
     }
 
-    if (editing) {
-      const { error } = await supabase
-        .from("clients")
-        .update(form)
-        .eq("id", editing.id);
+    const basePayload = {
+      name: form.name,
+      street: form.street,
+      number: form.number,
+      neighborhood: form.neighborhood,
+      complement: form.complement,
+      phone: form.phone,
+      notes: form.notes,
+    };
 
+    if (editing) {
+      const { error } = await runWithTableFallback((tableName) =>
+        saveWithColumnFallback(tableName, "update", basePayload, editing.id)
+      );
       if (error) {
         console.error(error);
-        alert("Erro ao atualizar cliente");
+        alert(`Erro ao atualizar cliente: ${error.message}`);
         return;
       }
     } else {
-      const { error } = await supabase
-        .from("clients")
-        .insert(form);
-
+      const { error } = await runWithTableFallback((tableName) =>
+        saveWithColumnFallback(tableName, "insert", basePayload)
+      );
       if (error) {
         console.error(error);
-        alert("Erro ao salvar cliente");
+        alert(`Erro ao salvar cliente: ${error.message}`);
         return;
       }
     }
 
     setIsModalOpen(false);
     setEditing(null);
-    setForm({
-      name: "",
-      street: "",
-      number: "",
-      neighborhood: "",
-      complement: "",
-      phone: "",
-      notes: "",
-    });
-
+    setForm(emptyForm);
     loadClients();
   };
 
-  /* ======================
-     DELETE
-  ====================== */
   const handleDelete = async (id: string) => {
     if (!window.confirm("Deseja excluir este cliente?")) return;
 
-    const { error } = await supabase
-      .from("clients")
-      .delete()
-      .eq("id", id);
-
+    const { error } = await runWithTableFallback((tableName) =>
+      supabase.from(tableName).delete().eq("id", id)
+    );
     if (error) {
       console.error(error);
-      alert("Erro ao excluir cliente");
+      alert(`Erro ao excluir cliente: ${error.message}`);
       return;
     }
-
     loadClients();
   };
 
-  return (
-    <div className="bg-white p-6 rounded-xl shadow space-y-6">
-      {/* HEADER */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold">Clientes</h2>
+  const openNew = () => {
+    setEditing(null);
+    setForm(emptyForm);
+    setIsModalOpen(true);
+  };
 
-        <button
-          onClick={() => {
-            setEditing(null);
-            setIsModalOpen(true);
-          }}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
-        >
-          + Novo Cliente
-        </button>
+  const openEdit = (c: Client) => {
+    setEditing(c);
+    setForm({
+      name: c.name,
+      street: c.street || "",
+      number: c.number || "",
+      neighborhood: c.neighborhood || "",
+      complement: c.complement || "",
+      phone: c.phone || "",
+      notes: c.notes || "",
+    });
+    setIsModalOpen(true);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-800">Cadastro de Clientes</h2>
+            <p className="mt-1 text-sm text-slate-500">Gerencie os clientes da sua base com visual azul e branco.</p>
+          </div>
+          <button
+            onClick={openNew}
+            className="rounded-xl bg-primary-700 px-4 py-2.5 font-semibold text-white transition hover:bg-primary-800"
+          >
+            + Novo Cliente
+          </button>
+        </div>
       </div>
 
-      {/* LIST */}
-      {loading ? (
-        <p>Carregando...</p>
-      ) : (
-        <table className="w-full text-sm border">
-          <thead className="bg-gray-100">
-            <tr>
-              <th className="p-2 text-left">Nome</th>
-              <th className="p-2 text-left">Telefone</th>
-              <th className="p-2 text-left">Bairro</th>
-              <th className="p-2 text-center">Ações</th>
-            </tr>
-          </thead>
-          <tbody>
-            {clients.length === 0 ? (
+      <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-sm">
+        {loading ? (
+          <p className="p-6 text-slate-500">Carregando...</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-blue-50 text-slate-700">
               <tr>
-                <td colSpan={4} className="p-4 text-center text-gray-500">
-                  Nenhum cliente cadastrado
-                </td>
+                <th className="p-3 text-left font-semibold">Nome</th>
+                <th className="p-3 text-left font-semibold">Telefone</th>
+                <th className="p-3 text-left font-semibold">Bairro</th>
+                <th className="p-3 text-center font-semibold">Ações</th>
               </tr>
-            ) : (
-              clients.map((c) => (
-                <tr key={c.id} className="border-t">
-                  <td className="p-2">{c.name}</td>
-                  <td className="p-2">{c.phone || "-"}</td>
-                  <td className="p-2">{c.neighborhood || "-"}</td>
-                  <td className="p-2 text-center space-x-3">
-                    <button
-                      onClick={() => {
-                        setEditing(c);
-                        setForm({
-                          name: c.name,
-                          street: c.street || "",
-                          number: c.number || "",
-                          neighborhood: c.neighborhood || "",
-                          complement: c.complement || "",
-                          phone: c.phone || "",
-                          notes: c.notes || "",
-                        });
-                        setIsModalOpen(true);
-                      }}
-                      className="text-blue-600 hover:underline"
-                    >
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => handleDelete(c.id)}
-                      className="text-red-600 hover:underline"
-                    >
-                      Excluir
-                    </button>
+            </thead>
+            <tbody>
+              {clients.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="p-8 text-center text-slate-500">
+                    Nenhum cliente cadastrado.
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      )}
+              ) : (
+                clients.map((c) => (
+                  <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50/60">
+                    <td className="p-3 font-medium text-slate-800">{c.name}</td>
+                    <td className="p-3 text-slate-700">{c.phone || "-"}</td>
+                    <td className="p-3 text-slate-700">{c.neighborhood || "-"}</td>
+                    <td className="p-3 text-center space-x-3">
+                      <button onClick={() => openEdit(c)} className="text-blue-700 hover:underline">
+                        Editar
+                      </button>
+                      <button onClick={() => handleDelete(c.id)} className="text-red-600 hover:underline">
+                        Excluir
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        )}
+      </div>
 
-      {/* MODAL */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white w-full max-w-4xl rounded-xl p-6 shadow-lg">
-            <h3 className="text-lg font-bold mb-4">
-              {editing ? "Editar Cliente" : "Novo Cliente"}
-            </h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-5xl rounded-2xl border border-blue-100 bg-white p-6 shadow-xl">
+            <h3 className="mb-6 text-xl font-bold text-slate-800">{editing ? "Editar Cliente" : "Novo Cliente"}</h3>
 
-            <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {[
                 ["Nome", "name"],
                 ["Rua", "street"],
@@ -212,32 +270,33 @@ const Clients: React.FC = () => {
                 ["Bairro", "neighborhood"],
                 ["Complemento", "complement"],
                 ["Celular", "phone"],
-                ["Observação", "notes"],
               ].map(([label, field]) => (
                 <div key={field}>
-                  <label className="text-sm font-medium">{label}</label>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">{label}</label>
                   <input
-                    className="w-full border p-3 rounded-full"
+                    className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
                     value={(form as any)[field]}
-                    onChange={(e) =>
-                      setForm({ ...form, [field]: e.target.value })
-                    }
+                    onChange={(e) => setForm({ ...form, [field]: e.target.value })}
                   />
                 </div>
               ))}
+
+              <div className="md:col-span-2">
+                <label className="mb-1.5 block text-sm font-semibold text-slate-700">Observação</label>
+                <textarea
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
+                  rows={3}
+                  value={form.notes || ""}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                />
+              </div>
             </div>
 
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="px-4 py-2 bg-gray-200 rounded-lg"
-              >
+            <div className="mt-6 flex justify-end gap-3">
+              <button onClick={() => setIsModalOpen(false)} className="rounded-xl border border-slate-300 px-5 py-2.5 text-slate-700">
                 Cancelar
               </button>
-              <button
-                onClick={handleSave}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg"
-              >
+              <button onClick={handleSave} className="rounded-xl bg-primary-700 px-5 py-2.5 font-semibold text-white hover:bg-primary-800">
                 Salvar
               </button>
             </div>

@@ -82,6 +82,24 @@ const dateToBR = (dt: Date) => {
   return `${dd}/${mm}/${yyyy}`;
 };
 
+const isoToBR = (value: string) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(raw)) return raw;
+
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    const [, yyyy, mm, dd] = isoMatch;
+    return `${dd}/${mm}/${yyyy}`;
+  }
+
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return dateToBR(parsed);
+
+  return "";
+};
+
 // Digitação de dinheiro: "200000" -> "2.000,00"
 const moneyMask = (v: string) => {
   const d = onlyDigits(v);
@@ -182,7 +200,7 @@ const EmployeeForm: React.FC<Props> = ({ id, setActiveView }) => {
         if (!data) return;
 
         setName(data.name || "");
-        setBirth(data.birth_date ? dateMask(String(data.birth_date)) : "");
+        setBirth(data.birth_date ? isoToBR(String(data.birth_date)) : "");
         setGender(data.gender || "");
         setCpf(data.cpf ? cpfMask(String(data.cpf)) : "");
         setPhone(data.phone ? phoneMask(String(data.phone)) : "");
@@ -191,7 +209,7 @@ const EmployeeForm: React.FC<Props> = ({ id, setActiveView }) => {
 
         setRole(data.role || "");
         setSector(data.department || "");
-        setAdmission(data.admission_date ? dateMask(String(data.admission_date)) : "");
+        setAdmission(data.admission_date ? isoToBR(String(data.admission_date)) : "");
         setDependents(data.dependents || "");
 
         setBaseSalary(
@@ -504,7 +522,12 @@ const EmployeeForm: React.FC<Props> = ({ id, setActiveView }) => {
             <input className={inputCls} value={formatBRL(costs.thirteenth_salary)} readOnly />
           </div>
 
-          <div className="md:col-span-2">
+          <div>
+            <div className={labelCls}>1/3 Férias (mensal)</div>
+            <input className={inputCls} value={formatBRL(costs.vacation_extra)} readOnly />
+          </div>
+
+          <div className="md:col-span-1">
             <div className={labelCls}>Custo total mensal</div>
             <input
               className={inputCls + " font-bold text-blue-700"}

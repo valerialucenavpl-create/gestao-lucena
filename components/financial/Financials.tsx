@@ -8,7 +8,11 @@ import MarkupFaturamentoTab from "./MarkupFaturamentoTab"; // ✅ NOVO
 
 type TabKey = "summary" | "fixed" | "variable" | "markup"; // ✅ NOVO
 
-const Financial: React.FC = () => {
+interface FinancialProps {
+  onVariableExpensesChange?: (expenses: { id: number; name: string; type: string; value: number }[]) => void;
+}
+
+const Financial: React.FC<FinancialProps> = ({ onVariableExpensesChange }) => {
   const tabs = useMemo(
     () => [
       { key: "summary" as const, label: "Resumo" },
@@ -44,7 +48,7 @@ const Financial: React.FC = () => {
       {/* CONTEÚDO */}
       {activeTab === "summary" && <SummaryTab />}
       {activeTab === "fixed" && <FixedExpensesCards />}
-      {activeTab === "variable" && <VariableExpensesCards />}
+      {activeTab === "variable" && <VariableExpensesCards onExpensesChange={onVariableExpensesChange as any} />}
       {activeTab === "markup" && <MarkupFaturamentoTab />} {/* ✅ NOVO */}
     </div>
   );
