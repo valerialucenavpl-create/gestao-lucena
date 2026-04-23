@@ -121,6 +121,8 @@ export interface Product {
   selectedCategoryColor?: string;
   referenceWidthMm?: number;
   referenceHeightMm?: number;
+  widthIncrement?: number;
+  heightIncrement?: number;
 }
 
 // ---------------------------------------------

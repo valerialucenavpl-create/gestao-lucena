@@ -458,6 +458,12 @@ const ProductModal: React.FC<ProductModalProps> = ({
   const [referenceHeightMm, setReferenceHeightMm] = useState(
     Number((product as any)?.referenceHeightMm ?? 2000)
   );
+  const [widthIncrement, setWidthIncrement] = useState(
+    Number((product as any)?.widthIncrement ?? 0)
+  );
+  const [heightIncrement, setHeightIncrement] = useState(
+    Number((product as any)?.heightIncrement ?? 0)
+  );
   const [dbRawMaterials, setDbRawMaterials] = useState<InventoryItem[]>([]);
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
   const [draftItem, setDraftItem] = useState<ProductCompositionItem | null>(null);
@@ -1073,6 +1079,8 @@ const ProductModal: React.FC<ProductModalProps> = ({
       selectedCategoryColor,
       referenceWidthMm: getPositiveInteger(referenceWidthMm, 1),
       referenceHeightMm: getPositiveInteger(referenceHeightMm, 1),
+      widthIncrement: Number(widthIncrement) || 0,
+      heightIncrement: Number(heightIncrement) || 0,
     });
   };
 
@@ -1296,6 +1304,41 @@ const ProductModal: React.FC<ProductModalProps> = ({
                       </div>
                     )}
                   </div>
+
+                  {productSubCategory1 === "Correr" && (
+                    <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4">
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-orange-600">
+                        Acréscimo automático (Correr)
+                      </h3>
+                      <p className="mt-1 text-xs text-orange-500">
+                        Valor somado automaticamente à medida informada no orçamento.
+                      </p>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <label className="text-sm text-slate-700">
+                          Acréscimo de Largura (mm)
+                          <input
+                            type="number"
+                            min={0}
+                            value={widthIncrement}
+                            onChange={(e) => setWidthIncrement(Number(e.target.value) || 0)}
+                            className="mt-2 w-full rounded-xl border border-orange-300 bg-white px-4 py-3 text-slate-900"
+                            placeholder="Ex: 40"
+                          />
+                        </label>
+                        <label className="text-sm text-slate-700">
+                          Acréscimo de Altura (mm)
+                          <input
+                            type="number"
+                            min={0}
+                            value={heightIncrement}
+                            onChange={(e) => setHeightIncrement(Number(e.target.value) || 0)}
+                            className="mt-2 w-full rounded-xl border border-orange-300 bg-white px-4 py-3 text-slate-900"
+                            placeholder="Ex: 40"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">

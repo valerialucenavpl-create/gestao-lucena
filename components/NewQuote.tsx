@@ -547,6 +547,9 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     const product = products.find((p) => p.id === productId);
     if (!product) return { price: 0, cost: 0, materialCost: 0, laborCost: 0, absorptionCost: 0 };
 
+    const effectiveWidth = width + (product.widthIncrement || 0);
+    const effectiveHeight = height + (product.heightIncrement || 0);
+
     let rawMaterialCost = 0;
 
     product.composition.forEach((compItem) => {
@@ -575,8 +578,8 @@ const NewQuote: React.FC<NewQuoteProps> = ({
         compItem,
         costMaterial,
         effectiveVariantCost,
-        width,
-        height
+        effectiveWidth,
+        effectiveHeight
       );
     });
 
