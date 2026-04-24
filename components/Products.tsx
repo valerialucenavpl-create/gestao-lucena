@@ -69,9 +69,11 @@ const Products: React.FC<ProductsProps> = ({
     ),
     referenceWidthMm: Number(row?.referenceWidthMm ?? (row as any)?.referencewidthmm ?? row?.reference_width_mm ?? 0),
     referenceHeightMm: Number(row?.referenceHeightMm ?? (row as any)?.referenceheightmm ?? row?.reference_height_mm ?? 0),
+    widthIncrement: Number(row?.widthIncrement ?? (row as any)?.widthincrement ?? row?.width_increment ?? 0),
+    heightIncrement: Number(row?.heightIncrement ?? (row as any)?.heightincrement ?? row?.height_increment ?? 0),
   });
 
-  const PRODUCTS_BAD_COLS_KEY = "products_bad_columns_v1";
+  const PRODUCTS_BAD_COLS_KEY = "products_bad_columns_v2";
 
   const getCachedBadColumns = (): Set<string> => {
     try {
@@ -158,6 +160,8 @@ const Products: React.FC<ProductsProps> = ({
         "reference_width_mm",
         "referenceHeightMm",
         "reference_height_mm",
+        "widthIncrement",
+        "heightIncrement",
       ].includes(column)
     );
 
