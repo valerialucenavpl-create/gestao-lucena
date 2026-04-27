@@ -212,6 +212,8 @@ const Products: React.FC<ProductsProps> = ({
       selectedCategoryColor: productData.selectedCategoryColor || "",
       referenceWidthMm: Number(productData.referenceWidthMm || 0),
       referenceHeightMm: Number(productData.referenceHeightMm || 0),
+      widthIncrement: Number((productData as any).widthIncrement || 0),
+      heightIncrement: Number((productData as any).heightIncrement || 0),
     };
 
     if (editingProduct) {
