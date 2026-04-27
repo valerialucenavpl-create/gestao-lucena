@@ -401,11 +401,29 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   }, [selectedGlassType]);
 
   const lockOptions = useMemo(() => {
+    const selectedProduct = products.find((p) => p.id === gwSelectedProduct);
+    const productCat = normalizeText(
+      selectedProduct?.productCategory || selectedProduct?.category || ""
+    );
+
     const fromInventory = rawMaterials
       .filter((m) => normalizeText(m.name).includes("FECHADURA"))
+      .filter((m) => {
+        const matCat = normalizeText((m as any).usageCategory || (m as any).usage_category || "");
+        if (!matCat) return true;
+        if (productCat.includes("alumin")) return matCat.includes("alumin");
+        if (productCat.includes("vidro")) return matCat.includes("vidro");
+        return true;
+      })
       .map((m) => m.name);
-    return Array.from(new Set(fromInventory));
-  }, [rawMaterials]);
+
+    const all = rawMaterials
+      .filter((m) => normalizeText(m.name).includes("FECHADURA"))
+      .map((m) => m.name);
+
+    const filtered = Array.from(new Set(fromInventory));
+    return filtered.length > 0 ? filtered : Array.from(new Set(all));
+  }, [rawMaterials, gwSelectedProduct, products]);
 
   const handleOptions = useMemo(() => {
     const fromInventory = rawMaterials
