@@ -433,7 +433,7 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     return Array.from(new Set([...fromConstants, ...fromInventory]));
   }, [rawMaterials]);
 
-  const textureOptions = ["Liso", "Canelado", "Jateado", "Reflecta", "Serigrafado"];
+  const textureOptions = ["Padrão", "Jateado"];
 
   const getProductColorOptions = (productId: string): string[] => {
     const product = products.find((item) => item.id === productId);
