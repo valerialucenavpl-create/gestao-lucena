@@ -112,11 +112,7 @@ export const HARDWARE_COLORS = [
     { id: 'bronze', name: 'Bronze', hex: '#d97706' },
 ];
 
-export const HANDLES = [
-    { id: 'h01', name: 'Puxador Arco de um Furo', image: 'https://cdn-icons-png.flaticon.com/512/154/154262.png', cost: 0 },
-    { id: 'h02', name: 'Puxador H 400 e 300 entre furos', image: 'https://cdn-icons-png.flaticon.com/512/154/154262.png', cost: 0 },
-    { id: 'h03', name: 'Puxador H 600 e 500 entre furos', image: 'https://cdn-icons-png.flaticon.com/512/154/154262.png', cost: 0 },
-];
+export const HANDLES: { id: string; name: string; image: string; cost: number }[] = [];
 
 // -----------------------------
 
