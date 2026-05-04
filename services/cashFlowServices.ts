@@ -59,17 +59,30 @@ export const getCashFlow = async () => {
     const { data: authData, error: authErr } = await supabase.auth.getUser();
     if (authErr || !authData.user) return { ok: false, error: authErr };
 
-    const { data, error } = await supabase
-      .from(TABLE)
-      .select("*")
-      .eq("user_id", authData.user.id)
-      .order("date", { ascending: false })
-      .order("created_at", { ascending: false });
+    // Supabase default limit is 1000 rows — paginate to fetch ALL records
+    const PAGE_SIZE = 1000;
+    let allRows: DbRow[] = [];
+    let from = 0;
 
-    if (error) return { ok: false, error };
+    while (true) {
+      const { data, error } = await supabase
+        .from(TABLE)
+        .select("*")
+        .eq("user_id", authData.user.id)
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .range(from, from + PAGE_SIZE - 1);
 
-    const rows = (data ?? []) as DbRow[];
-    return { ok: true, data: rows.map(mapRowToEntry) };
+      if (error) return { ok: false, error };
+
+      const rows = (data ?? []) as DbRow[];
+      allRows = [...allRows, ...rows];
+
+      if (rows.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+
+    return { ok: true, data: allRows.map(mapRowToEntry) };
   } catch (e) {
     return { ok: false, error: e };
   }
