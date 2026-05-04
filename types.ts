@@ -254,7 +254,7 @@ export interface CompanySettings {
 // ---------------------------------------------
 export interface CashFlowEntry {
   id: string;
-  type: "income" | "expense";
+  type: "Entrada" | "Saída";
   amount: number;
   category: string;
   subcategory?: string;

@@ -38,9 +38,15 @@ const ymdToTimestamptz = (ymd: string): string => {
   return `${ymd}T00:00:00.000Z`;
 };
 
+const normalizeType = (t: string): "Entrada" | "Saída" => {
+  const v = String(t || "").toLowerCase().trim();
+  if (v === "saída" || v === "saida" || v === "expense" || v === "out" || v === "saída") return "Saída";
+  return "Entrada";
+};
+
 const mapRowToEntry = (r: DbRow): CashFlowEntry => ({
   id: String(r.id),
-  type: (r.type as any) ?? "Entrada",
+  type: normalizeType(r.type ?? "Entrada"),
   amount: Number(r?.[AMOUNT_COL] ?? 0),
   category: (r as any)?.category ?? "",
   subcategory: (r as any)?.subcategory ?? "",
