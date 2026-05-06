@@ -400,29 +400,29 @@ const PayableFormModal: React.FC<{
             {installments.length === 0 ? (
               <p className="text-sm text-gray-400 italic">Sem parcelas — conta à vista</p>
             ) : (
-              <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-2">
                 {installments.map((inst, idx) => (
-                  <div key={inst.id} style={{ display: "flex", gap: "4px", alignItems: "center" }} className="border rounded-lg p-2 bg-gray-50">
-                    <span style={{ width: "55px", flexShrink: 0, fontSize: "11px" }} className="text-gray-500">Parc. {idx + 1}</span>
+                  <div key={inst.id} className="border rounded-lg p-2 bg-gray-50 flex flex-col gap-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-500">Parcela {idx + 1}</span>
+                      {inst.paid
+                        ? <span className="text-xs text-green-600 font-bold">✓ Pago</span>
+                        : <button type="button" onClick={() => removeInstallment(inst.id)} className="text-red-400 hover:text-red-600 text-base leading-none">×</button>
+                      }
+                    </div>
                     <input
                       type="date"
-                      style={{ width: "130px", flexShrink: 0, fontSize: "12px" }}
-                      className="px-1 py-1 border border-gray-300 rounded"
+                      className="w-full px-1 py-1 border border-gray-300 rounded text-xs"
                       value={inst.dueDate}
                       onChange={(e) => updateInstallment(inst.id, "dueDate", e.target.value)}
                     />
                     <input
                       type="number"
-                      style={{ width: "90px", flexShrink: 0, fontSize: "12px" }}
-                      className="px-1 py-1 border border-gray-300 rounded"
-                      placeholder="Valor"
+                      className="w-full px-1 py-1 border border-gray-300 rounded text-xs"
+                      placeholder="Valor (R$)"
                       value={inst.amount || ""}
                       onChange={(e) => updateInstallment(inst.id, "amount", Number(e.target.value))}
                     />
-                    {inst.paid
-                      ? <span className="text-xs text-green-600 font-semibold">✓</span>
-                      : <button type="button" onClick={() => removeInstallment(inst.id)} className="text-red-400 hover:text-red-600 text-xl leading-none">×</button>
-                    }
                   </div>
                 ))}
               </div>
