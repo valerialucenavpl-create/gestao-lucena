@@ -402,24 +402,26 @@ const PayableFormModal: React.FC<{
             ) : (
               <div className="space-y-2">
                 {installments.map((inst, idx) => (
-                  <div key={inst.id} style={{ display: "grid", gridTemplateColumns: "80px 1fr 100px 24px", gap: "6px", alignItems: "center" }} className="border rounded-lg p-2 bg-gray-50">
-                    <span className="text-xs text-gray-500">Parcela {idx + 1}</span>
+                  <div key={inst.id} style={{ display: "flex", gap: "6px", alignItems: "center" }} className="border rounded-lg p-2 bg-gray-50">
+                    <span style={{ width: "70px", flexShrink: 0 }} className="text-xs text-gray-500">Parcela {idx + 1}</span>
                     <input
                       type="date"
-                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                      style={{ width: "150px", flexShrink: 0 }}
+                      className="px-2 py-1 border border-gray-300 rounded text-sm"
                       value={inst.dueDate}
                       onChange={(e) => updateInstallment(inst.id, "dueDate", e.target.value)}
                     />
                     <input
                       type="number"
-                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                      style={{ width: "110px", flexShrink: 0 }}
+                      className="px-2 py-1 border border-gray-300 rounded text-sm"
                       placeholder="Valor"
                       value={inst.amount || ""}
                       onChange={(e) => updateInstallment(inst.id, "amount", Number(e.target.value))}
                     />
                     {inst.paid
                       ? <span className="text-xs text-green-600 font-semibold">✓</span>
-                      : <button type="button" onClick={() => removeInstallment(inst.id)} className="text-red-400 hover:text-red-600 text-xl leading-none text-center">×</button>
+                      : <button type="button" onClick={() => removeInstallment(inst.id)} className="text-red-400 hover:text-red-600 text-xl leading-none">×</button>
                     }
                   </div>
                 ))}
