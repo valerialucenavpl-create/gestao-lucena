@@ -9,9 +9,10 @@ export type View =
   | "products"
   | "inventory"
   | "cashflow"
+  | "payables"
   | "financials"
-  | "employees"      // ✅ ADICIONADO
-  | "employee-new"   // ✅ ADICIONADO
+  | "employees"
+  | "employee-new"
   | "assistant"
   | "reports"
   | "settings"
@@ -278,6 +279,30 @@ export type Message = {
   id: number;
   text: string;
   sender: "bot" | "user";
-  isTyping?: boolean; // ✅ adiciona isso
+  isTyping?: boolean;
 };
+
+// ---------------------------------------------
+// Contas a Pagar
+// ---------------------------------------------
+export interface PayableInstallment {
+  id: string;
+  dueDate: string;
+  amount: number;
+  paid: boolean;
+  paidDate?: string;
+}
+
+export interface Payable {
+  id: string;
+  name: string;
+  amount: number;
+  supplier: string;
+  productCategory: string;
+  dueDate: string;
+  installments: PayableInstallment[];
+  notes: string;
+  status: "pending" | "partial" | "paid";
+  createdAt?: string;
+}
 

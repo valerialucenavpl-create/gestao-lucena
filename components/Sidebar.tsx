@@ -106,6 +106,9 @@ const Sidebar: React.FC<Props> = ({
           <Item view="cashflow" label="Caixa" Icon={Wallet} />
         )}
         {(isAdmin || isFinance) && (
+          <Item view="payables" label="Contas a Pagar" Icon={Wallet} />
+        )}
+        {(isAdmin || isFinance) && (
           <Item view="financials" label="Financeiro" Icon={BarChart3} />
         )}
 

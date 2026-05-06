@@ -16,6 +16,7 @@ import Login from "./components/Login";
 import CashFlowForm from "./components/CashFlowForm";
 import Products from "./components/Products";
 import Sellers from "./components/Sellers";
+import Payables from "./components/Payables";
 
 // FUNCIONÁRIOS
 import EmployeesList from "./components/employees/EmployeesList";
@@ -676,6 +677,9 @@ if (
       // ✅ FINANCEIRO / CAIXA
       case "cashflow":
         return <CashFlowForm cashFlow={cashFlow} setCashFlow={setCashFlow} />;
+
+      case "payables":
+        return <Payables />;
 
       case "financials":
         return (
