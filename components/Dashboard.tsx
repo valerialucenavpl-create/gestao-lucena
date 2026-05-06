@@ -708,8 +708,8 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
         ))}
       </div>
 
-      {/* META GERAL + METAS INDIVIDUAIS + ANIVERSARIANTES */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      {/* META GERAL + METAS INDIVIDUAIS + ANIVERSARIANTES + CONTAS A PAGAR */}
+      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
         {/* META GERAL */}
         <div className="bg-white p-5 rounded-xl shadow-md">
           <h3 className="text-base font-semibold text-gray-800 mb-4">Meta Geral da Empresa</h3>
@@ -834,11 +834,57 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
                 </p>
               </div>
             ))}
-
             {upcomingBirthdays.length === 0 && (
               <p className="text-sm text-gray-400">Sem aniversariantes cadastrados para o período.</p>
             )}
           </div>
+        </div>
+
+        {/* CONTAS A PAGAR */}
+        <div className="bg-white p-5 rounded-xl shadow-md">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-gray-800">Contas a Pagar</h3>
+            <button onClick={() => setActiveView("payables")} className="text-xs text-blue-600 hover:underline">
+              Ver todas →
+            </button>
+          </div>
+          {payables.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-4">Nenhuma conta cadastrada.</p>
+          ) : (
+            <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+              {payables.map((p: any) => {
+                const today = new Date().toISOString().split("T")[0];
+                const dueDate = p.due_date ? String(p.due_date).split("T")[0] : "";
+                const status = p.status || "pending";
+                const isOverdue = status !== "paid" && dueDate && dueDate < today;
+                const { label, cls } =
+                  status === "paid"    ? { label: "Pago",     cls: "bg-green-100 text-green-700" } :
+                  status === "partial" ? { label: "Parcial",  cls: "bg-yellow-100 text-yellow-700" } :
+                  isOverdue            ? { label: "Vencida",  cls: "bg-red-100 text-red-700" } :
+                                         { label: "A Vencer", cls: "bg-blue-100 text-blue-700" };
+                const fmt = (ymd: string) => {
+                  if (!ymd) return "-";
+                  const [y, m, d] = ymd.split("-");
+                  return `${d}/${m}/${y}`;
+                };
+                return (
+                  <div key={p.id} className="border border-gray-100 rounded-lg p-3 bg-gray-50/60">
+                    <div className="flex items-start justify-between gap-1 mb-1">
+                      <p className="text-sm font-semibold text-gray-800 leading-tight">{p.name}</p>
+                      <span className={`px-1.5 py-0.5 rounded-full text-xs font-semibold shrink-0 ${cls}`}>{label}</span>
+                    </div>
+                    {p.supplier && <p className="text-xs text-gray-500">{p.supplier}</p>}
+                    <div className="flex items-center justify-between mt-1">
+                      <p className="text-xs text-gray-500">{fmt(dueDate)}</p>
+                      <p className="text-sm font-bold text-gray-800">
+                        {Number(p.amount || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -849,69 +895,6 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
           Aqui você tem uma visão geral do seu negócio. Utilize o menu à esquerda para navegar entre
           orçamentos, vendas, estoque e muito mais.
         </p>
-      </div>
-
-      {/* Contas a Pagar */}
-      <div className="bg-white p-5 rounded-xl shadow-md">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-semibold text-gray-800">Contas a Pagar</h3>
-          <button
-            onClick={() => setActiveView("payables")}
-            className="text-sm text-blue-600 hover:underline"
-          >
-            Ver todas →
-          </button>
-        </div>
-        {payables.length === 0 ? (
-          <p className="text-sm text-gray-400 text-center py-4">Nenhuma conta cadastrada.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-xs text-gray-500 uppercase">
-                  <th className="py-2 text-left font-medium">Nome</th>
-                  <th className="py-2 text-left font-medium">Fornecedor</th>
-                  <th className="py-2 text-left font-medium">Categoria</th>
-                  <th className="py-2 text-right font-medium">Valor</th>
-                  <th className="py-2 text-center font-medium">Vencimento</th>
-                  <th className="py-2 text-center font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {payables.map((p: any) => {
-                  const today = new Date().toISOString().split("T")[0];
-                  const dueDate = p.due_date ? String(p.due_date).split("T")[0] : "";
-                  const status = p.status || "pending";
-                  const isOverdue = status !== "paid" && dueDate && dueDate < today;
-                  const { label, cls } =
-                    status === "paid"    ? { label: "Pago",     cls: "bg-green-100 text-green-700" } :
-                    status === "partial" ? { label: "Parcial",  cls: "bg-yellow-100 text-yellow-700" } :
-                    isOverdue            ? { label: "Vencida",  cls: "bg-red-100 text-red-700" } :
-                                           { label: "A Vencer", cls: "bg-blue-100 text-blue-700" };
-                  const fmt = (ymd: string) => {
-                    if (!ymd) return "-";
-                    const [y, m, d] = ymd.split("-");
-                    return `${d}/${m}/${y}`;
-                  };
-                  return (
-                    <tr key={p.id} className="border-b last:border-0 hover:bg-gray-50">
-                      <td className="py-2 font-medium text-gray-800">{p.name}</td>
-                      <td className="py-2 text-gray-500">{p.supplier || "-"}</td>
-                      <td className="py-2 text-gray-500">{p.product_category || "-"}</td>
-                      <td className="py-2 text-right font-semibold">
-                        {Number(p.amount || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                      </td>
-                      <td className="py-2 text-center text-gray-600">{fmt(dueDate)}</td>
-                      <td className="py-2 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${cls}`}>{label}</span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
     </div>
   );
