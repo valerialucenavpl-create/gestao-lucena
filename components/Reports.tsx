@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { CashFlowEntry, Product, Quote, Sale } from "../types";
+import { getCashFlow } from "../services/cashFlowServices";
 
 // ─── Helpers ────────────────────────────────────────────────
 const money = (v: number) =>
@@ -109,10 +110,17 @@ const Reports: React.FC<Props> = ({ sales, quotes, cashFlow, products }) => {
   const [fromDate, setFromDate] = useState(toISO(new Date(now.getFullYear(), now.getMonth(), 1)));
   const [toDate, setToDate] = useState(toISO(now));
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [localCF, setLocalCF] = useState<CashFlowEntry[]>([]);
+
+  // Carrega cashFlow direto do Supabase para garantir dados atualizados
+  useEffect(() => {
+    getCashFlow().then((r) => { if (r.ok) setLocalCF(r.data ?? []); });
+  }, []);
 
   const ss = Array.isArray(sales) ? sales : [];
   const qs = Array.isArray(quotes) ? quotes : [];
-  const cf = Array.isArray(cashFlow) ? cashFlow : [];
+  // Usa dados locais carregados diretamente, com fallback para prop
+  const cf = localCF.length > 0 ? localCF : (Array.isArray(cashFlow) ? cashFlow : []);
   const ps = Array.isArray(products) ? products : [];
 
   const byId = useMemo(() =>
