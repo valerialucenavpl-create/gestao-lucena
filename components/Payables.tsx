@@ -406,13 +406,14 @@ const PayableFormModal: React.FC<{
                     <span className="text-xs text-gray-500 w-20 shrink-0">Parcela {idx + 1}</span>
                     <input
                       type="date"
+                      style={{ minWidth: "160px" }}
                       className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm"
                       value={inst.dueDate}
                       onChange={(e) => updateInstallment(inst.id, "dueDate", e.target.value)}
                     />
                     <input
                       type="number"
-                      className="w-32 px-2 py-1 border border-gray-300 rounded text-sm"
+                      className="w-24 px-2 py-1 border border-gray-300 rounded text-sm"
                       placeholder="Valor"
                       value={inst.amount || ""}
                       onChange={(e) => updateInstallment(inst.id, "amount", Number(e.target.value))}
