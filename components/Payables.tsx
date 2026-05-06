@@ -334,7 +334,7 @@ const PayableFormModal: React.FC<{
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <div className="flex items-center justify-between p-6 border-b">
           <h3 className="text-xl font-bold">{payable ? "Editar Conta" : "Nova Conta a Pagar"}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-3xl leading-none">×</button>
@@ -402,19 +402,19 @@ const PayableFormModal: React.FC<{
             ) : (
               <div className="space-y-2">
                 {installments.map((inst, idx) => (
-                  <div key={inst.id} style={{ display: "flex", gap: "6px", alignItems: "center" }} className="border rounded-lg p-2 bg-gray-50">
-                    <span style={{ width: "70px", flexShrink: 0 }} className="text-xs text-gray-500">Parcela {idx + 1}</span>
+                  <div key={inst.id} style={{ display: "flex", gap: "4px", alignItems: "center" }} className="border rounded-lg p-2 bg-gray-50">
+                    <span style={{ width: "55px", flexShrink: 0, fontSize: "11px" }} className="text-gray-500">Parc. {idx + 1}</span>
                     <input
                       type="date"
-                      style={{ width: "150px", flexShrink: 0 }}
-                      className="px-2 py-1 border border-gray-300 rounded text-sm"
+                      style={{ width: "130px", flexShrink: 0, fontSize: "12px" }}
+                      className="px-1 py-1 border border-gray-300 rounded"
                       value={inst.dueDate}
                       onChange={(e) => updateInstallment(inst.id, "dueDate", e.target.value)}
                     />
                     <input
                       type="number"
-                      style={{ width: "110px", flexShrink: 0 }}
-                      className="px-2 py-1 border border-gray-300 rounded text-sm"
+                      style={{ width: "90px", flexShrink: 0, fontSize: "12px" }}
+                      className="px-1 py-1 border border-gray-300 rounded"
                       placeholder="Valor"
                       value={inst.amount || ""}
                       onChange={(e) => updateInstallment(inst.id, "amount", Number(e.target.value))}
