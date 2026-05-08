@@ -8,6 +8,15 @@ import {
   sanitizeMoneyInputBR,
 } from "../utils/money";
 
+// ─── Categorias fixas de Contas a Pagar ─────────────────────────────────────
+const PAYABLE_CATEGORIES = [
+  "MERCADORIA", "FUNCIONARIO", "IMPOSTO", "ALUGUEL", "JUROS",
+  "SISTEMA", "PATROCINIO", "ENERGIA", "AGUA", "CONSORCIO",
+  "CONTADOR", "INTERNET",
+];
+
+const EXTRA_SUBCATEGORIES = ["CUSTO FIXO", "CUSTO VARIAVEL"];
+
 // ─── CashFlow Saída plan (duplicated from CashFlowForm) ───────────────────────
 const SAIDA_PLAN: Record<string, { title: string; items: string[] }[]> = {
   "CUSTOS VARIÁVEIS": [
@@ -50,6 +59,7 @@ const normalizeRow = (row: any): Payable => ({
   name: row.name || "",
   amount: Number(row.amount || 0),
   supplier: row.supplier || "",
+  payableCategory: row.payable_category || "",
   productCategory: row.product_category || "",
   dueDate: row.due_date ? String(row.due_date).split("T")[0] : "",
   installments: Array.isArray(row.installments) ? row.installments : [],
@@ -207,7 +217,7 @@ const Payables: React.FC = () => {
                   <tr key={p.id} className="border-t hover:bg-gray-50">
                     <td className="p-3 font-medium">{p.name}</td>
                     <td className="p-3 text-gray-600">{p.supplier || "-"}</td>
-                    <td className="p-3 text-gray-600">{p.productCategory || "-"}</td>
+                    <td className="p-3 text-gray-600">{p.payableCategory || "-"}{p.productCategory ? ` / ${p.productCategory}` : ""}</td>
                     <td className="p-3 text-right font-semibold">{money(p.amount)}</td>
                     <td className="p-3 text-center">{formatBR(p.dueDate)}</td>
                     <td className="p-3 text-center text-xs text-gray-500">
@@ -283,11 +293,17 @@ const PayableFormModal: React.FC<{
   const [supplier, setSupplier] = useState(payable?.supplier || "");
   const [amount, setAmount] = useState(payable?.amount || 0);
   const [amountInput, setAmountInput] = useState(formatMoneyInputBR(payable?.amount || 0));
+  const [payableCategory, setPayableCategory] = useState(payable?.payableCategory || "");
   const [productCategory, setProductCategory] = useState(payable?.productCategory || "");
   const [dueDate, setDueDate] = useState(payable?.dueDate || "");
   const [notes, setNotes] = useState(payable?.notes || "");
   const [installments, setInstallments] = useState<PayableInstallment[]>(payable?.installments || []);
   const [saving, setSaving] = useState(false);
+
+  const subcategoryOptions = useMemo(
+    () => [...materialCategories, ...EXTRA_SUBCATEGORIES],
+    [materialCategories]
+  );
 
   const cls = "w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500";
 
@@ -312,6 +328,7 @@ const PayableFormModal: React.FC<{
         name: name.trim(),
         supplier: supplier.trim(),
         amount: Number(amount),
+        payable_category: payableCategory,
         product_category: productCategory,
         due_date: dueDate || null,
         installments,
@@ -368,10 +385,18 @@ const PayableFormModal: React.FC<{
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">Categoria do Produto</label>
+            <label className="block text-sm font-medium mb-1">Categoria</label>
+            <select className={cls} value={payableCategory} onChange={(e) => setPayableCategory(e.target.value)}>
+              <option value="">Selecione</option>
+              {PAYABLE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Subcategoria</label>
             <select className={cls} value={productCategory} onChange={(e) => setProductCategory(e.target.value)}>
               <option value="">Selecione</option>
-              {materialCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+              {subcategoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
 
@@ -540,7 +565,7 @@ const PaymentModal: React.FC<{
         <div className="mx-6 mt-5 p-4 bg-blue-50 border border-blue-200 rounded-xl">
           <p className="font-bold text-blue-800 text-base">{payable.name}</p>
           {payable.supplier && <p className="text-sm text-blue-600 mt-1">Fornecedor: {payable.supplier}</p>}
-          {payable.productCategory && <p className="text-sm text-blue-600">Categoria: {payable.productCategory}</p>}
+          {payable.payableCategory && <p className="text-sm text-blue-600">Categoria: {payable.payableCategory}{payable.productCategory ? ` / ${payable.productCategory}` : ""}</p>}
           <p className="text-sm text-blue-600">Valor total: <strong>{money(payable.amount)}</strong></p>
           {payable.dueDate && <p className="text-sm text-blue-600">Vencimento: {formatBR(payable.dueDate)}</p>}
           {payable.notes && <p className="text-xs text-blue-500 mt-2 italic">{payable.notes}</p>}

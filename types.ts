@@ -298,6 +298,7 @@ export interface Payable {
   name: string;
   amount: number;
   supplier: string;
+  payableCategory: string;
   productCategory: string;
   dueDate: string;
   installments: PayableInstallment[];
