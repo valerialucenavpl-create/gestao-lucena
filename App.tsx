@@ -212,9 +212,6 @@ const normalizeProducts = (rows: ProductRow[]): Product[] => {
       fixedCostRate: Number(
         (row as any)?.fixedCostRate ?? (row as any)?.fixedcostrate ?? (row as any)?.fixed_cost_rate ?? 0
       ),
-      absorptionRate: Number(
-        (row as any)?.absorptionRate ?? (row as any)?.absorptionrate ?? (row as any)?.absorption_rate ?? 0
-      ),
       quantityReference: Number(
         (row as any)?.quantityReference ?? (row as any)?.quantityreference ?? (row as any)?.quantity_reference ?? 1
       ),

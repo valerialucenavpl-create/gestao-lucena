@@ -428,9 +428,6 @@ const ProductModal: React.FC<ProductModalProps> = ({
   const [fixedCostRate, setFixedCostRate] = useState(
     Number((product as any)?.fixedCostRate ?? 20)
   );
-  const [absorptionRate, setAbsorptionRate] = useState(
-    Number((product as any)?.absorptionRate ?? 15)
-  );
   const [quantity, setQuantity] = useState(
     Number((product as any)?.quantityReference ?? 1)
   );
@@ -818,8 +815,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
   );
 
   const baseOperationalCost = materialCost + laborCost;
-  const absorptionCost = baseOperationalCost * (getPositiveNumber(absorptionRate) / 100);
-  const totalCostBeforeMarkup = baseOperationalCost + absorptionCost;
+  const totalCostBeforeMarkup = baseOperationalCost;
   const markupRate =
     getPositiveNumber(desiredProfitMargin) +
     getPositiveNumber(fixedCostRate) +
@@ -1074,7 +1070,6 @@ const ProductModal: React.FC<ProductModalProps> = ({
       helperHours: getPositiveNumber(helperHours),
       helperRate: getPositiveNumber(helperRate),
       fixedCostRate: getPositiveNumber(fixedCostRate),
-      absorptionRate: getPositiveNumber(absorptionRate),
       quantityReference: getPositiveInteger(quantity, 1),
       selectedCategoryColor,
       referenceWidthMm: getPositiveInteger(referenceWidthMm, 1),
@@ -1647,19 +1642,6 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     </label>
 
                     <label className="text-sm text-slate-700">
-                      Rateio por absorcao (%)
-                      <input
-                        type="number"
-                        min={0}
-                        value={absorptionRate}
-                        onChange={(event) =>
-                          setAbsorptionRate(Number(event.target.value) || 0)
-                        }
-                        className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
-                      />
-                    </label>
-
-                    <label className="text-sm text-slate-700">
                       Quantidade vendida
                       <input
                         type="number"
@@ -1700,10 +1682,6 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
                       <span>Mao de obra ({laborHoursTotal.toFixed(2)} h)</span>
                       <strong>{formatCurrency(laborCost)}</strong>
-                    </div>
-                    <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-                      <span>Rateio por absorcao ({absorptionRate.toFixed(2)}%)</span>
-                      <strong>{formatCurrency(absorptionCost)}</strong>
                     </div>
                     <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
                       <span>Impostos ({taxRate.toFixed(2)}%)</span>

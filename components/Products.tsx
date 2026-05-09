@@ -62,7 +62,6 @@ const Products: React.FC<ProductsProps> = ({
     assemblyHours: Number(row?.assemblyHours ?? (row as any)?.assemblyhours ?? row?.assembly_hours ?? 0),
     hourlyRate: Number(row?.hourlyRate ?? (row as any)?.hourlyrate ?? row?.hourly_rate ?? 0),
     fixedCostRate: Number(row?.fixedCostRate ?? (row as any)?.fixedcostrate ?? row?.fixed_cost_rate ?? 0),
-    absorptionRate: Number(row?.absorptionRate ?? (row as any)?.absorptionrate ?? row?.absorption_rate ?? 0),
     quantityReference: Number(row?.quantityReference ?? (row as any)?.quantityreference ?? row?.quantity_reference ?? 1),
     selectedCategoryColor: String(
       row?.selectedCategoryColor ?? (row as any)?.selectedcategorycolor ?? row?.selected_category_color ?? ""
@@ -207,7 +206,6 @@ const Products: React.FC<ProductsProps> = ({
       helperHours: Number((productData as any).helperHours || 0),
       helperRate: Number((productData as any).helperRate || 0),
       fixedCostRate: Number(productData.fixedCostRate || 0),
-      absorptionRate: Number(productData.absorptionRate || 0),
       quantityReference: Number(productData.quantityReference || 1),
       selectedCategoryColor: productData.selectedCategoryColor || "",
       referenceWidthMm: Number(productData.referenceWidthMm || 0),

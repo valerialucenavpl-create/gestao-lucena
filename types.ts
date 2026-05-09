@@ -117,7 +117,6 @@ export interface Product {
   helperHours?: number;
   helperRate?: number;
   fixedCostRate?: number;
-  absorptionRate?: number;
   quantityReference?: number;
   selectedCategoryColor?: string;
   referenceWidthMm?: number;
@@ -190,7 +189,6 @@ export interface QuoteItem {
   cost: number;
   materialCost?: number;
   laborCost?: number;
-  absorptionCost?: number;
 }
 // ---------------------------------------------
 // Orçamentos

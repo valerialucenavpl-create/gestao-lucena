@@ -563,7 +563,7 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     glassTypeId?: string
   ) => {
     const product = products.find((p) => p.id === productId);
-    if (!product) return { price: 0, cost: 0, materialCost: 0, laborCost: 0, absorptionCost: 0 };
+    if (!product) return { price: 0, cost: 0, materialCost: 0, laborCost: 0 };
 
     const effectiveWidth = width + (product.widthIncrement || 0);
     const effectiveHeight = height + (product.heightIncrement || 0);
@@ -602,9 +602,7 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     });
 
     const laborCostUnit = (product.laborCost || 0);
-    const absorptionRate = Number(product.absorptionRate || 0) / 100;
-    const absorptionCostUnit = rawMaterialCost * absorptionRate;
-    const totalCostOfGoods = rawMaterialCost + laborCostUnit + absorptionCostUnit;
+    const totalCostOfGoods = rawMaterialCost + laborCostUnit;
 
     const profitMargin = product.desiredProfitMargin / 100;
     const variableCostMargin = totalVariablePercent / 100;
@@ -619,7 +617,6 @@ const NewQuote: React.FC<NewQuoteProps> = ({
       cost: totalCostOfGoods * quantity,
       materialCost: rawMaterialCost * quantity,
       laborCost: laborCostUnit * quantity,
-      absorptionCost: absorptionCostUnit * quantity,
     };
   };
 
@@ -802,7 +799,7 @@ if (!ensureColorSelected()) return;
     const selectedProduct = products.find((product) => product.id === alSelectedProductId);
     if (!selectedProduct) return;
 
-    const { price: basePrice, cost: baseCost, materialCost: baseMat, laborCost: baseLab, absorptionCost: baseAbs } = calculateItemPrice(
+    const { price: basePrice, cost: baseCost, materialCost: baseMat, laborCost: baseLab } = calculateItemPrice(
       alSelectedProductId,
       alWidth,
       alHeight,
@@ -832,7 +829,6 @@ if (!ensureColorSelected()) return;
       cost: totalCost,
       materialCost: baseMat,
       laborCost: baseLab,
-      absorptionCost: baseAbs,
     };
 
     setItems((prev) => [...prev, newItem]);
@@ -862,7 +858,7 @@ if (!ensureColorSelected()) return;
       Number(handleFromConstant?.cost || 0) ||
       Number(getVariantCost(handleVariant) || getVariantSalePrice(handleVariant) || 0);
 
-    const { price: basePrice, cost: baseCost, materialCost: baseMat, laborCost: baseLab, absorptionCost: baseAbs } = calculateItemPrice(
+    const { price: basePrice, cost: baseCost, materialCost: baseMat, laborCost: baseLab } = calculateItemPrice(
       gwSelectedProduct,
       gwWidth,
       gwHeight,
@@ -898,7 +894,6 @@ if (!ensureColorSelected()) return;
       cost: totalCost,
       materialCost: baseMat,
       laborCost: baseLab,
-      absorptionCost: baseAbs,
     };
 
     setItems((prev) => [...prev, newItem]);
@@ -957,7 +952,7 @@ if (!ensureColorSelected()) return;
 
             const glassTypeId = getGlassTypeIdFromDescription(updatedItem.description);
 
-            const { price, cost, materialCost, laborCost, absorptionCost } = calculateItemPrice(
+            const { price, cost, materialCost, laborCost } = calculateItemPrice(
               updatedItem.productId,
               updatedItem.width,
               updatedItem.height,
@@ -969,7 +964,7 @@ if (!ensureColorSelected()) return;
             updatedItem.cost = cost;
             updatedItem.materialCost = materialCost;
             updatedItem.laborCost = laborCost;
-            updatedItem.absorptionCost = absorptionCost;
+            
           }
         }
 
@@ -981,7 +976,6 @@ if (!ensureColorSelected()) return;
   const subtotal = items.reduce((sum, item) => sum + item.price, 0);
   const totalMaterialCost = items.reduce((sum, item) => sum + (item.materialCost ?? 0), 0);
   const totalLaborCost = items.reduce((sum, item) => sum + (item.laborCost ?? 0), 0);
-  const totalAbsorptionCost = items.reduce((sum, item) => sum + (item.absorptionCost ?? 0), 0);
 
 // Valor bruto antes do desconto
 const grossTotal = subtotal + freight + installation;
@@ -2358,12 +2352,6 @@ const handleSavePDF = async () => {
                   <div className="flex justify-between text-gray-700">
                     <span>Mão de obra:</span>
                     <span className="font-medium">R$ {fmt(totalLaborCost)}</span>
-                  </div>
-                )}
-                {totalAbsorptionCost > 0 && (
-                  <div className="flex justify-between text-gray-700">
-                    <span>Rateio por absorção:</span>
-                    <span className="font-medium">R$ {fmt(totalAbsorptionCost)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-gray-800 font-semibold border-t border-yellow-300 pt-1 mt-1">
