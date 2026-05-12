@@ -70,9 +70,15 @@ const Products: React.FC<ProductsProps> = ({
     referenceHeightMm: Number(row?.referenceHeightMm ?? (row as any)?.referenceheightmm ?? row?.reference_height_mm ?? 0),
     widthIncrement: Number(row?.widthIncrement ?? (row as any)?.widthincrement ?? row?.width_increment ?? 0),
     heightIncrement: Number(row?.heightIncrement ?? (row as any)?.heightincrement ?? row?.height_increment ?? 0),
-  });
+    professionalCount: Number(row?.professionalCount ?? (row as any)?.professionalcount ?? 0),
+    professionalHours: Number(row?.professionalHours ?? (row as any)?.professionalhours ?? 0),
+    professionalRate: Number(row?.professionalRate ?? (row as any)?.professionalrate ?? 0),
+    helperCount: Number(row?.helperCount ?? (row as any)?.helpercount ?? 0),
+    helperHours: Number(row?.helperHours ?? (row as any)?.helperhours ?? 0),
+    helperRate: Number(row?.helperRate ?? (row as any)?.helperrate ?? 0),
+  } as Product);
 
-  const PRODUCTS_BAD_COLS_KEY = "products_bad_columns_v2";
+  const PRODUCTS_BAD_COLS_KEY = "products_bad_columns_v3";
 
   const getCachedBadColumns = (): Set<string> => {
     try {
