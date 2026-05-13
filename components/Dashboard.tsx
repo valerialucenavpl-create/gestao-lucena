@@ -848,43 +848,80 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
               Ver todas →
             </button>
           </div>
-          {payables.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-4">Nenhuma conta cadastrada.</p>
-          ) : (
-            <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-              {payables.map((p: any) => {
-                const today = new Date().toISOString().split("T")[0];
+          {(() => {
+            const today = new Date().toISOString().split("T")[0];
+            const fmt = (ymd: string) => {
+              if (!ymd) return "-";
+              const [y, m, d] = ymd.split("-");
+              return `${d}/${m}/${y}`;
+            };
+            const money = (n: number) =>
+              Number(n || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+            // Expand each payable into individual installment rows
+            const rows: { key: string; name: string; supplier: string; date: string; amount: number; isPaid: boolean; instLabel?: string }[] = [];
+
+            payables.forEach((p: any) => {
+              const insts = Array.isArray(p.installments) ? p.installments : [];
+              if (insts.length === 0) {
+                // Sem parcelas — mostra a conta inteira
                 const dueDate = p.due_date ? String(p.due_date).split("T")[0] : "";
-                const status = p.status || "pending";
-                const isOverdue = status !== "paid" && dueDate && dueDate < today;
-                const { label, cls } =
-                  status === "paid"    ? { label: "Pago",     cls: "bg-green-100 text-green-700" } :
-                  status === "partial" ? { label: "Parcial",  cls: "bg-yellow-100 text-yellow-700" } :
-                  isOverdue            ? { label: "Vencida",  cls: "bg-red-100 text-red-700" } :
-                                         { label: "A Vencer", cls: "bg-blue-100 text-blue-700" };
-                const fmt = (ymd: string) => {
-                  if (!ymd) return "-";
-                  const [y, m, d] = ymd.split("-");
-                  return `${d}/${m}/${y}`;
-                };
-                return (
-                  <div key={p.id} className="border border-gray-100 rounded-lg p-3 bg-gray-50/60">
-                    <div className="flex items-start justify-between gap-1 mb-1">
-                      <p className="text-sm font-semibold text-gray-800 leading-tight">{p.name}</p>
-                      <span className={`px-1.5 py-0.5 rounded-full text-xs font-semibold shrink-0 ${cls}`}>{label}</span>
+                const isPaid = (p.status || "") === "paid";
+                rows.push({ key: p.id, name: p.name, supplier: p.supplier || "", date: dueDate, amount: Number(p.amount || 0), isPaid });
+              } else {
+                // Expande cada parcela pendente
+                insts.forEach((inst: any, idx: number) => {
+                  rows.push({
+                    key: `${p.id}-${inst.id || idx}`,
+                    name: p.name,
+                    supplier: p.supplier || "",
+                    date: inst.dueDate || inst.due_date || "",
+                    amount: Number(inst.amount || 0),
+                    isPaid: inst.paid === true,
+                    instLabel: `Parcela ${idx + 1}`,
+                  });
+                });
+              }
+            });
+
+            // Sort by date ascending (earliest first), paid items at the bottom
+            rows.sort((a, b) => {
+              if (a.isPaid !== b.isPaid) return a.isPaid ? 1 : -1;
+              return a.date.localeCompare(b.date);
+            });
+
+            if (rows.length === 0) return <p className="text-sm text-gray-400 text-center py-4">Nenhuma conta cadastrada.</p>;
+
+            return (
+              <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                {rows.map((row) => {
+                  const isOverdue = !row.isPaid && row.date && row.date < today;
+                  const { label, cls } = row.isPaid
+                    ? { label: "Pago",     cls: "bg-green-100 text-green-700" }
+                    : isOverdue
+                      ? { label: "Vencida",  cls: "bg-red-100 text-red-700" }
+                      : { label: "A Vencer", cls: "bg-blue-100 text-blue-700" };
+                  return (
+                    <div key={row.key} className="border border-gray-100 rounded-lg p-3 bg-gray-50/60">
+                      <div className="flex items-start justify-between gap-1 mb-1">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-800 leading-tight truncate">{row.name}</p>
+                          {(row.supplier || row.instLabel) && (
+                            <p className="text-xs text-gray-500">{[row.supplier, row.instLabel].filter(Boolean).join(" · ")}</p>
+                          )}
+                        </div>
+                        <span className={`px-1.5 py-0.5 rounded-full text-xs font-semibold shrink-0 ${cls}`}>{label}</span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <p className="text-xs text-gray-500">{fmt(row.date)}</p>
+                        <p className="text-sm font-bold text-gray-800">{money(row.amount)}</p>
+                      </div>
                     </div>
-                    {p.supplier && <p className="text-xs text-gray-500">{p.supplier}</p>}
-                    <div className="flex items-center justify-between mt-1">
-                      <p className="text-xs text-gray-500">{fmt(dueDate)}</p>
-                      <p className="text-sm font-bold text-gray-800">
-                        {Number(p.amount || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       </div>
 
