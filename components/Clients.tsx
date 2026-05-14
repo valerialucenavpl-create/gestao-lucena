@@ -207,33 +207,45 @@ const Clients: React.FC = () => {
 
     const reader = new FileReader();
     reader.onload = async (ev) => {
-      const text = ev.target?.result as string;
+      let text = ev.target?.result as string;
       if (!text) return;
 
-      // Detecta separador (ponto-e-vírgula ou vírgula)
-      const sep = text.indexOf(";") !== -1 ? ";" : ",";
+      // Remove BOM (Byte Order Mark) que o Excel insere no início de arquivos UTF-8
+      text = text.replace(/^﻿/, "");
+
+      // Detecta separador (ponto-e-vírgula ou vírgula ou tab)
+      const firstLine = text.split(/\r?\n/)[0] || "";
+      const sep = firstLine.indexOf(";") !== -1 ? ";" : firstLine.indexOf("\t") !== -1 ? "\t" : ",";
+
       const lines = text.split(/\r?\n/).filter((l) => l.trim());
       if (lines.length < 2) { alert("Arquivo vazio ou sem dados."); return; }
 
-      // Mapeia colunas pelo cabeçalho
-      const headers = lines[0].split(sep).map((h) => h.trim().toLowerCase()
+      // Normaliza texto para comparação (remove acentos, BOM, aspas, espaços)
+      const norm = (s: string) => s.trim()
+        .replace(/^﻿/, "")
+        .toLowerCase()
         .normalize("NFD").replace(/[̀-ͯ]/g, "")
-        .replace(/['"]/g, ""));
+        .replace(/['"]/g, "")
+        .trim();
+
+      // Mapeia colunas pelo cabeçalho
+      const headers = lines[0].split(sep).map(norm);
 
       const col = (h: string) => {
         const aliases: Record<string, string[]> = {
           name:         ["nome", "name", "cliente"],
-          street:       ["rua", "street", "logradouro", "endereco", "endereço"],
-          number:       ["numero", "número", "num", "number"],
+          street:       ["rua", "street", "logradouro", "endereco", "endereo"],
+          number:       ["numero", "num", "number"],
           neighborhood: ["bairro", "neighborhood"],
           complement:   ["complemento", "complement"],
           phone:        ["telefone", "phone", "celular", "fone"],
-          notes:        ["observacao", "observação", "notes", "obs", "cpf"],
+          notes:        ["observacao", "notes", "obs", "cpf", "cnpj"],
           city:         ["cidade", "city"],
+          date:         ["data", "date", "datacadastro"],
         };
         const list = aliases[h] ?? [h];
         for (const alias of list) {
-          const idx = headers.findIndex((hh) => hh === alias || hh.includes(alias));
+          const idx = headers.findIndex((hh) => hh === alias || hh.startsWith(alias));
           if (idx !== -1) return idx;
         }
         return -1;
@@ -249,7 +261,7 @@ const Clients: React.FC = () => {
       const cityIdx         = col("city");
 
       if (nameIdx === -1) {
-        alert("Coluna 'Nome' não encontrada. Verifique o cabeçalho do CSV.");
+        alert(`Coluna 'Nome' não encontrada.\n\nCabeçalho detectado:\n${headers.join(" | ")}\n\nCertifique-se que a 1ª linha tem 'Nome' e salve como CSV (separado por ponto-e-vírgula).`);
         return;
       }
 
@@ -323,6 +335,7 @@ const Clients: React.FC = () => {
       loadClients();
     };
 
+    // Tenta UTF-8 primeiro; se falhar em detectar a coluna Nome, tenta Windows-1252
     reader.readAsText(file, "UTF-8");
   };
 
