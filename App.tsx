@@ -242,6 +242,41 @@ const App: React.FC = () => {
   const [variableExpenses, setVariableExpenses] = useState<VariableExpense[]>([]);
   const [cashFlow, setCashFlow] = useState<CashFlowEntry[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
+
+  // ESC key → volta para a tela anterior
+  const ESC_BACK_MAP: Partial<Record<string, View>> = {
+    newQuote:     "quotes",
+    quoteDetail:  "quotes",
+    quotes:       "dashboard",
+    sales:        "dashboard",
+    clients:      "dashboard",
+    products:     "dashboard",
+    inventory:    "dashboard",
+    cashflow:     "dashboard",
+    payables:     "dashboard",
+    financials:   "dashboard",
+    employees:    "dashboard",
+    "employee-new": "employees",
+    sellers:      "dashboard",
+    reports:      "dashboard",
+    settings:     "dashboard",
+    assistant:    "dashboard",
+  };
+
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // Não navega se o usuário estiver digitando em um campo
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      // Não navega se houver um modal aberto (elemento com z-50 no DOM)
+      if (document.querySelector(".fixed.inset-0")) return;
+      const back = ESC_BACK_MAP[activeView as string];
+      if (back) setActiveView(back);
+    };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, [activeView]);;
   const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
   const [sales, setSales] = useState<Sale[]>([]);
 
