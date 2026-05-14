@@ -30,6 +30,8 @@ const Clients: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
   const [form, setForm] = useState<Omit<Client, "id">>(emptyForm);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
 
   const isTableNotFound = (message: string) => {
     const text = message.toLowerCase();
@@ -198,6 +200,132 @@ const Clients: React.FC = () => {
     setIsModalOpen(true);
   };
 
+  const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const text = ev.target?.result as string;
+      if (!text) return;
+
+      // Detecta separador (ponto-e-vírgula ou vírgula)
+      const sep = text.indexOf(";") !== -1 ? ";" : ",";
+      const lines = text.split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length < 2) { alert("Arquivo vazio ou sem dados."); return; }
+
+      // Mapeia colunas pelo cabeçalho
+      const headers = lines[0].split(sep).map((h) => h.trim().toLowerCase()
+        .normalize("NFD").replace(/[̀-ͯ]/g, "")
+        .replace(/['"]/g, ""));
+
+      const col = (h: string) => {
+        const aliases: Record<string, string[]> = {
+          name:         ["nome", "name", "cliente"],
+          street:       ["rua", "street", "logradouro", "endereco", "endereço"],
+          number:       ["numero", "número", "num", "number"],
+          neighborhood: ["bairro", "neighborhood"],
+          complement:   ["complemento", "complement"],
+          phone:        ["telefone", "phone", "celular", "fone"],
+          notes:        ["observacao", "observação", "notes", "obs", "cpf"],
+          city:         ["cidade", "city"],
+        };
+        const list = aliases[h] ?? [h];
+        for (const alias of list) {
+          const idx = headers.findIndex((hh) => hh === alias || hh.includes(alias));
+          if (idx !== -1) return idx;
+        }
+        return -1;
+      };
+
+      const nameIdx         = col("name");
+      const streetIdx       = col("street");
+      const numberIdx       = col("number");
+      const neighborhoodIdx = col("neighborhood");
+      const complementIdx   = col("complement");
+      const phoneIdx        = col("phone");
+      const notesIdx        = col("notes");
+      const cityIdx         = col("city");
+
+      if (nameIdx === -1) {
+        alert("Coluna 'Nome' não encontrada. Verifique o cabeçalho do CSV.");
+        return;
+      }
+
+      const parseRow = (line: string): string[] => {
+        // Suporta campos entre aspas com separadores internos
+        const result: string[] = [];
+        let cur = ""; let inQ = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === '"') { inQ = !inQ; continue; }
+          if (ch === sep && !inQ) { result.push(cur.trim()); cur = ""; }
+          else cur += ch;
+        }
+        result.push(cur.trim());
+        return result;
+      };
+
+      const rows = lines.slice(1).map(parseRow).filter((r) => r[nameIdx]?.trim());
+      if (rows.length === 0) { alert("Nenhum cliente encontrado no arquivo."); return; }
+
+      const confirmMsg = `Importar ${rows.length} clientes? Clientes já existentes NÃO serão duplicados (verificação por nome).`;
+      if (!window.confirm(confirmMsg)) return;
+
+      setImporting(true);
+      setImportProgress({ done: 0, total: rows.length });
+
+      // Carrega nomes existentes para evitar duplicatas
+      const { data: existing } = await supabase.from("clients").select("name");
+      const existingNames = new Set((existing ?? []).map((c: any) => String(c.name ?? "").toLowerCase().trim()));
+
+      const BATCH = 50;
+      let done = 0;
+      let skipped = 0;
+      let failed = 0;
+
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const batch = rows.slice(i, i + BATCH);
+        const toInsert = batch
+          .filter((r) => {
+            const name = r[nameIdx]?.trim();
+            if (!name || existingNames.has(name.toLowerCase())) { skipped++; return false; }
+            return true;
+          })
+          .map((r) => {
+            const cityVal = cityIdx !== -1 ? r[cityIdx]?.trim() : "";
+            const notesVal = notesIdx !== -1 ? r[notesIdx]?.trim() : "";
+            const combined = [notesVal, cityVal ? `Cidade: ${cityVal}` : ""].filter(Boolean).join(" | ");
+            return {
+              name:         r[nameIdx]?.trim() || "",
+              street:       streetIdx !== -1 ? r[streetIdx]?.trim() : "",
+              number:       numberIdx !== -1 ? r[numberIdx]?.trim() : "",
+              neighborhood: neighborhoodIdx !== -1 ? r[neighborhoodIdx]?.trim() : "",
+              complement:   complementIdx !== -1 ? r[complementIdx]?.trim() : "",
+              phone:        phoneIdx !== -1 ? r[phoneIdx]?.trim() : "",
+              notes:        combined || "",
+            };
+          });
+
+        if (toInsert.length > 0) {
+          const { error } = await supabase.from("clients").insert(toInsert);
+          if (error) { console.error("Erro ao inserir lote:", error); failed += toInsert.length; }
+          else done += toInsert.length;
+        }
+
+        setImportProgress({ done: Math.min(i + BATCH, rows.length), total: rows.length });
+      }
+
+      setImporting(false);
+      setImportProgress(null);
+      alert(`✅ Importação concluída!\n• Inseridos: ${done}\n• Ignorados (já existiam): ${skipped}\n• Com erro: ${failed}`);
+      loadClients();
+    };
+
+    reader.readAsText(file, "UTF-8");
+  };
+
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
@@ -206,12 +334,26 @@ const Clients: React.FC = () => {
             <h2 className="text-2xl font-bold text-slate-800">Cadastro de Clientes</h2>
             <p className="mt-1 text-sm text-slate-500">Gerencie os clientes da sua base com visual azul e branco.</p>
           </div>
-          <button
-            onClick={openNew}
-            className="rounded-xl bg-primary-700 px-4 py-2.5 font-semibold text-white transition hover:bg-primary-800"
-          >
-            + Novo Cliente
-          </button>
+          <div className="flex gap-2 flex-wrap">
+            <label className={`rounded-xl px-4 py-2.5 font-semibold text-white transition cursor-pointer ${importing ? "bg-gray-400" : "bg-green-600 hover:bg-green-700"}`}>
+              {importing && importProgress
+                ? `Importando... ${importProgress.done}/${importProgress.total}`
+                : "⬆ Importar CSV"}
+              <input
+                type="file"
+                accept=".csv,.txt"
+                className="hidden"
+                disabled={importing}
+                onChange={handleImportCSV}
+              />
+            </label>
+            <button
+              onClick={openNew}
+              className="rounded-xl bg-primary-700 px-4 py-2.5 font-semibold text-white transition hover:bg-primary-800"
+            >
+              + Novo Cliente
+            </button>
+          </div>
         </div>
       </div>
 
