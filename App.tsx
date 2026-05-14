@@ -243,6 +243,12 @@ const App: React.FC = () => {
   const [cashFlow, setCashFlow] = useState<CashFlowEntry[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
 
+  const [showEscConfirm, setShowEscConfirm] = useState(false);
+  const [escConfirmTarget, setEscConfirmTarget] = useState<View | null>(null);
+
+  // Telas que precisam de confirmação antes de sair com ESC
+  const ESC_CONFIRM_VIEWS = new Set(["newQuote", "employee-new"]);
+
   // ESC key → volta para a tela anterior
   const ESC_BACK_MAP: Partial<Record<string, View>> = {
     newQuote:     "quotes",
@@ -266,13 +272,18 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      // Não navega se o usuário estiver digitando em um campo
       const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
-      // Não navega se houver um modal aberto (elemento com z-50 no DOM)
       if (document.querySelector(".fixed.inset-0")) return;
-      const back = ESC_BACK_MAP[activeView as string];
-      if (back) setActiveView(back);
+      const isEmpEdit = typeof activeView === "string" && activeView.startsWith("employee-edit-");
+      const back = ESC_BACK_MAP[activeView as string] || (isEmpEdit ? "employees" as View : null);
+      if (!back) return;
+      if (ESC_CONFIRM_VIEWS.has(activeView as string) || isEmpEdit) {
+        setEscConfirmTarget(back);
+        setShowEscConfirm(true);
+      } else {
+        setActiveView(back);
+      }
     };
     window.addEventListener("keydown", handleEsc);
     return () => window.removeEventListener("keydown", handleEsc);
@@ -794,6 +805,30 @@ if (
 
         <main className="flex-1 overflow-y-auto p-4">{renderView()}</main>
       </div>
+
+      {/* Confirmação de saída via ESC */}
+      {showEscConfirm && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60">
+          <div className="bg-white rounded-2xl p-6 shadow-2xl max-w-sm w-full mx-4 text-center">
+            <p className="text-lg font-semibold text-gray-800 mb-1">Sair sem salvar?</p>
+            <p className="text-sm text-gray-500 mb-5">As alterações feitas ainda não foram salvas.</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowEscConfirm(false)}
+                className="flex-1 px-4 py-2 border rounded-xl hover:bg-gray-50 text-sm font-medium"
+              >
+                Continuar editando
+              </button>
+              <button
+                onClick={() => { setShowEscConfirm(false); if (escConfirmTarget) setActiveView(escConfirmTarget); }}
+                className="flex-1 px-4 py-2 bg-red-500 text-white rounded-xl hover:bg-red-600 text-sm font-medium"
+              >
+                Sair sem salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -393,6 +393,15 @@ const ProductModal: React.FC<ProductModalProps> = ({
   currentUser: _currentUser,
 }) => {
   const initialHourlyRate = Number((product as any)?.hourlyRate ?? 0);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.stopPropagation(); setShowExitConfirm(true); }
+    };
+    window.addEventListener("keydown", handle, true);
+    return () => window.removeEventListener("keydown", handle, true);
+  }, []);
 
   const [name, setName] = useState(String((product as any)?.name || ""));
   const [category, setCategory] = useState(
@@ -1081,6 +1090,19 @@ const ProductModal: React.FC<ProductModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+      {showExitConfirm && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60">
+          <div className="bg-white rounded-2xl p-6 shadow-2xl max-w-sm w-full mx-4 text-center">
+            <p className="text-lg font-semibold text-gray-800 mb-1">Sair sem salvar?</p>
+            <p className="text-sm text-gray-500 mb-5">As alterações feitas ainda não foram salvas.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowExitConfirm(false)} className="flex-1 px-4 py-2 border rounded-xl hover:bg-gray-50 text-sm font-medium">Continuar editando</button>
+              <button onClick={() => { setShowExitConfirm(false); handleSubmit(); }} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 text-sm font-medium">Salvar</button>
+              <button onClick={() => { setShowExitConfirm(false); onClose(); }} className="flex-1 px-4 py-2 bg-red-500 text-white rounded-xl hover:bg-red-600 text-sm font-medium">Sair</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="max-h-[94vh] w-full max-w-7xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-5">
           <div>

@@ -65,6 +65,16 @@ const parseCurrencyInput = (value: string) => {
 };
 
 export default function InventoryForm({ id, onClose }: Props) {
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.stopPropagation(); setShowExitConfirm(true); }
+    };
+    window.addEventListener("keydown", handle, true);
+    return () => window.removeEventListener("keydown", handle, true);
+  }, []);
+
   const [name, setName] = useState("");
   const [unit, setUnit] = useState("un");
   const [minStock, setMinStock] = useState(0);
@@ -644,6 +654,19 @@ if (inventoryId) {
 
   return (
 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-[1px]">
+      {showExitConfirm && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60">
+          <div className="bg-white rounded-2xl p-6 shadow-2xl max-w-sm w-full mx-4 text-center">
+            <p className="text-lg font-semibold text-gray-800 mb-1">Sair sem salvar?</p>
+            <p className="text-sm text-gray-500 mb-5">As alterações feitas ainda não foram salvas.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowExitConfirm(false)} className="flex-1 px-4 py-2 border rounded-xl hover:bg-gray-50 text-sm font-medium">Continuar editando</button>
+              <button onClick={() => { setShowExitConfirm(false); handleSave(); }} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 text-sm font-medium">Salvar</button>
+              <button onClick={() => { setShowExitConfirm(false); onClose(); }} className="flex-1 px-4 py-2 bg-red-500 text-white rounded-xl hover:bg-red-600 text-sm font-medium">Sair</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="w-full max-w-5xl overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-2xl">
         <div className="bg-gradient-to-r from-primary-700 to-primary-600 px-8 py-6 text-white">
           <h3 className="text-3xl font-bold">{id ? "Editar Material" : "Novo Material"}</h3>
