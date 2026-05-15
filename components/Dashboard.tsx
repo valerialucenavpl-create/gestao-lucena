@@ -895,12 +895,18 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
             return (
               <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
                 {rows.map((row) => {
-                  const isOverdue = !row.isPaid && row.date && row.date < today;
+                  const daysUntil = row.date
+                    ? Math.round((new Date(row.date + "T00:00:00").getTime() - new Date(today + "T00:00:00").getTime()) / 86400000)
+                    : null;
                   const { label, cls } = row.isPaid
-                    ? { label: "Pago",     cls: "bg-green-100 text-green-700" }
-                    : isOverdue
-                      ? { label: "Vencida",  cls: "bg-red-100 text-red-700" }
-                      : { label: "A Vencer", cls: "bg-blue-100 text-blue-700" };
+                    ? { label: "Pago",           cls: "bg-green-100 text-green-700 border border-green-300" }
+                    : daysUntil === null || daysUntil < 0
+                      ? { label: "Vencida",        cls: "bg-red-100 text-red-700 border border-red-400 font-bold" }
+                      : daysUntil === 0
+                        ? { label: "Vence hoje",   cls: "bg-blue-100 text-blue-700 border border-blue-400 font-bold" }
+                        : daysUntil <= 3
+                          ? { label: `${daysUntil}d`,  cls: "bg-yellow-100 text-yellow-800 border border-yellow-400 font-bold" }
+                          : { label: "A Vencer",   cls: "bg-green-100 text-green-700 border border-green-300" };
                   return (
                     <div key={row.key} className="border border-gray-100 rounded-lg p-3 bg-gray-50/60">
                       <div className="flex items-start justify-between gap-1 mb-1">
