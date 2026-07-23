@@ -84,17 +84,16 @@ const Payables: React.FC = () => {
     loadCategories();
   }, []);
 
-  const loadPayables = async () => {
-    setLoading(true);
+  const loadPayables = async (showLoader = true) => {
+    if (showLoader) setLoading(true);
     const { data: authData } = await supabase.auth.getUser();
-    if (!authData.user) { setLoading(false); return; }
+    if (!authData.user) { if (showLoader) setLoading(false); return; }
     const { data } = await supabase
       .from("payables")
       .select("*")
-      .eq("user_id", authData.user.id)
       .order("due_date", { ascending: true });
     if (data) setPayables(data.map(normalizeRow));
-    setLoading(false);
+    if (showLoader) setLoading(false);
   };
 
   const loadCategories = async () => {
@@ -106,7 +105,7 @@ const Payables: React.FC = () => {
     if (!window.confirm("Excluir esta conta a pagar?")) return;
     const { data: authData } = await supabase.auth.getUser();
     if (!authData.user) return;
-    await supabase.from("payables").delete().eq("id", id).eq("user_id", authData.user.id);
+    await supabase.from("payables").delete().eq("id", id);
     setPayables((prev) => prev.filter((p) => p.id !== id));
   };
 
@@ -275,6 +274,7 @@ const Payables: React.FC = () => {
           onPaid={(updated) => {
             setPayables((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
             setShowPayment(false);
+            loadPayables(false);
           }}
         />
       )}
@@ -531,6 +531,10 @@ const PaymentModal: React.FC<{
       const updated: Payable = { ...payable };
       if (selectedInst === "full" || payable.installments.length === 0) {
         updated.status = "paid";
+        // marca todas as parcelas como pagas também
+        if (payable.installments.length > 0) {
+          updated.installments = payable.installments.map((i) => ({ ...i, paid: true, paidDate: paymentDate }));
+        }
       } else {
         updated.installments = payable.installments.map((i) =>
           i.id === selectedInst ? { ...i, paid: true, paidDate: paymentDate } : i
@@ -538,13 +542,27 @@ const PaymentModal: React.FC<{
         updated.status = updated.installments.every((i) => i.paid) ? "paid" : "partial";
       }
 
-      const { error } = await supabase
+      const { data: updatedRows, error } = await supabase
         .from("payables")
         .update({ status: updated.status, installments: updated.installments })
         .eq("id", payable.id)
-        .eq("user_id", authData.user.id);
+        .select();
 
       if (error) { alert(`Erro ao atualizar conta: ${error.message}`); return; }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        // Tenta sem filtro de ID para detectar problema de permissão
+        const { data: check } = await supabase
+          .from("payables")
+          .select("id, status")
+          .eq("id", payable.id)
+          .single();
+        const msg = check
+          ? `A conta existe mas o update não foi salvo (status atual: ${check.status}). Verifique as permissões RLS no Supabase.`
+          : `Conta não encontrada no banco (id: ${payable.id}). Recarregue a página e tente novamente.`;
+        alert(`Aviso: ${msg}`);
+        return;
+      }
 
       alert("Pagamento registrado e lançado no Caixa automaticamente ✅");
       onPaid(updated);

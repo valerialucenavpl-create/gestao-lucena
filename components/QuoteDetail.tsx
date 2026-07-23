@@ -13,6 +13,7 @@ import {
 } from "../types";
 import { calculateQuoteCompositionLineCost } from "../utils/materialFormulas";
 import { createCashFlowEntry } from "../services/cashFlowServices";
+import { generateQuotePDF } from "../utils/generateQuotePDF";
 import {
   formatMoneyInputBR,
   parseMoneyInputBR,
@@ -87,6 +88,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
   rawMaterials,
   products,
   variableExpenses = [],
+  companySettings,
   cashFlow = [],
   onUpdateQuote,
   onCashFlowAdded,
@@ -95,6 +97,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
   const [localQuote, setLocalQuote] = useState<Quote>(() => structuredClone(quote));
   const [saving, setSaving] = useState(false);
   const [savedOk, setSavedOk] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
   const [showFinances, setShowFinances] = useState(false);
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [paymentTab, setPaymentTab] = useState<"receitas" | "despesas">("receitas");
@@ -183,6 +186,25 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
     setSaving(false);
   };
 
+  // ── Visualizar / Imprimir PDF do orçamento ──
+  const handleViewPdf = async () => {
+    setGeneratingPdf(true);
+    try {
+      const doc = await generateQuotePDF(localQuote, companySettings, {
+        hidePrice: false,
+        hideMeasures: false,
+        hideDetailedDescription: false,
+      });
+      const url = doc.output("bloburl");
+      window.open(url.toString(), "_blank");
+    } catch (err) {
+      console.error(err);
+      alert("Não foi possível gerar o PDF do orçamento.");
+    } finally {
+      setGeneratingPdf(false);
+    }
+  };
+
   // ── Save payment ──
   const handleSavePayment = async () => {
     if (payAmount <= 0) return alert("Informe um valor válido.");
@@ -248,15 +270,25 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
           <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
           Voltar para Orçamentos
         </button>
-        {saving ? (
-          <span style={{ fontSize: 13, color: "#94a3b8", fontWeight: 600 }}>Salvando…</span>
-        ) : savedOk ? (
-          <span style={{ fontSize: 13, color: "#22c55e", fontWeight: 700 }}>✓ Salvo</span>
-        ) : isDirty ? (
-          <button onClick={handleSave} disabled={saving} style={{ background: "#22c55e", color: "#fff", border: "none", borderRadius: 8, padding: "8px 20px", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
-            Salvar alterações
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            onClick={handleViewPdf}
+            disabled={generatingPdf}
+            style={{ display: "flex", alignItems: "center", gap: 6, background: "#252b45", border: "1px solid #3d4166", borderRadius: 8, padding: "8px 16px", color: "#c8d0e7", fontWeight: 600, fontSize: 14, cursor: generatingPdf ? "default" : "pointer", opacity: generatingPdf ? 0.7 : 1 }}
+          >
+            <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            {generatingPdf ? "Gerando…" : "Imprimir / PDF"}
           </button>
-        ) : null}
+          {saving ? (
+            <span style={{ fontSize: 13, color: "#94a3b8", fontWeight: 600 }}>Salvando…</span>
+          ) : savedOk ? (
+            <span style={{ fontSize: 13, color: "#22c55e", fontWeight: 700 }}>✓ Salvo</span>
+          ) : isDirty ? (
+            <button onClick={handleSave} disabled={saving} style={{ background: "#22c55e", color: "#fff", border: "none", borderRadius: 8, padding: "8px 20px", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+              Salvar alterações
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {/* ── CARD PRINCIPAL ── */}
@@ -372,7 +404,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
                         <div style={{ fontWeight: 700, color: "#e8eaf0", fontSize: 15, marginBottom: 5 }}>{item.productName}</div>
                         {(wDisp || hDisp) && (
                           <div style={{ fontSize: 12, color: "#8892b0", marginBottom: 3 }}>
-                            📐 {[wDisp, hDisp].filter(Boolean).join(" × ")}
+                            📐 {[hDisp, wDisp].filter(Boolean).join(" × ")}
                           </div>
                         )}
                         {item.selectedColor && item.selectedColor !== "Padrão" && (

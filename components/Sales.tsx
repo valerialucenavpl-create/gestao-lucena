@@ -1,10 +1,31 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { CashFlowEntry, Client, Quote, Sale } from "../types";
+import { deleteSale } from "../services/salesServices";
 import {
   formatMoneyInputBR,
   parseMoneyInputBR,
   sanitizeMoneyInputBR,
 } from "../utils/money";
+
+// Key for localStorage: stores IDs of virtual sales (from quotes) that were deleted
+const DELETED_VIRTUAL_KEY = "deleted_virtual_sales";
+
+function getDeletedVirtualIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_VIRTUAL_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function addDeletedVirtualId(id: string) {
+  try {
+    const set = getDeletedVirtualIds();
+    set.add(id);
+    localStorage.setItem(DELETED_VIRTUAL_KEY, JSON.stringify([...set]));
+  } catch {}
+}
 
 interface SalesProps {
   sales?: Sale[] | null;
@@ -12,6 +33,7 @@ interface SalesProps {
   clients?: Client[] | null;
   cashFlow?: CashFlowEntry[] | null;
   onOpenQuote?: (quoteId: string) => void;
+  onDeleteSale?: (saleId: string) => void;
 }
 type FastStatus =
   | "Todos"
@@ -117,7 +139,7 @@ function getSaleAmount(sale: any): number {
   function getSaleCustomerName(sale: any, quote?: Quote): string {
   return toSafeText(sale?.customerName) || toSafeText(quote?.customerName);
 }
-const Sales: React.FC<SalesProps> = ({ sales, quotes, cashFlow, onOpenQuote }) => {
+const Sales: React.FC<SalesProps> = ({ sales, quotes, cashFlow, onOpenQuote, onDeleteSale }) => {
   const safeSales = Array.isArray(sales) ? sales : [];
   const safeQuotes = Array.isArray(quotes) ? quotes : [];
   const safeCashFlow = Array.isArray(cashFlow) ? cashFlow : [];
@@ -132,32 +154,12 @@ const Sales: React.FC<SalesProps> = ({ sales, quotes, cashFlow, onOpenQuote }) =
   const [editStatus, setEditStatus] = useState<Exclude<FastStatus, "Todos">>("Aguardando");
 
   useEffect(() => {
-    if (safeSales.length > 0) {
-      setLocalSales(safeSales);
-      return;
-    }
-
-    // Tenta carregar status personalizados do localStorage
-    let savedStatuses: Record<string, string> = {};
-    try {
-      const raw = localStorage.getItem("local_sales_statuses");
-      if (raw) savedStatuses = JSON.parse(raw);
-    } catch {}
-
-    const salesFromApprovedQuotes: Sale[] = safeQuotes
-      .filter((q) => q.status !== "Recusado")
-      .map((q) => ({
-        id: `quote-${q.id}`,
-        quoteId: String(q.id),
-        customerName: q.customerName,
-        salesperson: q.salesperson,
-        saleDate: new Date(q.date),
-        amount: Number(q.totalPrice || 0),
-        status: (savedStatuses[`quote-${q.id}`] || q.status || "Pendente") as any,
-      }));
-
-    setLocalSales(salesFromApprovedQuotes);
-  }, [safeSales, safeQuotes]);
+    const deletedIds = getDeletedVirtualIds();
+    // Always use DB sales — filter out locally-deleted IDs for this session
+    setLocalSales(
+      safeSales.filter((s) => !deletedIds.has(String((s as any).id)))
+    );
+  }, [safeSales]);
 
   const getQuote = (quoteId: string) => safeQuotes.find((q: any) => String(q.id) === String(quoteId));
   const getFinancialInfo = (sale: Sale) => {
@@ -271,12 +273,33 @@ const getComputedStatus = (sale: Sale): Exclude<FastStatus, "Todos"> => {
     setEditingSale(null);
   };
 
-  const handleDelete = (saleId: string) => {
+  const handleDelete = async (saleId: string) => {
     const ok = window.confirm("Deseja realmente excluir esta venda da lista?");
     if (!ok) return;
 
-    setLocalSales((prev) => prev.filter((sale: any) => sale.id !== saleId));
     setMenuOpenId(null);
+
+    const isVirtual = saleId.startsWith("quote-");
+
+    if (isVirtual) {
+      // Virtual sale (generated from quote) — persist deletion in localStorage
+      addDeletedVirtualId(saleId);
+    } else {
+      // Real DB sale — delete from Supabase
+      const numericId = Number(saleId);
+      if (!isNaN(numericId)) {
+        const result = await deleteSale(numericId);
+        if (!result.ok) {
+          alert("Erro ao excluir venda. Tente novamente.");
+          return;
+        }
+      }
+    }
+
+    // Remove from local state immediately
+    setLocalSales((prev) => prev.filter((sale: any) => String(sale.id) !== saleId));
+    // Notify parent to update its sales list
+    onDeleteSale?.(saleId);
   };
 
 

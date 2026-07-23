@@ -14,6 +14,7 @@ type DbUserRow = {
   email: string;
   role: "Admin" | "Sales" | "Finance";
   monthly_goal?: number | null;
+  avatar?: string | null;
   created_at?: string;
 };
 
@@ -101,9 +102,36 @@ export const getUserProfile = async (
         row.role === "Sales" || row.role === "Finance"
           ? Number(row.monthly_goal ?? 0)
           : undefined,
+      avatar: row.avatar || `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(row.name || row.email)}`,
     };
 
     return { ok: true, data: mapped };
+  } catch (e) {
+    return { ok: false, error: e };
+  }
+};
+
+/**
+ * 🔹 Atualizar perfil de usuária (role, nome, meta) na tabela public.users
+ */
+export const updateUserProfile = async (
+  authUserId: string,
+  fields: { name?: string; role?: "Admin" | "Sales" | "Finance"; monthlyGoal?: number; avatar?: string }
+): Promise<{ ok: boolean; error?: any }> => {
+  try {
+    const payload: Record<string, unknown> = {};
+    if (fields.name !== undefined) payload.name = fields.name;
+    if (fields.role !== undefined) payload.role = fields.role;
+    if (fields.monthlyGoal !== undefined) payload.monthly_goal = fields.monthlyGoal;
+    if ((fields as any).avatar !== undefined) payload.avatar = (fields as any).avatar;
+
+    const { error } = await supabase
+      .from(USERS_TABLE)
+      .update(payload)
+      .eq("auth_user_id", authUserId);
+
+    if (error) return { ok: false, error };
+    return { ok: true };
   } catch (e) {
     return { ok: false, error: e };
   }
@@ -392,7 +420,8 @@ export const createUser = async (payload: {
         };
       }
 
-      // Projeto com confirmação de e-mail ativa: perfil será criado no primeiro login da usuária.
+      // Email confirmation active: try saving profile with admin client so it appears in the list immediately.
+      await upsertUserProfileWithFallback(authUserId, supabase);
       return {
         ok: true as const,
         data: {

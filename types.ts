@@ -6,10 +6,12 @@ export type View =
   | "quotes"
   | "sales"
   | "clients"
+  | "agenda"
   | "products"
   | "inventory"
   | "cashflow"
   | "payables"
+  | "receivables"
   | "financials"
   | "employees"
   | "employee-new"
@@ -53,6 +55,7 @@ export interface InventoryItem {
   stockQuantity?: number;
   standardSize?: string;
   purchaseLengthMeters?: number;
+  jateadoPrice?: number;
 }
 
 // ---------------------------------------------
@@ -73,6 +76,10 @@ export type ProductCompositionQuantityMode = "normal" | "made_to_measure";
 export interface ProductCompositionMeasureFormula {
   target: ProductCompositionAxis;
   intervalMm: number;
+  // Percentual do vão (0-100) que esta peça ocupa antes de dividir pelo
+  // intervalMm. Usado para portões com 2 lambris de tamanhos diferentes,
+  // onde cada um cobre uma fração da altura total.
+  spanPercent?: number;
 }
 
 export interface ProductCompositionItem {
@@ -97,6 +104,9 @@ export interface Product {
   id: string;
   name: string;
   desiredProfitMargin: number;
+  marginByColor?: Record<string, number>;
+  minProfitValue?: number;
+  fixedSalePrice?: number;
   composition: ProductCompositionItem[];
   category?: string;
   productCategory?: string;
@@ -116,6 +126,14 @@ export interface Product {
   helperCount?: number;
   helperHours?: number;
   helperRate?: number;
+  // Mão de obra — instalação
+  instProfCount?: number;
+  instProfInstHours?: number;
+  instProfRate?: number;
+  instHelpCount?: number;
+  instHelpInstHours?: number;
+  instHelpRate?: number;
+  laborSector?: string;
   fixedCostRate?: number;
   quantityReference?: number;
   selectedCategoryColor?: string;
@@ -176,6 +194,23 @@ export type UnitOfMeasure = UnitType;
 // ---------------------------------------------
 // Itens do Orçamento
 // ---------------------------------------------
+export interface QuoteItemMaterialLine {
+  name: string;
+  color: string;
+  unit: string;
+  quantity: number;
+  unitCost: number;
+  totalCost: number;
+}
+
+export interface QuoteItemLaborLine {
+  role: string;
+  count: number;
+  hours: number;
+  rate: number;
+  total: number;
+}
+
 export interface QuoteItem {
   id: string;
   productId: string;
@@ -189,6 +224,9 @@ export interface QuoteItem {
   cost: number;
   materialCost?: number;
   laborCost?: number;
+  fixedCostValue?: number;
+  materialBreakdown?: QuoteItemMaterialLine[];
+  laborBreakdown?: QuoteItemLaborLine[];
 }
 // ---------------------------------------------
 // Orçamentos
@@ -259,6 +297,7 @@ export interface CashFlowEntry {
   subcategory?: string;
   description: string;
   date: string;
+  createdAt?: string;
 }
 
 // ---------------------------------------------
@@ -302,6 +341,37 @@ export interface Payable {
   installments: PayableInstallment[];
   notes: string;
   status: "pending" | "partial" | "paid";
+  createdAt?: string;
+}
+
+// ---------------------------------------------
+// Agenda
+// ---------------------------------------------
+export type AgendaSegment = "Vidro/Esquadria" | "Mármore/Granito" | "Portão";
+
+export type AgendaServiceType =
+  | "Medição"
+  | "Instalação"
+  | "Entrega"
+  | "Orçamento"
+  | "Visita"
+  | "Manutenção";
+
+export type AgendaStatus = "Pendente" | "Confirmado" | "Concluído" | "Cancelado";
+
+export interface Agendamento {
+  id: string;
+  clientName: string;
+  clientId?: string;
+  phone?: string;
+  sellerName: string;
+  segment: AgendaSegment;
+  serviceType?: AgendaServiceType;
+  description: string;
+  date: string; // YYYY-MM-DD
+  time?: string; // HH:mm
+  address?: string;
+  status: AgendaStatus;
   createdAt?: string;
 }
 

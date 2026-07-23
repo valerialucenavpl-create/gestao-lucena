@@ -117,11 +117,48 @@ const parseMoneyBR = (v: string) => {
 const formatBRL = (n: number) =>
   Number(n || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
+// Arredonda para 2 casas decimais evitando erros de ponto flutuante (ex.: 160.18499999999999 -> 160.19)
+const round2 = (n: number) => Math.round((n + 1e-9) * 100) / 100;
+
+// Tabela INSS 2026 (Simples Nacional - Anexos I/II/III, sem INSS patronal)
+const INSS_TETO_2026 = 8475.55;
+const INSS_FAIXAS_2026 = [
+  { limite: 1621.0, aliquota: 0.075 },
+  { limite: 2902.84, aliquota: 0.09 },
+  { limite: 4354.27, aliquota: 0.12 },
+  { limite: INSS_TETO_2026, aliquota: 0.14 },
+];
+
+// INSS progressivo: cada faixa do salário paga sua própria alíquota
+const calcularINSS = (salarioBruto: number) => {
+  if (salarioBruto <= 0) return 0;
+
+  const base = Math.min(salarioBruto, INSS_TETO_2026);
+  let total = 0;
+  let limiteAnterior = 0;
+
+  for (const faixa of INSS_FAIXAS_2026) {
+    if (base <= limiteAnterior) break;
+    const valorFaixa = Math.min(base, faixa.limite) - limiteAnterior;
+    total += valorFaixa * faixa.aliquota;
+    limiteAnterior = faixa.limite;
+  }
+
+  return round2(total);
+};
+
+// IRRF: por enquanto não calculado (placeholder para regra futura)
+const calcularIRRF = () => 0;
+
+const CLT_OPTIONS = ["Sim", "Não"] as const;
+
 const labelCls = "text-sm font-semibold text-gray-800 mb-1";
 const inputCls =
   "w-full p-2 rounded border border-black bg-white text-gray-900 placeholder-gray-400 " +
   "focus:outline-none focus:ring-0 focus:border-black";
 const EmployeeForm: React.FC<Props> = ({ id, setActiveView }) => {
+  const [saving, setSaving] = useState(false);
+
   // DADOS PESSOAIS
   const [name, setName] = useState("");
   const [birth, setBirth] = useState("");
@@ -140,13 +177,19 @@ const EmployeeForm: React.FC<Props> = ({ id, setActiveView }) => {
   // SALÁRIOS
   const [baseSalary, setBaseSalary] = useState("");
   const [netSalary, setNetSalary] = useState("");
+  const [isClt, setIsClt] = useState(true);
 
   const baseNum = useMemo(() => parseMoneyBR(baseSalary), [baseSalary]);
   const netNum = useMemo(() => parseMoneyBR(netSalary), [netSalary]);
 
+  // Sem carteira assinada: por padrão líquido = bruto (até o usuário editar)
+  useEffect(() => {
+    if (!isClt) {
+      setNetSalary((prev) => prev || baseSalary);
+    }
+  }, [isClt]);
+
   const monthlyHours = 240;
-  const hourValue = useMemo(() => (netNum > 0 ? netNum / monthlyHours : 0), [netNum]);
-  const minuteValue = useMemo(() => hourValue / 60, [hourValue]);
 
   // previsão de férias = admissão + 1 ano (VISUAL apenas)
   const vacationForecast = useMemo(() => {
@@ -158,30 +201,60 @@ const EmployeeForm: React.FC<Props> = ({ id, setActiveView }) => {
   }, [admission]);
 
   // ✅ CUSTOS AUTOMÁTICOS (baseado no SALÁRIO BASE)
+  // Simples Nacional (Anexos I/II/III): INSS patronal já está embutido no DAS, não entra aqui.
   const costs = useMemo(() => {
     const base = baseNum;
 
-    const inss_value = base * 0.09;
-    const inss_employer = base * 0.09;
-    const fgts = base * 0.08;
-    const fgts_fine_40 = fgts * 0.4;
-    const thirteenth_salary = base / 12;
-    const vacation_extra = (base / 3) / 12;
+    // 13º e 1/3 de férias são devidos em ambos os regimes (CLT ou não)
+    const thirteenth_salary = round2(base / 12);
+    const vacation_extra = round2(base / 3 / 12);
 
-    const total_monthly_cost =
-      base + inss_employer + fgts + fgts_fine_40 + thirteenth_salary + vacation_extra;
+    if (isClt) {
+      const inss_value = calcularINSS(base);
+      const irrf_value = calcularIRRF();
+      const net_salary = round2(base - inss_value - irrf_value);
+      const fgts = round2(base * 0.08);
+      const fgts_fine_40 = round2(fgts * 0.4);
+
+      const total_monthly_cost = round2(
+        base + fgts + fgts_fine_40 + thirteenth_salary + vacation_extra
+      );
+
+      return {
+        monthly_hours: monthlyHours,
+        inss_value,
+        irrf_value,
+        net_salary,
+        fgts,
+        fgts_fine_40,
+        thirteenth_salary,
+        vacation_extra,
+        total_monthly_cost,
+      };
+    }
+
+    // Sem carteira assinada: sem INSS, sem FGTS, sem multa de 40%
+    const total_monthly_cost = round2(base + thirteenth_salary + vacation_extra);
 
     return {
       monthly_hours: monthlyHours,
-      inss_value,
-      inss_employer,
-      fgts,
-      fgts_fine_40,
+      inss_value: 0,
+      irrf_value: 0,
+      net_salary: netNum,
+      fgts: 0,
+      fgts_fine_40: 0,
       thirteenth_salary,
       vacation_extra,
       total_monthly_cost,
     };
-  }, [baseNum]);
+  }, [baseNum, netNum, isClt]);
+
+  // Valor hora baseado no CUSTO TOTAL (inclui todos os encargos CLT)
+  const hourValue = useMemo(
+    () => (costs.total_monthly_cost > 0 ? costs.total_monthly_cost / monthlyHours : 0),
+    [costs.total_monthly_cost]
+  );
+  const minuteValue = useMemo(() => hourValue / 60, [hourValue]);
 
   // LOAD (edição)
   useEffect(() => {
@@ -211,6 +284,8 @@ const EmployeeForm: React.FC<Props> = ({ id, setActiveView }) => {
         setSector(data.department || "");
         setAdmission(data.admission_date ? isoToBR(String(data.admission_date)) : "");
         setDependents(data.dependents || "");
+
+        setIsClt(data.is_clt === false ? false : true);
 
         setBaseSalary(
           typeof data.base_salary === "number"
@@ -263,6 +338,7 @@ const EmployeeForm: React.FC<Props> = ({ id, setActiveView }) => {
     };
   };
   const handleSave = async () => {
+    if (saving) return;
     if (!name || !role || !sector) {
       alert("Preencha nome, cargo e setor");
       return;
@@ -284,32 +360,38 @@ const EmployeeForm: React.FC<Props> = ({ id, setActiveView }) => {
       dependents,
 
       base_salary: baseNum,
-      net_salary: netNum,
+      net_salary: isClt ? costs.net_salary : netNum,
       hour_value: hourValue,
       minute_value: minuteValue,
+      is_clt: isClt,
 
       // custos (se existirem as colunas no supabase, ele salva; se não, ele remove sozinho)
       monthly_hours: costs.monthly_hours,
       inss_value: costs.inss_value,
-      inss_employer: costs.inss_employer,
       fgts: costs.fgts,
       fgts_fine_40: costs.fgts_fine_40,
       thirteenth_salary: costs.thirteenth_salary,
+      vacation_extra: costs.vacation_extra,
       total_monthly_cost: costs.total_monthly_cost,
     };
 
     // limpa undefined para não atrapalhar
     Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
 
-    const r = await saveWithAutoDropUnknown(payload);
+    setSaving(true);
+    try {
+      const r = await saveWithAutoDropUnknown(payload);
 
-    if (!r.ok) {
-      const msg = (r as any).error?.message || "Erro ao salvar";
-      alert(`Erro ao salvar: ${msg}`);
-      return;
+      if (!r.ok) {
+        const msg = (r as any).error?.message || "Erro ao salvar";
+        alert(`Erro ao salvar: ${msg}`);
+        return;
+      }
+
+      goBack();
+    } finally {
+      setSaving(false);
     }
-
-    goBack();
   };
 
   return (
@@ -320,7 +402,8 @@ const EmployeeForm: React.FC<Props> = ({ id, setActiveView }) => {
         <button
           type="button"
           onClick={goBack}
-          className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300"
+          disabled={saving}
+          className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-50"
         >
           Cancelar
         </button>
@@ -404,6 +487,21 @@ const EmployeeForm: React.FC<Props> = ({ id, setActiveView }) => {
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
+            <div className={labelCls}>Possui carteira assinada (CLT)?</div>
+            <select
+              className={inputCls}
+              value={isClt ? "Sim" : "Não"}
+              onChange={(e) => setIsClt(e.target.value === "Sim")}
+            >
+              {CLT_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
             <div className={labelCls}>Salário base</div>
             <input
               className={inputCls}
@@ -418,10 +516,11 @@ const EmployeeForm: React.FC<Props> = ({ id, setActiveView }) => {
             <div className={labelCls}>Salário líquido</div>
             <input
               className={inputCls}
-              value={netSalary}
+              value={isClt ? formatBRL(costs.net_salary) : netSalary}
               onChange={(e) => setNetSalary(moneyMask(e.target.value))}
               placeholder="0.000,00"
               inputMode="numeric"
+              readOnly={isClt}
             />
           </div>
 
@@ -503,11 +602,6 @@ const EmployeeForm: React.FC<Props> = ({ id, setActiveView }) => {
           </div>
 
           <div>
-            <div className={labelCls}>INSS Patronal</div>
-            <input className={inputCls} value={formatBRL(costs.inss_employer)} readOnly />
-          </div>
-
-          <div>
             <div className={labelCls}>FGTS</div>
             <input className={inputCls} value={formatBRL(costs.fgts)} readOnly />
           </div>
@@ -538,7 +632,9 @@ const EmployeeForm: React.FC<Props> = ({ id, setActiveView }) => {
         </div>
 
         <div className="text-xs text-gray-500 mt-3">
-          * Cálculo automático: base + INSS patronal + FGTS + multa 40% + 13º + (1/3 férias / 12)
+          {isClt
+            ? "* Cálculo automático (CLT): salário bruto + FGTS + multa 40% + 13º + 1/3 de férias. INSS do empregado é progressivo (Simples Nacional: sem INSS patronal)."
+            : "* Sem carteira assinada: custo total = salário bruto + 13º + 1/3 de férias. Sem INSS, FGTS ou multa de 40%."}
         </div>
       </div>
 
@@ -546,16 +642,18 @@ const EmployeeForm: React.FC<Props> = ({ id, setActiveView }) => {
         <button
           type="button"
           onClick={goBack}
-          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+          disabled={saving}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
         >
           Cancelar
         </button>
         <button
           type="button"
           onClick={handleSave}
-          className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          disabled={saving}
+          className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          Salvar
+          {saving ? "Salvando..." : "Salvar"}
         </button>
       </div>
     </div>

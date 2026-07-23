@@ -9,18 +9,20 @@ import {
   VariableExpense,
   Quote,
   QuoteItem,
+  QuoteItemMaterialLine,
+  QuoteItemLaborLine,
 } from "../types";
 import { generateQuotePDF, PDFOptions, cityFromAddress } from "../utils/generateQuotePDF";
 import { Icon } from "./icons/Icon";
 
-import { HARDWARE_COLORS, HANDLES } from "../constants";
+import { HARDWARE_COLORS } from "../constants";
 import {
   formatMoneyInputBR,
   parseMoneyInputBR,
   sanitizeMoneyInputBR,
 } from "../utils/money";
 import { resolveMaterialPurchaseLengthMeters } from "../utils/materialPurchaseLength";
-import { calculateQuoteCompositionLineCost } from "../utils/productComposition";
+import { getCompositionLineBreakdown } from "../utils/productComposition";
 import { supabase } from "../services/supabase";
 
 const normalizeText = (value: unknown) =>
@@ -150,8 +152,14 @@ const getEffectiveMaterialUnitCost = (
   return safeRawCost;
 };
 
+// Só é "o vidro" de fato se for vendido por m² (a peça/chapa de vidro em si).
+// Sem essa checagem de unidade, acessórios cujo nome contém "VIDRO" (ex.:
+// "CUNHA VIDRO", vendida por unidade) eram confundidos com o vidro selecionado
+// no orçamento e tinham o preço errado (do vidro) usado no lugar do preço
+// próprio do acessório.
 const isGlassMaterial = (material: InventoryItem) =>
-  getMaterialUsageCategory(material).includes("VIDRO") || normalizeText(material?.name).includes("VIDRO");
+  String(material?.unit || "").trim() === "m²" &&
+  (getMaterialUsageCategory(material).includes("VIDRO") || normalizeText(material?.name).includes("VIDRO"));
 
 interface NewQuoteProps {
   currentUser: User;
@@ -166,10 +174,45 @@ interface NewQuoteProps {
   onCancel: () => void;
 }
 
+const normalizeMaterialVariant = (variant: Record<string, unknown>) => {
+  const name = String(
+    (variant as any)?.name ??
+      (variant as any)?.color_name ??
+      (variant as any)?.variant_name ??
+      (variant as any)?.color ??
+      ""
+  ).trim();
+  if (!name) return null;
+
+  const cost = Number(
+    (variant as any)?.cost ??
+      (variant as any)?.cost_price ??
+      (variant as any)?.price ??
+      (variant as any)?.value ??
+      0
+  );
+
+  const salePrice = Number(
+    (variant as any)?.salePrice ??
+      (variant as any)?.sale_price ??
+      (variant as any)?.price ??
+      (variant as any)?.cost ??
+      (variant as any)?.cost_price ??
+      (variant as any)?.value ??
+      0
+  );
+
+  return {
+    name,
+    cost: Number.isFinite(cost) ? cost : 0,
+    salePrice: Number.isFinite(salePrice) ? salePrice : 0,
+  };
+};
+
 const NewQuote: React.FC<NewQuoteProps> = ({
   currentUser,
   clients,
-  rawMaterials,
+  rawMaterials: rawMaterialsProp,
   products,
   variableExpenses,
   companySettings,
@@ -181,6 +224,71 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   // ============================
   //           STATES
   // ============================
+  // Busca matéria-prima diretamente do Supabase ao abrir o orçamento, em vez
+  // de confiar só na lista carregada uma única vez no início do app (App.tsx).
+  // Sem isso, edições recentes em Matéria-Prima (preço, metragem de compra
+  // por barra, cores) ficavam "presas" até o usuário recarregar a página,
+  // calculando o orçamento com dados desatualizados.
+  const [dbRawMaterials, setDbRawMaterials] = useState<InventoryItem[]>([]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadFreshRawMaterials = async () => {
+      const { data, error } = await supabase
+        .from("inventory")
+        .select("*, inventory_variants(*)");
+
+      if (error || !Array.isArray(data) || !active) return;
+
+      const normalized = data
+        .map((row: any) => {
+          const variantSource = Array.isArray(row?.inventory_variants)
+            ? row.inventory_variants
+            : [];
+          const colorVariants = variantSource
+            .map((variant: any) => normalizeMaterialVariant(variant))
+            .filter((variant): variant is { name: string; cost: number; salePrice: number } =>
+              Boolean(variant)
+            );
+
+          return {
+            ...row,
+            id: String(row?.id ?? ""),
+            name: String(row?.name ?? row?.material_name ?? "").trim(),
+            unit: String(row?.unit ?? "un") as InventoryItem["unit"],
+            usageCategory: row?.usageCategory ?? row?.usage_category ?? "",
+            purchaseLengthMeters: resolveMaterialPurchaseLengthMeters(
+              row as Record<string, unknown>
+            ),
+            colorVariants,
+          } as InventoryItem;
+        })
+        .filter((item) => Boolean(item.id) && Boolean(item.name));
+
+      if (active) setDbRawMaterials(normalized);
+    };
+
+    loadFreshRawMaterials();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Combina a lista do App.tsx (pode estar desatualizada) com a busca fresca
+  // feita acima; os dados recém-buscados sempre têm prioridade.
+  const rawMaterials = useMemo(() => {
+    const byId = new Map<string, InventoryItem>();
+    rawMaterialsProp.forEach((item) => byId.set(String(item.id), item));
+    dbRawMaterials.forEach((item) => {
+      const id = String(item.id);
+      const existing = byId.get(id);
+      byId.set(id, existing ? { ...existing, ...item } : item);
+    });
+    return Array.from(byId.values());
+  }, [rawMaterialsProp, dbRawMaterials]);
+  const [showMaterialDetail, setShowMaterialDetail] = useState(false);
+  const [showLaborDetail, setShowLaborDetail] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState<string>("");
   const [clientSearch, setClientSearch] = useState<string>("");
   const [clientDropdownOpen, setClientDropdownOpen] = useState<boolean>(false);
@@ -278,8 +386,8 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [isAlGridVisible, setIsAlGridVisible] = useState<boolean>(true);
   const [alSelectedProductId, setAlSelectedProductId] = useState<string>("");
   const [alProductSearch, setAlProductSearch] = useState<string>("");
-  const [alWidth, setAlWidth] = useState<number>(1200);
-  const [alHeight, setAlHeight] = useState<number>(1000);
+  const [alWidth, setAlWidth] = useState<number>(0);
+  const [alHeight, setAlHeight] = useState<number>(0);
   const [alQuantity, setAlQuantity] = useState<number>(1);
   const [alExtraService, setAlExtraService] = useState<number>(0);
   const [alExtraServiceInput, setAlExtraServiceInput] = useState<string>(formatMoneyInputBR(0));
@@ -297,11 +405,9 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [gwSelectedProduct, setGwSelectedProduct] = useState<string>("");
   const [gwGlassTypeId, setGwGlassTypeId] = useState<string>("");
   const [gwProductSearch, setGwProductSearch] = useState<string>("");
-  const [gwWidth, setGwWidth] = useState<number>(1200);
-  const [gwHeight, setGwHeight] = useState<number>(1000);
+  const [gwWidth, setGwWidth] = useState<number>(0);
+  const [gwHeight, setGwHeight] = useState<number>(0);
   const [gwTexture, setGwTexture] = useState<string>("Liso");
-  const [gwLockType, setGwLockType] = useState<string>("");
-  const [gwHandle, setGwHandle] = useState<string>("");
   const [gwHardwareColor, setGwHardwareColor] = useState<string>("Branco");
   const [gwExtraService, setGwExtraService] = useState<number>(0);
   const [gwExtraServiceInput, setGwExtraServiceInput] = useState<string>(formatMoneyInputBR(0));
@@ -399,39 +505,6 @@ const NewQuote: React.FC<NewQuoteProps> = ({
 
     return Array.from(new Set(colors));
   }, [selectedGlassType]);
-
-  const lockOptions = useMemo(() => {
-    const selectedProduct = products.find((p) => p.id === gwSelectedProduct);
-    const productCat = normalizeText(
-      selectedProduct?.productCategory || selectedProduct?.category || ""
-    );
-
-    const fromInventory = rawMaterials
-      .filter((m) => normalizeText(m.name).includes("FECHADURA"))
-      .filter((m) => {
-        const matCat = normalizeText((m as any).usageCategory || (m as any).usage_category || "");
-        if (!matCat) return true;
-        if (productCat.includes("alumin")) return matCat.includes("alumin");
-        if (productCat.includes("vidro")) return matCat.includes("vidro");
-        return true;
-      })
-      .map((m) => m.name);
-
-    const all = rawMaterials
-      .filter((m) => normalizeText(m.name).includes("FECHADURA"))
-      .map((m) => m.name);
-
-    const filtered = Array.from(new Set(fromInventory));
-    return filtered.length > 0 ? filtered : Array.from(new Set(all));
-  }, [rawMaterials, gwSelectedProduct, products]);
-
-  const handleOptions = useMemo(() => {
-    const fromInventory = rawMaterials
-      .filter((m) => normalizeText(m.name).includes("PUXADOR"))
-      .map((m) => m.name);
-    const fromConstants = HANDLES.map((h) => h.name);
-    return Array.from(new Set([...fromConstants, ...fromInventory]));
-  }, [rawMaterials]);
 
   const textureOptions = ["Padrão", "Jateado"];
 
@@ -560,7 +633,8 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     height: number,
     quantity: number,
     color: string,
-    glassTypeId?: string
+    glassTypeId?: string,
+    hardwareColor?: string
   ) => {
     const product = products.find((p) => p.id === productId);
     if (!product) return { price: 0, cost: 0, materialCost: 0, laborCost: 0 };
@@ -569,20 +643,29 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     const effectiveHeight = height + (product.heightIncrement || 0);
 
     let rawMaterialCost = 0;
+    const materialBreakdown: QuoteItemMaterialLine[] = [];
 
     product.composition.forEach((compItem) => {
       const material = rawMaterials.find((m) => m.id === compItem.materialId);
       if (!material) return;
 
+      const isGlass = isGlassMaterial(material);
       const costMaterial =
-        glassTypeId && isGlassMaterial(material)
+        glassTypeId && isGlass
           ? rawMaterials.find((m) => String(m.id) === glassTypeId) || material
           : material;
 
       const variants = getMaterialVariants(costMaterial);
 
+      // Vidro usa a cor do vidro; ferragens/acessórios do box usam a cor das
+      // ferragens (ex.: Preto) escolhida no assistente. Sem essa separação,
+      // a cor do vidro (ex.: Incolor) nunca batia com as variantes de
+      // ferragem (Branco/Preto/...) e o cálculo sempre caía na primeira
+      // variante cadastrada (Branco), ignorando a cor de ferragem escolhida.
+      const colorToMatch = !isGlass && hardwareColor ? hardwareColor : color;
+
       const colorVariant =
-        variants.find((cv) => normalizeText(getVariantName(cv)) === normalizeText(color)) ||
+        variants.find((cv) => normalizeText(getVariantName(cv)) === normalizeText(colorToMatch)) ||
         variants[0];
 
       if (!colorVariant) return;
@@ -592,31 +675,100 @@ const NewQuote: React.FC<NewQuoteProps> = ({
         getVariantCost(colorVariant)
       );
 
-      rawMaterialCost += calculateQuoteCompositionLineCost(
+      const lineBreakdown = getCompositionLineBreakdown(
         compItem,
         costMaterial,
         effectiveVariantCost,
         effectiveWidth,
         effectiveHeight
       );
+
+      rawMaterialCost += lineBreakdown.totalCost;
+
+      materialBreakdown.push({
+        name: costMaterial.name,
+        color: getVariantName(colorVariant),
+        unit: lineBreakdown.calculationUnit,
+        quantity: lineBreakdown.requiredQuantity,
+        unitCost: effectiveVariantCost,
+        totalCost: lineBreakdown.totalCost,
+      });
     });
+
+    const laborBreakdown: QuoteItemLaborLine[] = [];
+    const pushLabor = (role: string, count: number, hours: number, rate: number) => {
+      if (count > 0 && hours > 0 && rate > 0) {
+        laborBreakdown.push({ role, count, hours, rate, total: count * hours * rate });
+      }
+    };
+    pushLabor("Profissional (produção)", Number(product.professionalCount || 0), Number(product.professionalHours || 0), Number(product.professionalRate || 0));
+    pushLabor("Ajudante (produção)", Number(product.helperCount || 0), Number(product.helperHours || 0), Number(product.helperRate || 0));
+    pushLabor("Profissional (instalação)", Number(product.instProfCount || 0), Number(product.instProfInstHours || 0), Number(product.instProfRate || 0));
+    pushLabor("Ajudante (instalação)", Number(product.instHelpCount || 0), Number(product.instHelpInstHours || 0), Number(product.instHelpRate || 0));
 
     const laborCostUnit = (product.laborCost || 0);
     const totalCostOfGoods = rawMaterialCost + laborCostUnit;
 
-    const profitMargin = product.desiredProfitMargin / 100;
-    const variableCostMargin = totalVariablePercent / 100;
-    const fixedCostRate = (Number(product.fixedCostRate) > 0 ? Number(product.fixedCostRate) : globalFixedCostRate) / 100;
-    const markupDivisor = 1 - variableCostMargin - fixedCostRate - profitMargin;
+    // Margem por cor: se o produto tiver uma margem específica para a cor
+    // escolhida (ex.: inox/madeirado mais barata para compensar o custo do
+    // material), usa ela; senão cai na margem geral do produto.
+    const colorMarginEntry = product.marginByColor
+      ? Object.entries(product.marginByColor).find(
+          ([key]) => normalizeText(key) === normalizeText(color)
+        )
+      : undefined;
+    const effectiveMargin = colorMarginEntry ? colorMarginEntry[1] : product.desiredProfitMargin;
 
-    const unitPrice =
-      markupDivisor > 0 ? totalCostOfGoods / markupDivisor : totalCostOfGoods * 2;
+    const profitMargin = effectiveMargin / 100;
+    const variableCostMargin = totalVariablePercent / 100;
+    const fixedRate = Math.min((Number(product.fixedCostRate) > 0 ? Number(product.fixedCostRate) : globalFixedCostRate) / 100, 0.99);
+    // Passo 1: absorve custo fixo na base (método planilha Excel)
+    const costWithFixed = fixedRate > 0 ? totalCostOfGoods / (1 - fixedRate) : totalCostOfGoods;
+    const fixedCostUnit = costWithFixed - totalCostOfGoods;
+
+    // Preço final fixo (definido manualmente no cadastro do produto): quando
+    // configurado, substitui todo o cálculo por % + piso de lucro mínimo.
+    // Útil para acessórios (ex.: roldana) onde a usuária quer cobrar um
+    // valor redondo em vez do resultado quebrado da margem percentual.
+    const fixedSalePrice = Number(product.fixedSalePrice || 0);
+    let unitPrice: number;
+    if (fixedSalePrice > 0) {
+      unitPrice = fixedSalePrice;
+    } else {
+      // Passo 2: aplica variáveis + lucro sobre o custo absorvido
+      const variableAndProfitDivisor = 1 - variableCostMargin - profitMargin;
+      unitPrice =
+        variableAndProfitDivisor > 0 ? costWithFixed / variableAndProfitDivisor : costWithFixed * 2;
+
+      // Piso de lucro mínimo em R$ por unidade (ex.: portões pequenos onde a
+      // % normal gera pouco lucro em reais). Só entra em ação quando o lucro
+      // calculado pela margem percentual fica abaixo do mínimo configurado.
+      const minProfitValue = Number(product.minProfitValue || 0);
+      if (minProfitValue > 0) {
+        const profitPerUnit = unitPrice * profitMargin;
+        if (profitPerUnit < minProfitValue) {
+          const variableDivisor = 1 - variableCostMargin;
+          unitPrice =
+            variableDivisor > 0 ? (costWithFixed + minProfitValue) / variableDivisor : costWithFixed + minProfitValue;
+        }
+      }
+    }
 
     return {
       price: unitPrice * quantity,
       cost: totalCostOfGoods * quantity,
       materialCost: rawMaterialCost * quantity,
       laborCost: laborCostUnit * quantity,
+      fixedCostValue: fixedCostUnit * quantity,
+      materialBreakdown: materialBreakdown.map((line) => ({
+        ...line,
+        quantity: line.quantity * quantity,
+        totalCost: line.totalCost * quantity,
+      })),
+      laborBreakdown: laborBreakdown.map((line) => ({
+        ...line,
+        total: line.total * quantity,
+      })),
     };
   };
 
@@ -799,7 +951,7 @@ if (!ensureColorSelected()) return;
     const selectedProduct = products.find((product) => product.id === alSelectedProductId);
     if (!selectedProduct) return;
 
-    const { price: basePrice, cost: baseCost, materialCost: baseMat, laborCost: baseLab } = calculateItemPrice(
+    const { price: basePrice, cost: baseCost, materialCost: baseMat, laborCost: baseLab, fixedCostValue: baseFixed, materialBreakdown, laborBreakdown } = calculateItemPrice(
       alSelectedProductId,
       alWidth,
       alHeight,
@@ -829,6 +981,9 @@ if (!ensureColorSelected()) return;
       cost: totalCost,
       materialCost: baseMat,
       laborCost: baseLab,
+      fixedCostValue: baseFixed,
+      materialBreakdown,
+      laborBreakdown,
     };
 
     setItems((prev) => [...prev, newItem]);
@@ -846,37 +1001,43 @@ if (!ensureColorSelected()) return;
      const selectedProduct = products.find((p) => p.id === gwSelectedProduct);
     if (!selectedProduct) return;
 
-    const lockVariant = getMaterialVariants(rawMaterials.find((m) => m.name === gwLockType))[0];
-    const lockCost = lockOptions.includes(gwLockType)
-      ? Number(getVariantCost(lockVariant) || getVariantSalePrice(lockVariant) || 0)
-      : 0;
-
-    const handleFromConstant = HANDLES.find((h) => h.name === gwHandle);
-    const handleFromInventory = rawMaterials.find((m) => m.name === gwHandle);
-    const handleVariant = getMaterialVariants(handleFromInventory)[0];
-    const handleCost =
-      Number(handleFromConstant?.cost || 0) ||
-      Number(getVariantCost(handleVariant) || getVariantSalePrice(handleVariant) || 0);
-
-    const { price: basePrice, cost: baseCost, materialCost: baseMat, laborCost: baseLab } = calculateItemPrice(
+    const { price: basePrice, cost: baseCost, materialCost: baseMat, laborCost: baseLab, fixedCostValue: baseFixed, materialBreakdown, laborBreakdown } = calculateItemPrice(
       gwSelectedProduct,
       gwWidth,
       gwHeight,
       gwQuantity,
       selectedColor,
-      gwGlassTypeId
+      gwGlassTypeId,
+      gwHardwareColor
     );
-    const extrasPerUnit = lockCost + handleCost + (Number(gwExtraService) || 0);
+
+    const areaM2 = (gwWidth * gwHeight) / 1_000_000;
+    const jateadoPricePerM2 = Number((selectedGlassType as any)?.jateado_price ?? selectedGlassType?.jateadoPrice ?? 0);
+    const isJateado = gwTexture === "Jateado";
+    const jateadoCost = isJateado ? jateadoPricePerM2 * areaM2 : 0;
+    const jateadoTotalCost = jateadoCost * gwQuantity;
+
+    const extrasPerUnit = jateadoCost + (Number(gwExtraService) || 0);
     const totalExtras = extrasPerUnit * gwQuantity;
     const finalPrice = basePrice + totalExtras;
     const totalCost = baseCost + totalExtras;
+
+    const fullMaterialBreakdown = [...materialBreakdown];
+    if (isJateado && jateadoTotalCost > 0) {
+      fullMaterialBreakdown.push({
+        name: "Jateado",
+        color: "Padrão",
+        unit: "m²",
+        quantity: areaM2 * gwQuantity,
+        unitCost: jateadoPricePerM2,
+        totalCost: jateadoTotalCost,
+      });
+    }
 
    const description = [
       `Tipo de vidro: ${selectedGlassType?.name || "Não informado"}`,
       `Cor do vidro: ${selectedColor || "Não informado"}`,
       `Textura: ${gwTexture || "Padrão"}`,
-      `Fechadura: ${gwLockType || "Não informado"}`,
-      `Puxador: ${gwHandle || "Não informado"}`,
       `Ferragens: ${gwHardwareColor || "Padrão"}`,
       `Acréscimo por serviço: R$ ${Number(gwExtraService || 0).toFixed(2)}`,
     ].join(" | ");
@@ -884,7 +1045,7 @@ if (!ensureColorSelected()) return;
     const newItem: QuoteItem = {
       id: `qi-glass-${Date.now()}`,
       productId: selectedProduct.id,
-      productName: selectedProduct.name,
+      productName: isJateado ? `${selectedProduct.name} (Jateado)` : selectedProduct.name,
       selectedColor,
       description,
       width: gwWidth,
@@ -892,8 +1053,11 @@ if (!ensureColorSelected()) return;
       quantity: gwQuantity,
       price: finalPrice,
       cost: totalCost,
-      materialCost: baseMat,
+      materialCost: baseMat + jateadoTotalCost,
       laborCost: baseLab,
+      fixedCostValue: baseFixed,
+      materialBreakdown: fullMaterialBreakdown,
+      laborBreakdown,
     };
 
     setItems((prev) => [...prev, newItem]);
@@ -919,6 +1083,18 @@ if (!ensureColorSelected()) return;
     );
 
     return material ? String(material.id) : undefined;
+  };
+
+  const getHardwareColorFromDescription = (description: string): string | undefined => {
+    const hardwareToken = description
+      .split("|")
+      .map((part) => part.trim())
+      .find((part) => normalizeText(part).startsWith("FERRAGENS:"));
+
+    if (!hardwareToken) return undefined;
+
+    const [, colorName = ""] = hardwareToken.split(":");
+    return colorName.trim() || undefined;
   };
 
   const handleItemChange = (id: string, field: keyof QuoteItem, value: any) => {
@@ -951,20 +1127,25 @@ if (!ensureColorSelected()) return;
             }
 
             const glassTypeId = getGlassTypeIdFromDescription(updatedItem.description);
+            const hardwareColor = getHardwareColorFromDescription(updatedItem.description);
 
-            const { price, cost, materialCost, laborCost } = calculateItemPrice(
+            const { price, cost, materialCost, laborCost, fixedCostValue, materialBreakdown, laborBreakdown } = calculateItemPrice(
               updatedItem.productId,
               updatedItem.width,
               updatedItem.height,
               updatedItem.quantity,
               updatedItem.selectedColor,
-              glassTypeId
+              glassTypeId,
+              hardwareColor
             );
             updatedItem.price = price;
             updatedItem.cost = cost;
             updatedItem.materialCost = materialCost;
             updatedItem.laborCost = laborCost;
-            
+            updatedItem.fixedCostValue = fixedCostValue;
+            updatedItem.materialBreakdown = materialBreakdown;
+            updatedItem.laborBreakdown = laborBreakdown;
+
           }
         }
 
@@ -976,6 +1157,45 @@ if (!ensureColorSelected()) return;
   const subtotal = items.reduce((sum, item) => sum + item.price, 0);
   const totalMaterialCost = items.reduce((sum, item) => sum + (item.materialCost ?? 0), 0);
   const totalLaborCost = items.reduce((sum, item) => sum + (item.laborCost ?? 0), 0);
+
+  // Soma o detalhamento de matéria-prima e mão de obra de todos os itens do
+  // orçamento, agrupando linhas repetidas (mesmo material/cor ou mesma função)
+  const aggregatedMaterialBreakdown = useMemo(() => {
+    const map = new Map<string, QuoteItemMaterialLine>();
+    items.forEach((item) => {
+      (item.materialBreakdown || []).forEach((line) => {
+        const key = `${line.name}|${line.color}|${line.unit}`;
+        const existing = map.get(key);
+        if (existing) {
+          existing.quantity += line.quantity;
+          existing.totalCost += line.totalCost;
+        } else {
+          map.set(key, { ...line });
+        }
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => b.totalCost - a.totalCost);
+  }, [items]);
+
+  const aggregatedLaborBreakdown = useMemo(() => {
+    const map = new Map<string, QuoteItemLaborLine>();
+    items.forEach((item) => {
+      (item.laborBreakdown || []).forEach((line) => {
+        const existing = map.get(line.role);
+        if (existing) {
+          existing.total += line.total;
+        } else {
+          map.set(line.role, { ...line });
+        }
+      });
+    });
+    return Array.from(map.values());
+  }, [items]);
+  const totalFixedCostValue = items.reduce(
+    (sum, item) =>
+      sum + (item.fixedCostValue ?? item.price * (globalFixedCostRate / 100)),
+    0
+  );
 
 // Valor bruto antes do desconto
 const grossTotal = subtotal + freight + installation;
@@ -1005,23 +1225,26 @@ const totalPrice = baseTotal + referralCommissionValue;
 const totalCostOfGoods =
   items.reduce((sum, item) => sum + item.cost, 0);
 
+// normalizeText remove acentos antes de comparar, para não depender de o
+// nome cadastrado no Financeiro ter sido digitado com/sem acentuação
+// (ex.: "Comissao vendedoras" sem ç/~ não batia com a busca por "comissão").
 const commissionRate =
   variableExpenses.find((e) =>
-    e.name.toLowerCase().includes("comissão")
+    normalizeText(e.name).includes(normalizeText("comissão"))
   )?.value || 0;
 
 const taxRate =
   variableExpenses.find(
     (e) =>
-      e.name.toLowerCase().includes("imposto") ||
-      e.name.toLowerCase().includes("simples")
+      normalizeText(e.name).includes(normalizeText("imposto")) ||
+      normalizeText(e.name).includes(normalizeText("simples"))
   )?.value || 0;
 
 const cardRate =
   variableExpenses.find(
     (e) =>
-      e.name.toLowerCase().includes("maquininha") ||
-      e.name.toLowerCase().includes("cartão")
+      normalizeText(e.name).includes(normalizeText("maquininha")) ||
+      normalizeText(e.name).includes(normalizeText("cartão"))
   )?.value || 0;
 
 // Taxa de cartão reduzida pelo desconto (desconto sempre vem da taxa do cartão)
@@ -1039,9 +1262,12 @@ const cardValue = discountMode === "fixed" && discountFixed > 0
   ? Math.max(0, grossTotal * (cardRate / 100) - discountFixed)
   : totalPrice * (effectiveCardRate / 100);
 
-const fixedCostEstimatePercent = globalFixedCostRate;
-const fixedCostValue =
-  totalPrice * (fixedCostEstimatePercent / 100);
+// Custo fixo real embutido no preço de cada item (usa o % de custo fixo
+// específico do produto, não um % global genérico, para a margem bater
+// com a margem mostrada na tela de cadastro do produto)
+const fixedCostValue = totalFixedCostValue;
+const fixedCostEstimatePercent =
+  totalPrice > 0 ? (fixedCostValue / totalPrice) * 100 : 0;
 
 const netProfit =
   totalPrice -
@@ -1782,7 +2008,8 @@ const handleSavePDF = async () => {
                   <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Altura (mm)</label>
                   <input
                     type="number"
-                    value={alHeight}
+                    value={alHeight || ""}
+                    placeholder="0000"
                     onChange={(e) => setAlHeight(Number(e.target.value) || 0)}
                     className="w-full h-11 px-3 border rounded-lg text-gray-900"
                   />
@@ -1791,7 +2018,8 @@ const handleSavePDF = async () => {
                   <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Largura (mm)</label>
                   <input
                     type="number"
-                    value={alWidth}
+                    value={alWidth || ""}
+                    placeholder="0000"
                     onChange={(e) => setAlWidth(Number(e.target.value) || 0)}
                     className="w-full h-11 px-3 border rounded-lg text-gray-900"
                   />
@@ -1940,11 +2168,11 @@ const handleSavePDF = async () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Altura (mm)</label>
-                  <input type="number" value={gwHeight} onChange={(e) => setGwHeight(Number(e.target.value) || 0)} className="w-full h-11 px-3 border rounded-lg text-gray-900" />
+                  <input type="number" value={gwHeight || ""} placeholder="0000" onChange={(e) => setGwHeight(Number(e.target.value) || 0)} className="w-full h-11 px-3 border rounded-lg text-gray-900" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Largura (mm)</label>
-                  <input type="number" value={gwWidth} onChange={(e) => setGwWidth(Number(e.target.value) || 0)} className="w-full h-11 px-3 border rounded-lg text-gray-900" />
+                  <input type="number" value={gwWidth || ""} placeholder="0000" onChange={(e) => setGwWidth(Number(e.target.value) || 0)} className="w-full h-11 px-3 border rounded-lg text-gray-900" />
                 </div>
               </div>
             </div>
@@ -2021,24 +2249,6 @@ const handleSavePDF = async () => {
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Tipo de Fechadura</label>
-                <select value={gwLockType} onChange={(e) => setGwLockType(e.target.value)} className="w-full h-11 px-3 border rounded-lg text-gray-900">
-                  <option value="">Selecione</option>
-                  {lockOptions.map((lock) => (
-                    <option key={lock} value={lock}>{lock}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Modelo de Puxador</label>
-                <select value={gwHandle} onChange={(e) => setGwHandle(e.target.value)} className="w-full h-11 px-3 border rounded-lg text-gray-900">
-                  <option value="">Selecione</option>
-                  {handleOptions.map((handle) => (
-                    <option key={handle} value={handle}>{handle}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
                 <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Cor das Ferragens</label>
                 <select value={gwHardwareColor} onChange={(e) => setGwHardwareColor(e.target.value)} className="w-full h-11 px-3 border rounded-lg text-gray-900">
                   {HARDWARE_COLORS.map((h) => (
@@ -2090,8 +2300,8 @@ const handleSavePDF = async () => {
                 <tr>
                   <th className="px-3 py-2 text-left">Produto</th>
                   <th className="px-3 py-2 text-left">Cor</th>
-                  <th className="px-3 py-2 text-center">Larg. (mm)</th>
                   <th className="px-3 py-2 text-center">Alt. (mm)</th>
+                  <th className="px-3 py-2 text-center">Larg. (mm)</th>
                   <th className="px-3 py-2 text-center">Qtd</th>
                   <th className="px-3 py-2 text-right">Valor</th>
                   <th className="px-3 py-2 text-center">Ações</th>
@@ -2113,16 +2323,16 @@ const handleSavePDF = async () => {
                       <td className="px-3 py-2">
                         <input
                           type="number"
-                          value={item.width}
-                          onChange={(e) => handleItemChange(item.id, "width", Number(e.target.value) || 0)}
+                          value={item.height}
+                          onChange={(e) => handleItemChange(item.id, "height", Number(e.target.value) || 0)}
                           className="w-20 border rounded px-2 py-1 text-sm text-gray-900 text-center"
                         />
                       </td>
                       <td className="px-3 py-2">
                         <input
                           type="number"
-                          value={item.height}
-                          onChange={(e) => handleItemChange(item.id, "height", Number(e.target.value) || 0)}
+                          value={item.width}
+                          onChange={(e) => handleItemChange(item.id, "width", Number(e.target.value) || 0)}
                           className="w-20 border rounded px-2 py-1 text-sm text-gray-900 text-center"
                         />
                       </td>
@@ -2152,8 +2362,8 @@ const handleSavePDF = async () => {
                     <tr key={item.id} className="border-t hover:bg-gray-50">
                       <td className="px-3 py-2 font-medium text-gray-800">{item.productName}</td>
                       <td className="px-3 py-2 text-gray-600">{item.selectedColor || "—"}</td>
-                      <td className="px-3 py-2 text-center text-gray-600">{item.width || "—"}</td>
                       <td className="px-3 py-2 text-center text-gray-600">{item.height || "—"}</td>
+                      <td className="px-3 py-2 text-center text-gray-600">{item.width || "—"}</td>
                       <td className="px-3 py-2 text-center text-gray-600">{item.quantity}</td>
                       <td className="px-3 py-2 text-right font-semibold text-gray-800">
                         R$ {item.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -2345,12 +2555,34 @@ const handleSavePDF = async () => {
               <div className="space-y-1 text-sm max-w-lg">
                 {/* Custos de produção */}
                 <div className="flex justify-between text-gray-700">
-                  <span>Custo matéria-prima:</span>
+                  <span className="flex items-center gap-2">
+                    Custo matéria-prima:
+                    {aggregatedMaterialBreakdown.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowMaterialDetail(true)}
+                        className="text-xs text-primary-700 underline hover:text-primary-900"
+                      >
+                        ver detalhamento
+                      </button>
+                    )}
+                  </span>
                   <span className="font-medium">R$ {fmt(totalMaterialCost)}</span>
                 </div>
                 {totalLaborCost > 0 && (
                   <div className="flex justify-between text-gray-700">
-                    <span>Mão de obra:</span>
+                    <span className="flex items-center gap-2">
+                      Mão de obra:
+                      {aggregatedLaborBreakdown.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowLaborDetail(true)}
+                          className="text-xs text-primary-700 underline hover:text-primary-900"
+                        >
+                          ver detalhamento
+                        </button>
+                      )}
+                    </span>
                     <span className="font-medium">R$ {fmt(totalLaborCost)}</span>
                   </div>
                 )}
@@ -2393,7 +2625,7 @@ const handleSavePDF = async () => {
                   )}
                   {fixedCostEstimatePercent > 0 && (
                     <div className="flex justify-between text-gray-700">
-                      <span>Custos fixos ({fixedCostEstimatePercent}%):</span>
+                      <span>Custos fixos ({fixedCostEstimatePercent.toFixed(2)}%):</span>
                       <span className="font-medium">R$ {fmt(fixedCostValue)}</span>
                     </div>
                   )}
@@ -2529,7 +2761,16 @@ const handleSavePDF = async () => {
       )}
 
       {/* ── PDF PREVIEW ── */}
-      {showPDFPreview && savedQuote && (
+      {showPDFPreview && savedQuote && (() => {
+        // savedQuote.date pode vir como "YYYY-MM-DD" ou timestamp completo do
+        // Supabase ("YYYY-MM-DDTHH:mm:ss+00:00"); pega só os 10 primeiros chars
+        // antes de anexar "T12:00:00", senão new Date(...) fica "Invalid Date".
+        const rawSavedDate = (savedQuote.date || "").slice(0, 10);
+        const savedQuoteDate = rawSavedDate
+          ? new Date(rawSavedDate + "T12:00:00")
+          : new Date();
+        const todayPreviewStr = new Date().toLocaleDateString("pt-BR");
+        return (
         <div className="fixed inset-0 z-50 overflow-auto" style={{ background: "#e8eaf0" }}>
           {/* Action bar */}
           <div className="sticky top-0 z-10 no-print" style={{ background: "#1e2130", borderBottom: "1px solid #2d3148" }}>
@@ -2643,22 +2884,30 @@ const handleSavePDF = async () => {
                 <div style={{ fontSize: 18, fontWeight: 700, color: "#1a1f36", marginTop: 1 }}>
                   N° {savedQuote.quoteNumber ?? "—"}
                   <span style={{ fontSize: 13, fontWeight: 400, color: "#8892b0", marginLeft: 6 }}>
-                    / {new Date((savedQuote.date || "") + "T12:00:00").getFullYear()}
+                    / {savedQuoteDate.getFullYear()}
                   </span>
                 </div>
               </div>
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#8892b0", fontWeight: 600 }}>Data</div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: "#3d4166", marginTop: 1 }}>
-                  {new Date((savedQuote.date || "") + "T12:00:00").toLocaleDateString("pt-BR")}
+                  {savedQuoteDate.toLocaleDateString("pt-BR")}
                 </div>
               </div>
             </div>
 
             {/* Client band */}
-            <div className="px-10 py-4" style={{ background: "#fff", borderBottom: "1px solid #eef0f7" }}>
-              <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#8892b0", fontWeight: 600 }}>Cliente</span>
-              <div style={{ fontSize: 15, fontWeight: 600, color: "#1a1f36", marginTop: 2 }}>{savedQuote.customerName || "—"}</div>
+            <div className="px-10 py-4 flex justify-between items-start" style={{ background: "#fff", borderBottom: "1px solid #eef0f7" }}>
+              <div>
+                <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#8892b0", fontWeight: 600 }}>Cliente</span>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "#1a1f36", marginTop: 2 }}>{savedQuote.customerName || "—"}</div>
+              </div>
+              {savedQuote.salesperson && (
+                <div style={{ textAlign: "right" }}>
+                  <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#8892b0", fontWeight: 600 }}>Vendedor(a)</span>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: "#1a1f36", marginTop: 2 }}>{savedQuote.salesperson}</div>
+                </div>
+              )}
             </div>
 
             {/* Products section */}
@@ -2687,7 +2936,7 @@ const handleSavePDF = async () => {
                         <td style={{ padding: "10px 12px", verticalAlign: "top" }}>
                           <div style={{ fontWeight: 600, color: "#1a1f36" }}>{item.productName}</div>
                           {!hideMeasures && (item.width > 0 || item.height > 0) && (
-                            <div style={{ fontSize: 11, color: "#8892b0", marginTop: 2 }}>{wDisp} × {hDisp}</div>
+                            <div style={{ fontSize: 11, color: "#8892b0", marginTop: 2 }}>{hDisp} × {wDisp}</div>
                           )}
                           {!hideDetailedDescription && item.description && (
                             <div style={{ fontSize: 11, color: "#8892b0", marginTop: 1 }}>
@@ -2770,7 +3019,7 @@ const handleSavePDF = async () => {
               <div style={{ textAlign: "center", flex: 1 }}>
                 <div style={{ fontSize: 12, color: "#8892b0" }}>
                   {cityPDF},{" "}
-                  {new Date((savedQuote.date || "") + "T12:00:00").toLocaleDateString("pt-BR")}
+                  {todayPreviewStr}
                 </div>
               </div>
               <div style={{ textAlign: "center", flex: 1 }}>
@@ -2789,7 +3038,8 @@ const handleSavePDF = async () => {
             <div style={{ height: 4, background: "linear-gradient(90deg, #6c8ef5, #3d4166, #1e2130)" }} />
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Modal cliente rápido */}
       {isClientModalOpen && (
@@ -2870,6 +3120,112 @@ const handleSavePDF = async () => {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showMaterialDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-2xl border border-blue-100 bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-800">Detalhamento da matéria-prima</h3>
+              <button
+                type="button"
+                onClick={() => setShowMaterialDetail(false)}
+                className="rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                Fechar
+              </button>
+            </div>
+            <p className="mb-3 text-xs text-slate-500">Apenas visualização — somatório de todos os itens deste orçamento.</p>
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-xs uppercase text-gray-600">
+                <tr>
+                  <th className="px-3 py-2 text-left">Material</th>
+                  <th className="px-3 py-2 text-left">Cor</th>
+                  <th className="px-3 py-2 text-right">Metragem/Qtd</th>
+                  <th className="px-3 py-2 text-right">Valor unit.</th>
+                  <th className="px-3 py-2 text-right">Valor total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {aggregatedMaterialBreakdown.map((line, idx) => (
+                  <tr key={`${line.name}-${line.color}-${idx}`} className="border-t">
+                    <td className="px-3 py-2 font-medium text-gray-800">{line.name}</td>
+                    <td className="px-3 py-2 text-gray-600">{line.color || "—"}</td>
+                    <td className="px-3 py-2 text-right text-gray-600">
+                      {line.quantity.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} {line.unit}
+                    </td>
+                    <td className="px-3 py-2 text-right text-gray-600">
+                      R$ {line.unitCost.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-3 py-2 text-right font-semibold text-gray-800">
+                      R$ {line.totalCost.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-slate-300">
+                  <td colSpan={4} className="px-3 py-2 text-right font-semibold text-gray-700">Total:</td>
+                  <td className="px-3 py-2 text-right font-bold text-gray-900">
+                    R$ {totalMaterialCost.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {showLaborDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-xl max-h-[80vh] overflow-y-auto rounded-2xl border border-blue-100 bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-800">Detalhamento da mão de obra</h3>
+              <button
+                type="button"
+                onClick={() => setShowLaborDetail(false)}
+                className="rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                Fechar
+              </button>
+            </div>
+            <p className="mb-3 text-xs text-slate-500">Apenas visualização — somatório de todos os itens deste orçamento.</p>
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-xs uppercase text-gray-600">
+                <tr>
+                  <th className="px-3 py-2 text-left">Função</th>
+                  <th className="px-3 py-2 text-right">Qtd</th>
+                  <th className="px-3 py-2 text-right">Horas</th>
+                  <th className="px-3 py-2 text-right">Valor/h</th>
+                  <th className="px-3 py-2 text-right">Valor total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {aggregatedLaborBreakdown.map((line) => (
+                  <tr key={line.role} className="border-t">
+                    <td className="px-3 py-2 font-medium text-gray-800">{line.role}</td>
+                    <td className="px-3 py-2 text-right text-gray-600">{line.count}</td>
+                    <td className="px-3 py-2 text-right text-gray-600">{line.hours}</td>
+                    <td className="px-3 py-2 text-right text-gray-600">
+                      R$ {line.rate.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-3 py-2 text-right font-semibold text-gray-800">
+                      R$ {line.total.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-slate-300">
+                  <td colSpan={4} className="px-3 py-2 text-right font-semibold text-gray-700">Total:</td>
+                  <td className="px-3 py-2 text-right font-bold text-gray-900">
+                    R$ {totalLaborCost.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
           </div>
         </div>
       )}

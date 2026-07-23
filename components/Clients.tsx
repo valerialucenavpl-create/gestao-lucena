@@ -4,24 +4,44 @@ import { supabase } from "../services/supabase";
 type Client = {
   id: string;
   name: string;
-  street: string | null;
-  number: string | null;
-  neighborhood: string | null;
-  complement: string | null;
   phone: string | null;
-  notes: string | null;
+  email: string | null;
+  address: string | null;
+  created_at?: string | null;
 };
+
+const normalizeSearch = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim();
 
 const CLIENTS_TABLE_CANDIDATES = ["clients", "clientes"] as const;
 
 const emptyForm: Omit<Client, "id"> = {
   name: "",
-  street: "",
-  number: "",
-  neighborhood: "",
-  complement: "",
   phone: "",
-  notes: "",
+  email: "",
+  address: "",
+};
+
+// A tabela só tem uma coluna de endereço (sem rua/número/bairro separados),
+// então rua/número/bairro/complemento e a observação são combinados num só
+// texto antes de salvar.
+const buildAddress = (parts: {
+  street?: string;
+  number?: string;
+  neighborhood?: string;
+  complement?: string;
+  city?: string;
+  notes?: string;
+}): string => {
+  const streetLine = [parts.street, parts.number].filter((v) => v?.trim()).join(", ");
+  const locationLine = [parts.neighborhood, parts.city].filter((v) => v?.trim()).join(" - ");
+  return [streetLine, locationLine, parts.complement, parts.notes ? `Obs: ${parts.notes}` : ""]
+    .filter((v) => v?.trim())
+    .join(" | ");
 };
 
 const Clients: React.FC = () => {
@@ -30,6 +50,7 @@ const Clients: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
   const [form, setForm] = useState<Omit<Client, "id">>(emptyForm);
+  const [notesInput, setNotesInput] = useState("");
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
 
@@ -95,16 +116,7 @@ const Clients: React.FC = () => {
     setLoading(true);
 
     const { data, tableName, error } = await runWithTableFallback<Client[]>(async (candidate) => {
-      const ordered = await supabase.from(candidate).select("*").order("created_at", { ascending: false });
-      if (!ordered.error) return ordered;
-
-      const message = String(ordered.error?.message ?? "").toLowerCase();
-      if (message.includes("created_at")) {
-        // fallback para schemas que não possuem created_at
-        return await supabase.from(candidate).select("*");
-      }
-
-      return ordered;
+      return await supabase.from(candidate).select("*");
     });
 
     if (error) {
@@ -116,13 +128,36 @@ const Clients: React.FC = () => {
     }
 
     console.log(`Clientes carregados da tabela: ${tableName}`);
-    setClients((data as Client[]) || []);
+    const sorted = [...((data as Client[]) || [])].sort((a, b) =>
+      a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" })
+    );
+    setClients(sorted);
     setLoading(false);
   };
 
   useEffect(() => {
     loadClients();
   }, []);
+
+  const [search, setSearch] = useState("");
+
+  const filteredClients = React.useMemo(() => {
+    const term = normalizeSearch(search);
+    if (!term) return clients;
+    return clients.filter((c) => {
+      const haystack = normalizeSearch(`${c.name} ${c.address ?? ""}`);
+      return haystack.includes(term);
+    });
+  }, [clients, search]);
+
+  const newThisMonthCount = React.useMemo(() => {
+    const now = new Date();
+    return clients.filter((c) => {
+      if (!c.created_at) return false;
+      const created = new Date(c.created_at);
+      return created.getFullYear() === now.getFullYear() && created.getMonth() === now.getMonth();
+    }).length;
+  }, [clients]);
 
   const handleSave = async () => {
     if (!form.name.trim()) {
@@ -132,12 +167,11 @@ const Clients: React.FC = () => {
 
     const basePayload = {
       name: form.name,
-      street: form.street,
-      number: form.number,
-      neighborhood: form.neighborhood,
-      complement: form.complement,
       phone: form.phone,
-      notes: form.notes,
+      email: form.email,
+      address: [form.address, notesInput.trim() ? `Obs: ${notesInput.trim()}` : ""]
+        .filter((v) => v?.trim())
+        .join(" | "),
     };
 
     if (editing) {
@@ -163,6 +197,7 @@ const Clients: React.FC = () => {
     setIsModalOpen(false);
     setEditing(null);
     setForm(emptyForm);
+    setNotesInput("");
     loadClients();
   };
 
@@ -183,6 +218,7 @@ const Clients: React.FC = () => {
   const openNew = () => {
     setEditing(null);
     setForm(emptyForm);
+    setNotesInput("");
     setIsModalOpen(true);
   };
 
@@ -190,13 +226,11 @@ const Clients: React.FC = () => {
     setEditing(c);
     setForm({
       name: c.name,
-      street: c.street || "",
-      number: c.number || "",
-      neighborhood: c.neighborhood || "",
-      complement: c.complement || "",
       phone: c.phone || "",
-      notes: c.notes || "",
+      email: c.email || "",
+      address: c.address || "",
     });
+    setNotesInput("");
     setIsModalOpen(true);
   };
 
@@ -239,6 +273,7 @@ const Clients: React.FC = () => {
           neighborhood: ["bairro", "neighborhood"],
           complement:   ["complemento", "complement"],
           phone:        ["telefone", "phone", "celular", "fone"],
+          email:        ["email", "e-mail"],
           notes:        ["observacao", "notes", "obs", "cpf", "cnpj"],
           city:         ["cidade", "city"],
           date:         ["data", "date", "datacadastro"],
@@ -257,6 +292,7 @@ const Clients: React.FC = () => {
       const neighborhoodIdx = col("neighborhood");
       const complementIdx   = col("complement");
       const phoneIdx        = col("phone");
+      const emailIdx        = col("email");
       const notesIdx        = col("notes");
       const cityIdx         = col("city");
 
@@ -296,6 +332,7 @@ const Clients: React.FC = () => {
       let done = 0;
       let skipped = 0;
       let failed = 0;
+      let firstError = "";
 
       for (let i = 0; i < rows.length; i += BATCH) {
         const batch = rows.slice(i, i + BATCH);
@@ -305,25 +342,29 @@ const Clients: React.FC = () => {
             if (!name || existingNames.has(name.toLowerCase())) { skipped++; return false; }
             return true;
           })
-          .map((r) => {
-            const cityVal = cityIdx !== -1 ? r[cityIdx]?.trim() : "";
-            const notesVal = notesIdx !== -1 ? r[notesIdx]?.trim() : "";
-            const combined = [notesVal, cityVal ? `Cidade: ${cityVal}` : ""].filter(Boolean).join(" | ");
-            return {
-              name:         r[nameIdx]?.trim() || "",
-              street:       streetIdx !== -1 ? r[streetIdx]?.trim() : "",
-              number:       numberIdx !== -1 ? r[numberIdx]?.trim() : "",
-              neighborhood: neighborhoodIdx !== -1 ? r[neighborhoodIdx]?.trim() : "",
-              complement:   complementIdx !== -1 ? r[complementIdx]?.trim() : "",
-              phone:        phoneIdx !== -1 ? r[phoneIdx]?.trim() : "",
-              notes:        combined || "",
-            };
-          });
+          .map((r) => ({
+            name:  r[nameIdx]?.trim() || "",
+            phone: phoneIdx !== -1 ? r[phoneIdx]?.trim() : "",
+            email: emailIdx !== -1 ? r[emailIdx]?.trim() : "",
+            address: buildAddress({
+              street:       streetIdx !== -1 ? r[streetIdx] : undefined,
+              number:       numberIdx !== -1 ? r[numberIdx] : undefined,
+              neighborhood: neighborhoodIdx !== -1 ? r[neighborhoodIdx] : undefined,
+              complement:   complementIdx !== -1 ? r[complementIdx] : undefined,
+              city:         cityIdx !== -1 ? r[cityIdx] : undefined,
+              notes:        notesIdx !== -1 ? r[notesIdx] : undefined,
+            }),
+          }));
 
         if (toInsert.length > 0) {
           const { error } = await supabase.from("clients").insert(toInsert);
-          if (error) { console.error("Erro ao inserir lote:", error); failed += toInsert.length; }
-          else done += toInsert.length;
+          if (error) {
+            console.error("Erro ao inserir lote:", error);
+            if (!firstError) firstError = error.message || "";
+            failed += toInsert.length;
+          } else {
+            done += toInsert.length;
+          }
         }
 
         setImportProgress({ done: Math.min(i + BATCH, rows.length), total: rows.length });
@@ -331,7 +372,8 @@ const Clients: React.FC = () => {
 
       setImporting(false);
       setImportProgress(null);
-      alert(`✅ Importação concluída!\n• Inseridos: ${done}\n• Ignorados (já existiam): ${skipped}\n• Com erro: ${failed}`);
+      const errorLine = firstError ? `\n\nErro: ${firstError}` : "";
+      alert(`✅ Importação concluída!\n• Inseridos: ${done}\n• Ignorados (já existiam): ${skipped}\n• Com erro: ${failed}${errorLine}`);
       loadClients();
     };
 
@@ -347,7 +389,11 @@ const Clients: React.FC = () => {
             <h2 className="text-2xl font-bold text-slate-800">Cadastro de Clientes</h2>
             <p className="mt-1 text-sm text-slate-500">Gerencie os clientes da sua base com visual azul e branco.</p>
           </div>
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="rounded-xl bg-primary-50 border border-primary-100 px-4 py-2.5 text-sm">
+              <span className="font-bold text-primary-700">{newThisMonthCount}</span>{" "}
+              <span className="text-slate-600">cliente{newThisMonthCount === 1 ? "" : "s"} novo{newThisMonthCount === 1 ? "" : "s"} este mês</span>
+            </div>
             <label className={`rounded-xl px-4 py-2.5 font-semibold text-white transition cursor-pointer ${importing ? "bg-gray-400" : "bg-green-600 hover:bg-green-700"}`}>
               {importing && importProgress
                 ? `Importando... ${importProgress.done}/${importProgress.total}`
@@ -368,6 +414,16 @@ const Clients: React.FC = () => {
             </button>
           </div>
         </div>
+
+        <div className="mt-4">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nome, endereço ou cidade..."
+            className="w-full max-w-md rounded-xl border border-slate-300 px-4 py-2.5 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
+          />
+        </div>
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-sm">
@@ -379,23 +435,23 @@ const Clients: React.FC = () => {
               <tr>
                 <th className="p-3 text-left font-semibold">Nome</th>
                 <th className="p-3 text-left font-semibold">Telefone</th>
-                <th className="p-3 text-left font-semibold">Bairro</th>
+                <th className="p-3 text-left font-semibold">Endereço</th>
                 <th className="p-3 text-center font-semibold">Ações</th>
               </tr>
             </thead>
             <tbody>
-              {clients.length === 0 ? (
+              {filteredClients.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="p-8 text-center text-slate-500">
-                    Nenhum cliente cadastrado.
+                    {clients.length === 0 ? "Nenhum cliente cadastrado." : "Nenhum cliente encontrado para essa busca."}
                   </td>
                 </tr>
               ) : (
-                clients.map((c) => (
+                filteredClients.map((c) => (
                   <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50/60">
                     <td className="p-3 font-medium text-slate-800">{c.name}</td>
                     <td className="p-3 text-slate-700">{c.phone || "-"}</td>
-                    <td className="p-3 text-slate-700">{c.neighborhood || "-"}</td>
+                    <td className="p-3 text-slate-700">{c.address || "-"}</td>
                     <td className="p-3 text-center space-x-3">
                       <button onClick={() => openEdit(c)} className="text-blue-700 hover:underline">
                         Editar
@@ -420,11 +476,8 @@ const Clients: React.FC = () => {
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {[
                 ["Nome", "name"],
-                ["Rua", "street"],
-                ["Número", "number"],
-                ["Bairro", "neighborhood"],
-                ["Complemento", "complement"],
                 ["Celular", "phone"],
+                ["E-mail", "email"],
               ].map(([label, field]) => (
                 <div key={field}>
                   <label className="mb-1.5 block text-sm font-semibold text-slate-700">{label}</label>
@@ -437,12 +490,22 @@ const Clients: React.FC = () => {
               ))}
 
               <div className="md:col-span-2">
+                <label className="mb-1.5 block text-sm font-semibold text-slate-700">Endereço</label>
+                <input
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
+                  placeholder="Rua, número, bairro, complemento"
+                  value={form.address || ""}
+                  onChange={(e) => setForm({ ...form, address: e.target.value })}
+                />
+              </div>
+
+              <div className="md:col-span-2">
                 <label className="mb-1.5 block text-sm font-semibold text-slate-700">Observação</label>
                 <textarea
                   className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
                   rows={3}
-                  value={form.notes || ""}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  value={notesInput}
+                  onChange={(e) => setNotesInput(e.target.value)}
                 />
               </div>
             </div>

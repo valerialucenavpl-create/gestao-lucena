@@ -52,25 +52,31 @@ const mapRowToEntry = (r: DbRow): CashFlowEntry => ({
   subcategory: (r as any)?.subcategory ?? "",
   description: r.description ?? "",
   date: toYMD(r.date),
+  createdAt: r.created_at || undefined,
 });
 
 export const getCashFlow = async () => {
   try {
+    // Auth check only — no user_id filter so all company users share the same cashflow data
     const { data: authData, error: authErr } = await supabase.auth.getUser();
     if (authErr || !authData.user) return { ok: false, error: authErr };
 
-    // Supabase default limit is 1000 rows — paginate to fetch ALL records
     const PAGE_SIZE = 1000;
     let allRows: DbRow[] = [];
     let from = 0;
 
     while (true) {
+      // "id" como desempate final é essencial: muitos lançamentos têm a mesma
+      // "date" e "created_at" nulo, então sem um critério único o Postgres não
+      // garante a mesma ordem entre as páginas — isso fazia a paginação às
+      // vezes repetir (ou pular) uma linha na fronteira de cada lote de 1000,
+      // dando um saldo errado e "instável" a cada vez que a tela carregava.
       const { data, error } = await supabase
         .from(TABLE)
         .select("*")
-        .eq("user_id", authData.user.id)
         .order("date", { ascending: false })
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .range(from, from + PAGE_SIZE - 1);
 
       if (error) return { ok: false, error };
@@ -109,6 +115,11 @@ export const createCashFlowEntry = async (
 
       // sua coluna no print é timestamptz:
       date: ymdToTimestamptz(payload.date),
+
+      // horário real do lançamento (a coluna "date" guarda só o dia, sempre
+      // à meia-noite) — usado para mostrar a hora na tela e também ajuda a
+      // ordenação a não ter empates entre lançamentos do mesmo dia.
+      created_at: new Date().toISOString(),
     };
 
     const { data, error } = await supabase
@@ -134,17 +145,15 @@ export const deleteCashFlowEntry = async (id: string) => {
     const { error } = await supabase
       .from(TABLE)
       .delete()
-      .eq("id", id)
-      .eq("user_id", authData.user.id);
+      .eq("id", id);
 
     if (error) return { ok: false, error };
 
-    // validação pós-delete para evitar falso positivo/falso negativo
+    // validação pós-delete
     const { data: stillExists, error: checkError } = await supabase
       .from(TABLE)
       .select("id")
       .eq("id", id)
-      .eq("user_id", authData.user.id)
       .maybeSingle();
 
     if (checkError) return { ok: false, error: checkError };

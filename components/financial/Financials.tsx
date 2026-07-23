@@ -5,8 +5,9 @@ import SummaryTab from "./SummaryTab";
 import FixedExpensesCards from "./FixedExpensesCards";
 import VariableExpensesCards from "./VariableExpensesCards";
 import MarkupFaturamentoTab from "./MarkupFaturamentoTab"; // ✅ NOVO
+import PartnersTab from "./PartnersTab";
 
-type TabKey = "summary" | "fixed" | "variable" | "markup"; // ✅ NOVO
+type TabKey = "summary" | "fixed" | "variable" | "markup" | "partners";
 
 interface FinancialProps {
   onVariableExpensesChange?: (expenses: { id: number; name: string; type: string; value: number }[]) => void;
@@ -18,6 +19,7 @@ const Financial: React.FC<FinancialProps> = ({ onVariableExpensesChange }) => {
       { key: "summary" as const, label: "Resumo" },
       { key: "fixed" as const, label: "Despesas Fixas" },
       { key: "variable" as const, label: "Despesas Variáveis" },
+      { key: "partners" as const, label: "Sócios (Pró-labore)" },
       { key: "markup" as const, label: "MARKUP / FATURAMENTO" }, // ✅ NOVO
     ],
     []
@@ -49,6 +51,7 @@ const Financial: React.FC<FinancialProps> = ({ onVariableExpensesChange }) => {
       {activeTab === "summary" && <SummaryTab />}
       {activeTab === "fixed" && <FixedExpensesCards />}
       {activeTab === "variable" && <VariableExpensesCards onExpensesChange={onVariableExpensesChange as any} />}
+      {activeTab === "partners" && <PartnersTab />}
       {activeTab === "markup" && <MarkupFaturamentoTab />} {/* ✅ NOVO */}
     </div>
   );

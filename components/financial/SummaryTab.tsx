@@ -22,6 +22,11 @@ type VariableExpense = {
   value: number;
 };
 
+type Partner = {
+  id: string;
+  pro_labore: number | null;
+};
+
 /* =======================
    HELPERS
 ======================= */
@@ -31,22 +36,14 @@ const formatBRL = (n: number) =>
     currency: "BRL",
   });
 
-// fallback para funcionários antigos
+// fallback para funcionários antigos (Simples Nacional: sem INSS patronal, embutido no DAS)
 const calcTotalMonthlyCost = (base: number) => {
-  const inss_employer = base * 0.09;
   const fgts = base * 0.08;
   const fgts_fine_40 = fgts * 0.4;
   const thirteenth = base / 12;
   const vacation_extra = (base / 3) / 12;
 
-  return (
-    base +
-    inss_employer +
-    fgts +
-    fgts_fine_40 +
-    thirteenth +
-    vacation_extra
-  );
+  return base + fgts + fgts_fine_40 + thirteenth + vacation_extra;
 };
 
 /* =======================
@@ -56,6 +53,7 @@ const SummaryTab: React.FC = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [fixed, setFixed] = useState<FixedExpense[]>([]);
   const [variable, setVariable] = useState<VariableExpense[]>([]);
+  const [partners, setPartners] = useState<Partner[]>([]);
   const [loading, setLoading] = useState(true);
 
   /* =======================
@@ -63,7 +61,7 @@ const SummaryTab: React.FC = () => {
   ======================= */
   useEffect(() => {
     const load = async () => {
-      const [empRes, fixRes, varRes] = await Promise.all([
+      const [empRes, fixRes, varRes, partnersRes] = await Promise.all([
         supabase
           .from("employees")
           .select("id, name, base_salary, total_monthly_cost"),
@@ -71,11 +69,14 @@ const SummaryTab: React.FC = () => {
         supabase.from("fixed_expenses").select("id, value"),
 
         supabase.from("variable_expenses").select("id, type, value"),
+
+        supabase.from("partners").select("id, pro_labore"),
       ]);
 
       setEmployees((empRes.data as Employee[]) ?? []);
       setFixed((fixRes.data as FixedExpense[]) ?? []);
       setVariable((varRes.data as VariableExpense[]) ?? []);
+      setPartners((partnersRes.data as Partner[]) ?? []);
       setLoading(false);
     };
 
@@ -115,6 +116,12 @@ const SummaryTab: React.FC = () => {
     [variable]
   );
 
+  // ✅ TOTAL PRÓ-LABORE (BRUTO) DOS SÓCIOS
+  const totalProLabore = useMemo(
+    () => partners.reduce((acc, p) => acc + Number(p.pro_labore || 0), 0),
+    [partners]
+  );
+
   if (loading) return <p>Carregando resumo...</p>;
 
   /* =======================
@@ -123,10 +130,15 @@ const SummaryTab: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-xl shadow">
           <p className="text-sm text-gray-500">Folha Total</p>
           <p className="text-xl font-bold">{formatBRL(folhaTotal)}</p>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl shadow">
+          <p className="text-sm text-gray-500">Sócios (Pró-labore)</p>
+          <p className="text-xl font-bold">{formatBRL(totalProLabore)}</p>
         </div>
 
         <div className="bg-white p-4 rounded-xl shadow">

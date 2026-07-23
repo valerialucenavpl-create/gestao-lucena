@@ -5,7 +5,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
 import Dashboard from "./components/Dashboard";
-import DashboardSales from "./components/DashboardSales";
 import Reports from "./components/Reports";
 import Inventory from "./components/inventory/InventoryPage";
 import Clients from "./components/Clients";
@@ -17,10 +16,14 @@ import CashFlowForm from "./components/CashFlowForm";
 import Products from "./components/Products";
 import Sellers from "./components/Sellers";
 import Payables from "./components/Payables";
+import Receivables from "./components/Receivables";
+import AgendaPage from "./components/agenda/AgendaPage";
 
 // FUNCIONÁRIOS
 import EmployeesList from "./components/employees/EmployeesList";
 import EmployeeForm from "./components/employees/EmployeesForm";
+import DeliverySectorDetail from "./components/DeliverySectorDetail";
+import { DeliverySector } from "./utils/deliveryEntries";
 
 // ORÇAMENTOS
 import Quotes from "./components/Quotes";
@@ -179,6 +182,24 @@ const normalizeProductComposition = (value: unknown): ProductCompositionItem[] =
   return [];
 };
 
+const normalizeMarginByColor = (value: unknown): Record<string, number> | undefined => {
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const result: Record<string, number> = {};
+  Object.entries(parsed as Record<string, unknown>).forEach(([key, val]) => {
+    const num = Number(val);
+    if (key && Number.isFinite(num)) result[key] = num;
+  });
+  return Object.keys(result).length > 0 ? result : undefined;
+};
+
 const normalizeProducts = (rows: ProductRow[]): Product[] => {
   return rows
     .map((row) => ({
@@ -200,6 +221,9 @@ const normalizeProducts = (rows: ProductRow[]): Product[] => {
       image: String((row as any)?.image ?? (row as any)?.photo_url ?? ""),
       desiredProfitMargin: Number(
         (row as any)?.desiredProfitMargin ?? (row as any)?.desiredprofitmargin ?? (row as any)?.desired_profit_margin ?? 0
+      ),
+      marginByColor: normalizeMarginByColor(
+        (row as any)?.marginByColor ?? (row as any)?.marginbycolor ?? (row as any)?.margin_by_color
       ),
       laborCost: Number((row as any)?.laborCost ?? (row as any)?.laborcost ?? (row as any)?.labor_cost ?? 0),
       productionHours: Number(
@@ -232,6 +256,7 @@ const App: React.FC = () => {
   const [activeView, setActiveView] = useState<View>("dashboard");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authResolved, setAuthResolved] = useState(false);
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
@@ -260,6 +285,7 @@ const App: React.FC = () => {
     inventory:    "dashboard",
     cashflow:     "dashboard",
     payables:     "dashboard",
+    receivables:  "dashboard",
     financials:   "dashboard",
     employees:    "dashboard",
     "employee-new": "employees",
@@ -367,6 +393,9 @@ const App: React.FC = () => {
     const goalRaw = profile?.monthly_goal ?? profile?.monthlyGoal ?? fallbackGoal;
     const parsedGoal = Number(goalRaw);
 
+    const avatarUrl = profile?.avatar ||
+      `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(profile?.name ?? fallbackName)}`;
+
     return {
       id: authUser.id,
       name: String(profile?.name ?? fallbackName),
@@ -378,6 +407,7 @@ const App: React.FC = () => {
             ? parsedGoal
             : 0
           : undefined,
+      avatar: avatarUrl,
     };
   };
 
@@ -424,11 +454,15 @@ const App: React.FC = () => {
         console.error("Erro ao inicializar sessão:", err);
       } finally {
         setLoading(false);
+        setAuthResolved(true);
       }
     };
 
     // Timeout de segurança: se demorar mais de 12s, libera a tela de login
-    const timeout = setTimeout(() => setLoading(false), 12000);
+    const timeout = setTimeout(() => {
+      setLoading(false);
+      setAuthResolved(true);
+    }, 12000);
 
     boot().finally(() => clearTimeout(timeout));
   }, []);
@@ -437,6 +471,12 @@ const App: React.FC = () => {
   // LOADERS
   // ===============================
   useEffect(() => {
+    // Espera a sessão do Supabase resolver antes de buscar dados: em máquinas/
+    // redes mais lentas, disparar essas consultas antes do token de auth estar
+    // anexado ao cliente fazia o RLS filtrar tudo silenciosamente (sem erro),
+    // dando a impressão de que o cadastro estava vazio.
+    if (!authResolved) return;
+
     loadCompanySettings().then((res) => res.ok && res.data && setCompanySettings(res.data));
     // Carrega do Supabase; se vazio/erro, usa localStorage como fallback
     getQuotes().then((r) => {
@@ -464,10 +504,39 @@ const App: React.FC = () => {
       setSales(mapped);
     });
     getCashFlow().then((r) => r.ok && setCashFlow(r.data ?? []));
-  }, []);
+  }, [authResolved]);
 
   useEffect(() => {
+    // Só busca depois que a sessão do Supabase terminou de resolver (ver
+    // comentário no efeito de LOADERS acima) — evita que a consulta de
+    // produtos saia sem o token de autenticação anexado e volte vazia por
+    // causa do RLS, mesmo sem nenhum erro.
+    if (!authResolved) return;
+
+    // Repete a consulta enquanto ela vier vazia sem erro (não só em caso de
+    // erro de fato): um array vazio sem erro é exatamente o sintoma do RLS
+    // filtrando tudo por o token de auth ainda não estar anexado, então
+    // aceitar essa resposta de primeira apagava produtos/matéria-prima que
+    // já existiam no banco.
+    const fetchAllWithRetry = async <T,>(
+      run: () => PromiseLike<{ data: T[] | null; error: unknown }>,
+      attempts = 4
+    ): Promise<{ data: T[] | null; error: unknown }> => {
+      let lastResult: { data: T[] | null; error: unknown } = { data: null, error: null };
+      for (let i = 0; i < attempts; i++) {
+        const result = await run();
+        lastResult = result;
+        if (Array.isArray(result.data) && result.data.length > 0) return result;
+        if (i < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 600 * (i + 1)));
+      }
+      return lastResult;
+    };
+
+    const fetchProductsWithRetry = () =>
+      fetchAllWithRetry<ProductRow>(() => supabase.from(PRODUCTS_TABLE).select("*"));
+
     const loadSystemData = async () => {
+      try {
       let clientsData: Client[] = [];
       for (const tbl of ["clients", "clientes"]) {
         const c = await supabase.from(tbl).select("*");
@@ -482,9 +551,9 @@ const App: React.FC = () => {
       }
       setClients(clientsData);
 
-      const iWithVariants = await supabase
-        .from(INVENTORY_TABLE)
-        .select("*, inventory_variants(*)");
+      const iWithVariants = await fetchAllWithRetry<MaterialVariantRow>(() =>
+        supabase.from(INVENTORY_TABLE).select("*, inventory_variants(*)")
+      );
 
       let inventoryRows: MaterialVariantRow[] = Array.isArray(iWithVariants.data)
         ? (iWithVariants.data as MaterialVariantRow[])
@@ -492,21 +561,28 @@ const App: React.FC = () => {
 
       if (iWithVariants.error) {
         console.error("Falha ao carregar inventory com variantes:", iWithVariants.error);
-        const iFallback = await supabase.from(INVENTORY_TABLE).select("*");
+        const iFallback = await fetchAllWithRetry<MaterialVariantRow>(() =>
+          supabase.from(INVENTORY_TABLE).select("*")
+        );
         inventoryRows = Array.isArray(iFallback.data)
           ? (iFallback.data as MaterialVariantRow[])
           : [];
       }
 
-      const inventoryRowsWithPhotos = await enrichMaterialRowsWithPhotoUrls(
-        inventoryRows as Record<string, unknown>[]
-      );
+      let inventoryRowsWithPhotos: Record<string, unknown>[] = inventoryRows as Record<string, unknown>[];
+      try {
+        inventoryRowsWithPhotos = await enrichMaterialRowsWithPhotoUrls(inventoryRows as Record<string, unknown>[]);
+      } catch (e) {
+        console.warn("enrichMaterialRowsWithPhotoUrls falhou, usando dados sem fotos:", e);
+      }
 
       setRawMaterials(normalizeRawMaterials(inventoryRowsWithPhotos));
 
-      const p = await supabase.from(PRODUCTS_TABLE).select("*");
-      if (Array.isArray(p.data)) {
-        setProducts(normalizeProducts(p.data as ProductRow[]));
+      const p = await fetchProductsWithRetry();
+      if (p.data) {
+        setProducts(normalizeProducts(p.data));
+      } else if (p.error) {
+        console.error("Erro ao carregar produtos após tentativas:", p.error);
       }
 
       const v = await supabase.from(VARIABLE_EXPENSES_TABLE).select("*");
@@ -519,10 +595,13 @@ const App: React.FC = () => {
         }));
         setVariableExpenses(normalized as VariableExpense[]);
       }
+      } catch (err) {
+        console.error("Erro ao carregar dados do sistema:", err);
+      }
     };
 
     loadSystemData();
-  }, []);
+  }, [authResolved]);
 
   // ===============================
   // PERMISSÕES (SEM LOOP)
@@ -534,7 +613,22 @@ const App: React.FC = () => {
       if (role === "Admin") return true;
 
       if (role === "Finance") {
-        return (["dashboard", "cashflow", "financials", "assistant"] as any).includes(view);
+        return (
+          ([
+            "dashboard",
+            "quotes", "newQuote", "quoteDetail",
+            "sales",
+            "clients",
+            "agenda",
+            "cashflow",
+            "payables",
+            "receivables",
+            "financials",
+            "employees",
+            "reports",
+            "assistant",
+          ] as any).includes(view)
+        );
       }
 
       if (role === "Sales") {
@@ -546,8 +640,11 @@ const App: React.FC = () => {
             "quoteDetail",
             "sales",
             "clients",
+            "agenda",
             "products",
             "inventory",
+            "sellers",
+            "settings",
             "assistant",
           ] as any).includes(view)
         );
@@ -556,6 +653,24 @@ const App: React.FC = () => {
       return false;
     };
   }, [role]);
+
+  // Se a tabela "sales" estiver vazia, monta vendas "virtuais" a partir
+  // dos orçamentos com status "Aprovado" (mesmo fallback usado no Dashboard).
+  const effectiveSales = useMemo<Sale[]>(() => {
+    if (sales.length > 0) return sales;
+
+    return quotes
+      .filter((q) => q.status === "Aprovado")
+      .map((q) => ({
+        id: `quote-${q.id}`,
+        quoteId: q.id,
+        customerName: q.customerName || "",
+        salesperson: q.salesperson || "",
+        saleDate: q.date ? new Date(q.date) : new Date(),
+        amount: Number(q.totalPrice || 0),
+        status: "" as any,
+      }));
+  }, [sales, quotes]);
 
   // ===============================
   // RENDER VIEW (ÚNICO)
@@ -573,31 +688,24 @@ if (
   return <EmployeeForm id={employeeId} setActiveView={setActiveView} />;
 }
 
+    // 🚚 entregas pendentes por setor: "delivery-sector-<SETOR>"
+    if (
+      typeof activeView === "string" &&
+      activeView.startsWith("delivery-sector-")
+    ) {
+      const sector = activeView.replace("delivery-sector-", "") as DeliverySector;
+      return <DeliverySectorDetail sector={sector} setActiveView={setActiveView} />;
+    }
 
-    // 🔒 se não tem permissão, mostra dashboard (sem setActiveView aqui!)
+
+    // 🔒 se não tem permissão, mostra dashboard
     if (!canAccess(activeView)) {
-      return role === "Sales" ? (
-        <DashboardSales
-          currentUser={currentUser}
-          sales={sales}
-          companyMonthlyGoal={(companySettings as any)?.monthlyGoal || 0}
-        />
-      ) : (
-        <Dashboard currentUser={currentUser} setActiveView={setActiveView} />
-      );
+      return <Dashboard currentUser={currentUser} setActiveView={setActiveView} />;
     }
 
     switch (activeView) {
       case "dashboard":
-        return role === "Sales" ? (
-          <DashboardSales
-            currentUser={currentUser}
-            sales={sales}
-            companyMonthlyGoal={(companySettings as any)?.monthlyGoal || 0}
-          />
-        ) : (
-          <Dashboard currentUser={currentUser} setActiveView={setActiveView} />
-        );
+        return <Dashboard currentUser={currentUser} setActiveView={setActiveView} />;
 
       // ✅ ORÇAMENTOS
       case "quotes":
@@ -686,7 +794,7 @@ if (
       case "sales":
         return (
           <Sales
-            sales={sales}
+            sales={effectiveSales}
             quotes={quotes}
             clients={clients}
             cashFlow={cashFlow}
@@ -694,12 +802,18 @@ if (
               setSelectedQuoteId(quoteId);
               setActiveView("quoteDetail");
             }}
+            onDeleteSale={(saleId) => {
+              setSales((prev) => prev.filter((s) => String((s as any).id) !== saleId));
+            }}
           />
         );
 
       // ✅ CLIENTES / ESTOQUE / PRODUTOS
       case "clients":
         return <Clients />;
+
+      case "agenda":
+        return <AgendaPage currentUser={currentUser} />;
 
       case "inventory":
         return (
@@ -723,6 +837,9 @@ if (
 
       case "payables":
         return <Payables />;
+
+      case "receivables":
+        return <Receivables />;
 
       case "financials":
         return (
@@ -766,6 +883,8 @@ if (
             setCompanySettings={setCompanySettings}
             users={users}
             setUsers={setUsers}
+            currentUser={currentUser}
+            onUpdateCurrentUser={(updated) => setCurrentUser(updated)}
           />
         );
 

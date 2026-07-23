@@ -4,18 +4,21 @@ import {
   uploadCompanyLogo,
   saveCompanySettings,
 } from "../services/companySettingsServices";
-import { createUser, uploadUserAvatar } from "../services/userService";
+import { createUser, uploadUserAvatar, updateUserProfile } from "../services/userService";
 import {
   formatMoneyInputBR,
   parseMoneyInputBR,
   sanitizeMoneyInputBR,
 } from "../utils/money";
+import { supabase } from "../services/supabase";
 
 interface SettingsProps {
   companySettings: CompanySettings;
   setCompanySettings: (settings: CompanySettings) => void;
   users: User[];
   setUsers: React.Dispatch<React.SetStateAction<User[]>>;
+  currentUser: User;
+  onUpdateCurrentUser?: (updated: User) => void;
 }
 
 const inputClass =
@@ -26,8 +29,60 @@ const Settings: React.FC<SettingsProps> = ({
   setCompanySettings,
   users,
   setUsers,
+  currentUser,
+  onUpdateCurrentUser,
 }) => {
-  const [activeTab, setActiveTab] = useState<"company" | "users">("company");
+  const isAdmin = currentUser.role === "Admin";
+
+  const [activeTab, setActiveTab] = useState<"company" | "users" | "profile">(
+    isAdmin ? "company" : "profile"
+  );
+
+  // ================== EDITAR USUÁRIA ==================
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editRole, setEditRole] = useState<User["role"]>("Sales");
+  const [editGoal, setEditGoal] = useState(0);
+  const [editGoalInput, setEditGoalInput] = useState(formatMoneyInputBR(0));
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const openEdit = (u: User) => {
+    setEditingUser(u);
+    setEditName(u.name);
+    setEditRole(u.role);
+    setEditGoal(u.monthlyGoal ?? 0);
+    setEditGoalInput(formatMoneyInputBR(u.monthlyGoal ?? 0));
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingUser) return;
+    setSavingEdit(true);
+    const goalRoles: User["role"][] = ["Sales", "Finance"];
+    const res = await updateUserProfile(editingUser.id, {
+      name: editName.trim() || editingUser.name,
+      role: editRole,
+      monthlyGoal: goalRoles.includes(editRole) ? editGoal : 0,
+    });
+    setSavingEdit(false);
+    if (!res.ok) {
+      alert("Erro ao salvar alterações. Tente novamente.");
+      return;
+    }
+    setUsers((prev) =>
+      prev.map((u) =>
+        u.id === editingUser.id
+          ? {
+              ...u,
+              name: editName.trim() || u.name,
+              role: editRole,
+              monthlyGoal: goalRoles.includes(editRole) ? editGoal : undefined,
+            }
+          : u
+      )
+    );
+    setEditingUser(null);
+    alert("Usuária atualizada com sucesso ✅");
+  };
 
   // ✅ SALVAR DADOS DA EMPRESA
   const [savingCompany, setSavingCompany] = useState(false);
@@ -114,7 +169,6 @@ const Settings: React.FC<SettingsProps> = ({
 
     setCreating(true);
     try {
-      // Upload avatar first if provided
       let avatarUrl: string | undefined;
       if (newAvatarFile) {
         const up = await uploadUserAvatar(newAvatarFile);
@@ -191,37 +245,99 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
+  // ================== MEU PERFIL / FOTO ==================
+  const [profileAvatarPreview, setProfileAvatarPreview] = useState<string>(
+    currentUser.avatar && !currentUser.avatar.includes("dicebear") ? currentUser.avatar : ""
+  );
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
+  const handleProfileAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingAvatar(true);
+    const up = await uploadUserAvatar(file);
+    if (!up.ok || !up.url) {
+      setUploadingAvatar(false);
+      alert("Erro ao enviar foto.");
+      return;
+    }
+    setProfileAvatarPreview(up.url);
+    await updateUserProfile(currentUser.id, { avatar: up.url });
+    onUpdateCurrentUser?.({ ...currentUser, avatar: up.url });
+    setUploadingAvatar(false);
+  };
+
+  // ================== MEU PERFIL / TROCA DE SENHA ==================
+  const [newPwd, setNewPwd] = useState("");
+  const [confirmPwd, setConfirmPwd] = useState("");
+  const [savingPwd, setSavingPwd] = useState(false);
+
+  const handleChangePassword = async () => {
+    if (newPwd.length < 6) {
+      alert("A senha deve ter pelo menos 6 caracteres.");
+      return;
+    }
+    if (newPwd !== confirmPwd) {
+      alert("As senhas não coincidem.");
+      return;
+    }
+    setSavingPwd(true);
+    const { error } = await supabase.auth.updateUser({ password: newPwd });
+    setSavingPwd(false);
+    if (error) {
+      alert(`Erro ao alterar senha: ${error.message}`);
+      return;
+    }
+    alert("Senha alterada com sucesso ✅");
+    setNewPwd("");
+    setConfirmPwd("");
+  };
+
   return (
     <div className="bg-white p-6 rounded-xl shadow-md min-h-[80vh]">
       {/* TABS */}
       <div className="flex gap-4 border-b mb-6">
-        <button
-          className={`pb-2 font-medium ${
-            activeTab === "company"
-              ? "border-b-2 border-primary-600 text-primary-600"
-              : "text-gray-500"
-          }`}
-          onClick={() => setActiveTab("company")}
-        >
-          Dados da Loja
-        </button>
+        {isAdmin && (
+          <button
+            className={`pb-2 font-medium ${
+              activeTab === "company"
+                ? "border-b-2 border-primary-600 text-primary-600"
+                : "text-gray-500"
+            }`}
+            onClick={() => setActiveTab("company")}
+          >
+            Dados da Loja
+          </button>
+        )}
+
+        {isAdmin && (
+          <button
+            className={`pb-2 font-medium ${
+              activeTab === "users"
+                ? "border-b-2 border-primary-600 text-primary-600"
+                : "text-gray-500"
+            }`}
+            onClick={() => setActiveTab("users")}
+          >
+            Usuários
+          </button>
+        )}
 
         <button
           className={`pb-2 font-medium ${
-            activeTab === "users"
+            activeTab === "profile"
               ? "border-b-2 border-primary-600 text-primary-600"
               : "text-gray-500"
           }`}
-          onClick={() => setActiveTab("users")}
+          onClick={() => setActiveTab("profile")}
         >
-          Usuários
+          Meu Perfil
         </button>
       </div>
 
       {/* ================= DADOS DA EMPRESA ================= */}
-      {activeTab === "company" && (
+      {activeTab === "company" && isAdmin && (
         <div className="max-w-3xl space-y-4">
-          {/* ✅ Cabeçalho com botão salvar */}
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold">Informações da Empresa</h2>
 
@@ -310,7 +426,7 @@ const Settings: React.FC<SettingsProps> = ({
       )}
 
       {/* ================= USUÁRIOS ================= */}
-      {activeTab === "users" && (
+      {activeTab === "users" && isAdmin && (
         <div>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-semibold">Gerenciar Usuários</h2>
@@ -333,26 +449,125 @@ const Settings: React.FC<SettingsProps> = ({
                 <th className="p-3 text-left">Email</th>
                 <th className="p-3 text-left">Função</th>
                 <th className="p-3 text-left">Meta</th>
+                <th className="p-3 text-left">Ações</th>
               </tr>
             </thead>
             <tbody>
               {users.map((u) => (
                 <tr key={u.id} className="border-t">
-                  <td className="p-3">{u.name}</td>
-                  <td className="p-3">{u.email}</td>
-                  <td className="p-3">{u.role}</td>
+                  <td className="p-3 font-medium">{u.name}</td>
+                  <td className="p-3 text-gray-500">{u.email}</td>
+                  <td className="p-3">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                      u.role === "Admin" ? "bg-purple-100 text-purple-700" :
+                      u.role === "Finance" ? "bg-blue-100 text-blue-700" :
+                      "bg-green-100 text-green-700"
+                    }`}>
+                      {u.role === "Admin" ? "Admin" : u.role === "Finance" ? "Financeiro" : "Vendas"}
+                    </span>
+                  </td>
                   <td className="p-3">
                     {u.role === "Sales" || u.role === "Finance"
                       ? (u.monthlyGoal ?? 0).toLocaleString("pt-BR", {
                           style: "currency",
                           currency: "BRL",
                         })
-                      : "-"}
+                      : "—"}
+                  </td>
+                  <td className="p-3">
+                    <button
+                      onClick={() => openEdit(u)}
+                      className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded-lg font-medium text-gray-700 transition"
+                    >
+                      Editar
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+
+          {/* MODAL EDITAR USUÁRIA */}
+          {editingUser && (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+              <div className="bg-white w-full max-w-md rounded-xl shadow-xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold">Editar Usuária</h3>
+                  <button onClick={() => setEditingUser(null)} className="px-2 py-1 rounded hover:bg-gray-100">✕</button>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block font-medium mb-1 text-sm">Email (não editável)</label>
+                    <input
+                      type="email"
+                      className={`${inputClass} bg-gray-50`}
+                      value={editingUser.email}
+                      readOnly
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-medium mb-1 text-sm">Nome</label>
+                    <input
+                      type="text"
+                      className={inputClass}
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-medium mb-1 text-sm">Cargo</label>
+                    <select
+                      className={inputClass}
+                      value={editRole}
+                      onChange={(e) => setEditRole(e.target.value as User["role"])}
+                    >
+                      <option value="Admin">Admin</option>
+                      <option value="Finance">Financeiro</option>
+                      <option value="Sales">Vendas</option>
+                    </select>
+                  </div>
+
+                  {(editRole === "Sales" || editRole === "Finance") && (
+                    <div>
+                      <label className="block font-medium mb-1 text-sm">Meta Mensal (R$)</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className={inputClass}
+                        value={editGoalInput}
+                        onChange={(e) => {
+                          const raw = sanitizeMoneyInputBR(e.target.value);
+                          setEditGoalInput(raw);
+                          setEditGoal(parseMoneyInputBR(raw));
+                        }}
+                        onBlur={() => setEditGoalInput(formatMoneyInputBR(editGoal))}
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-3 pt-3 border-t">
+                    <button
+                      onClick={() => setEditingUser(null)}
+                      className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 text-sm"
+                      disabled={savingEdit}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleSaveEdit}
+                      className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-60 text-sm"
+                      disabled={savingEdit}
+                    >
+                      {savingEdit ? "Salvando..." : "Salvar"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* MODAL CADASTRO */}
           {isCreateModalOpen && (
@@ -495,6 +710,146 @@ const Settings: React.FC<SettingsProps> = ({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ================= MEU PERFIL ================= */}
+      {activeTab === "profile" && (
+        <div className="max-w-lg space-y-4">
+          <h2 className="text-xl font-semibold">Meu Perfil</h2>
+
+          {/* FOTO DE PERFIL */}
+          <div className="flex flex-col items-center gap-3 py-4 border border-gray-200 rounded-xl bg-gray-50">
+            <div className="relative group">
+              {profileAvatarPreview ? (
+                <img
+                  src={profileAvatarPreview}
+                  alt="Foto de perfil"
+                  className="w-28 h-28 rounded-full object-cover border-4 border-white shadow-md"
+                />
+              ) : (
+                <div className="w-28 h-28 rounded-full bg-primary-100 border-4 border-white shadow-md flex items-center justify-center text-primary-700 font-bold text-4xl">
+                  {currentUser.name.charAt(0).toUpperCase()}
+                </div>
+              )}
+              {/* overlay de hover */}
+              <label className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                <span className="text-white text-xs font-semibold text-center px-2">
+                  {uploadingAvatar ? "Enviando..." : "Alterar\nfoto"}
+                </span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={uploadingAvatar}
+                  onChange={handleProfileAvatarChange}
+                />
+              </label>
+            </div>
+            <div className="text-center">
+              <p className="font-semibold text-gray-800">{currentUser.name}</p>
+              <p className="text-sm text-gray-500">
+                {currentUser.role === "Admin" ? "Administrador" : currentUser.role === "Sales" ? "Vendas" : "Financeiro"}
+              </p>
+            </div>
+            <label className={`px-4 py-1.5 text-sm rounded-lg border border-gray-300 cursor-pointer hover:bg-gray-100 transition ${uploadingAvatar ? "opacity-50 pointer-events-none" : ""}`}>
+              {uploadingAvatar ? "Enviando..." : "Escolher foto"}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                disabled={uploadingAvatar}
+                onChange={handleProfileAvatarChange}
+              />
+            </label>
+          </div>
+
+          <div>
+            <label className="block font-medium mb-1">Nome</label>
+            <input
+              type="text"
+              className={`${inputClass} bg-gray-50`}
+              value={currentUser.name}
+              readOnly
+            />
+          </div>
+
+          <div>
+            <label className="block font-medium mb-1">Email</label>
+            <input
+              type="email"
+              className={`${inputClass} bg-gray-50`}
+              value={currentUser.email}
+              readOnly
+            />
+          </div>
+
+          <div>
+            <label className="block font-medium mb-1">Cargo</label>
+            <input
+              type="text"
+              className={`${inputClass} bg-gray-50`}
+              value={
+                currentUser.role === "Admin"
+                  ? "Administrador"
+                  : currentUser.role === "Sales"
+                  ? "Vendas"
+                  : "Financeiro"
+              }
+              readOnly
+            />
+          </div>
+
+          {(currentUser.role === "Sales" || currentUser.role === "Finance") &&
+            currentUser.monthlyGoal !== undefined && (
+              <div>
+                <label className="block font-medium mb-1">Meta Mensal</label>
+                <input
+                  type="text"
+                  className={`${inputClass} bg-gray-50`}
+                  value={currentUser.monthlyGoal.toLocaleString("pt-BR", {
+                    style: "currency",
+                    currency: "BRL",
+                  })}
+                  readOnly
+                />
+              </div>
+            )}
+
+          {/* ALTERAR SENHA */}
+          <div className="border-t pt-5 mt-2 space-y-3">
+            <h3 className="text-lg font-semibold text-gray-800">Alterar Senha</h3>
+
+            <div>
+              <label className="block font-medium mb-1">Nova Senha</label>
+              <input
+                type="password"
+                className={inputClass}
+                value={newPwd}
+                onChange={(e) => setNewPwd(e.target.value)}
+                placeholder="Mínimo 6 caracteres"
+              />
+            </div>
+
+            <div>
+              <label className="block font-medium mb-1">Confirmar Nova Senha</label>
+              <input
+                type="password"
+                className={inputClass}
+                value={confirmPwd}
+                onChange={(e) => setConfirmPwd(e.target.value)}
+                placeholder="Repita a nova senha"
+              />
+            </div>
+
+            <button
+              onClick={handleChangePassword}
+              disabled={savingPwd || !newPwd || !confirmPwd}
+              className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-60"
+            >
+              {savingPwd ? "Salvando..." : "Salvar Senha"}
+            </button>
+          </div>
         </div>
       )}
     </div>

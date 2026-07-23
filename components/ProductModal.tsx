@@ -43,6 +43,7 @@ const categories = [
   "ACESSORIOS PORTAO AUTOMATICO",
   "MOTOR RESIDENCIAL",
   "MOTOR PORTAO AUTOMATICO",
+  "ACESSORIO DE MOTOR",
   "MARMORE",
   "ACESSORIO DE MARMORE",
 ];
@@ -52,9 +53,9 @@ const productStructureByCategory: Record<
   { products: string[]; subCategory1: string[]; subCategory2: string[]; subCategory3: string[] }
 > = {
   ALUMINIO: {
-    products: ["Portao", "Porta", "Grade", "Janela"],
-    subCategory1: ["2 Folhas", "3 Folhas", "Correr", "Basculante", "Abrir", "Fixo"],
-    subCategory2: ["Com Porta", "Sem Porta", "Fixa"],
+    products: ["Portao", "Porta", "Grade", "Janela", "Acessorio"],
+    subCategory1: ["2 Folhas", "3 Folhas", "Correr", "Basculante", "Abrir", "Fixo", "Vidro", "Portao", "Porta", "Aluminio", "Padrão"],
+    subCategory2: ["Com Porta", "Sem Porta", "Fixa", "Padrão"],
     subCategory3: [],
   },
   VIDRO: {
@@ -299,6 +300,7 @@ const buildDefaultDraft = (material?: InventoryItem | null): ProductCompositionI
     measureFormula: {
       target: isLambril ? "height" : "width",
       intervalMm: 120,
+      spanPercent: 100,
     },
   };
 };
@@ -324,6 +326,11 @@ const hydrateCompositionItem = (
     getPositiveNumber(item.factor) ||
     120;
 
+  const inferredSpanPercent = Math.min(
+    100,
+    getPositiveNumber(item.measureFormula?.spanPercent, 100) || 100
+  );
+
   return {
     ...baseDraft,
     ...item,
@@ -340,6 +347,7 @@ const hydrateCompositionItem = (
     measureFormula: {
       target: inferredMeasureTarget,
       intervalMm: inferredInterval,
+      spanPercent: inferredSpanPercent,
     },
   };
 };
@@ -353,6 +361,7 @@ const buildStoredCompositionItem = (
   const applyOn = item.applyOn || "height";
   const quantity = getPositiveNumber(item.quantity, 1) || 1;
   const intervalMm = getPositiveInteger(item.measureFormula?.intervalMm, 120);
+  const spanPercent = Math.min(100, getPositiveNumber(item.measureFormula?.spanPercent, 100) || 100);
 
   let rule: ProductCompositionItem["rule"] = "fixed_quantity";
   if (quantityMode === "made_to_measure") {
@@ -379,6 +388,7 @@ const buildStoredCompositionItem = (
     measureFormula: {
       target: item.measureFormula?.target || (applyOn === "height" ? "width" : "height"),
       intervalMm,
+      spanPercent,
     },
     variantName: item.variantName || "",
   };
@@ -414,6 +424,22 @@ const ProductModal: React.FC<ProductModalProps> = ({
   const [desiredProfitMargin, setDesiredProfitMargin] = useState(
     Number((product as any)?.desiredProfitMargin ?? 20)
   );
+  const [marginByColor, setMarginByColor] = useState<Record<string, number>>(
+    { ...((product as any)?.marginByColor || {}) }
+  );
+  const [minProfitValue, setMinProfitValue] = useState(
+    Number((product as any)?.minProfitValue ?? 0)
+  );
+  const [minProfitValueInput, setMinProfitValueInput] = useState(
+    formatMoneyInputBR(Number((product as any)?.minProfitValue ?? 0))
+  );
+  const [fixedSalePrice, setFixedSalePrice] = useState(
+    Number((product as any)?.fixedSalePrice ?? 0)
+  );
+  const [fixedSalePriceInput, setFixedSalePriceInput] = useState(
+    formatMoneyInputBR(Number((product as any)?.fixedSalePrice ?? 0))
+  );
+  const [isEditingFinalPrice, setIsEditingFinalPrice] = useState(false);
   const [productionHours, setProductionHours] = useState(
     Number((product as any)?.productionHours ?? 0)
   );
@@ -434,9 +460,26 @@ const ProductModal: React.FC<ProductModalProps> = ({
   const [helperHours, setHelperHours] = useState(Number((product as any)?.helperHours ?? 0));
   const [helperRateInput, setHelperRateInput] = useState(formatMoneyInputBR(Number((product as any)?.helperRate ?? 0)));
   const [helperRate, setHelperRate] = useState(Number((product as any)?.helperRate ?? 0));
+  // Instalação — profissional
+  const [instProfCount, setInstProfCount] = useState(Number((product as any)?.instProfCount ?? 1));
+  const [instProfInstHours, setInstProfInstHours] = useState(Number((product as any)?.instProfInstHours ?? 0));
+  const [instProfRateInput, setInstProfRateInput] = useState(formatMoneyInputBR(Number((product as any)?.instProfRate ?? 0)));
+  const [instProfRate, setInstProfRate] = useState(Number((product as any)?.instProfRate ?? 0));
+  // Instalação — ajudante
+  const [instHelpCount, setInstHelpCount] = useState(Number((product as any)?.instHelpCount ?? 1));
+  const [instHelpInstHours, setInstHelpInstHours] = useState(Number((product as any)?.instHelpInstHours ?? 0));
+  const [instHelpRateInput, setInstHelpRateInput] = useState(formatMoneyInputBR(Number((product as any)?.instHelpRate ?? 0)));
+  const [instHelpRate, setInstHelpRate] = useState(Number((product as any)?.instHelpRate ?? 0));
   const [fixedCostRate, setFixedCostRate] = useState(
     Number((product as any)?.fixedCostRate ?? 20)
   );
+  const [avgMarmoreHourlyRate, setAvgMarmoreHourlyRate] = useState(0);
+  const [avgVidroProfessionalHourlyRate, setAvgVidroProfessionalHourlyRate] = useState(0);
+  const [avgHelperHourlyRate, setAvgHelperHourlyRate] = useState(0);
+  const [laborSector, setLaborSector] = useState<string>(
+    String((product as any)?.laborSector || resolveProductFamily(category) || "VIDRO")
+  );
+  const avgProfessionalHourlyRate = laborSector === "MARMORE" ? avgMarmoreHourlyRate : avgVidroProfessionalHourlyRate;
   const [quantity, setQuantity] = useState(
     Number((product as any)?.quantityReference ?? 1)
   );
@@ -519,20 +562,50 @@ const ProductModal: React.FC<ProductModalProps> = ({
 
     loadInventoryForProductModal();
 
-    // Auto-load fixedCostRate from billing settings (always reflects system settings)
+    // Auto-load fixedCostRate e taxa média de produção
     const loadFixedCostRate = async () => {
       const [settingsRes, fixedRes, empRes] = await Promise.all([
-        supabase.from("billing_settings").select("monthly_revenue_target").order("updated_at", { ascending: false }).limit(1),
+        supabase.from("billing_settings").select("monthly_revenue_target, work_days, hours_per_day").order("updated_at", { ascending: false }).limit(1),
         supabase.from("fixed_expenses").select("value"),
-        supabase.from("employees").select("total_monthly_cost"),
+        supabase.from("employees").select("total_monthly_cost, department, monthly_hours, role"),
       ]);
       if (!active) return;
+
       const monthlyRevenue = Number(settingsRes.data?.[0]?.monthly_revenue_target || 0);
+      const workDays = Number(settingsRes.data?.[0]?.work_days || 22);
+      const hoursPerDay = Number(settingsRes.data?.[0]?.hours_per_day || 8);
+      const monthlyProductiveHours = workDays * hoursPerDay;
+
       const fixedTotal = (fixedRes.data || []).reduce((s: number, f: any) => s + Number(f.value || 0), 0);
-      const empTotal = (empRes.data || []).reduce((s: number, e: any) => s + Number(e.total_monthly_cost || 0), 0);
+
+      const allEmployees = empRes.data || [];
+      // Custo fixo: só ADM + Vendas (produção cobrada via MO por produto)
+      const empTotal = allEmployees
+        .filter((e: any) => e.department !== "Produção")
+        .reduce((s: number, e: any) => s + Number(e.total_monthly_cost || 0), 0);
+
       if (monthlyRevenue > 0) {
         setFixedCostRate(Number(((fixedTotal + empTotal) / monthlyRevenue * 100).toFixed(2)));
       }
+
+      // Taxa horária média por setor de mão de obra
+      const MARMORE_ROLES = ["MARMORISTA DE PRODUÇÃO"].map(normalizeText);
+      const VIDRO_PROFESSIONAL_ROLES = ["SERRALHEIRO DE PRODUÇÃO", "INSTALADOR"].map(normalizeText);
+      const HELPER_ROLES = ["AUXILIAR DE PRODUÇÃO", "AUXILIAR DE INSTALAÇÃO"].map(normalizeText);
+
+      const avgHourlyRateFor = (roles: string[]) => {
+        const employeesInRoles = allEmployees.filter((e: any) =>
+          roles.includes(normalizeText(e.role || ""))
+        );
+        if (employeesInRoles.length === 0) return 0;
+        const avgMonthlyCost = employeesInRoles.reduce((s: number, e: any) => s + Number(e.total_monthly_cost || 0), 0) / employeesInRoles.length;
+        const hoursRef = Number(employeesInRoles[0].monthly_hours || monthlyProductiveHours || 176);
+        return Number((avgMonthlyCost / hoursRef).toFixed(2));
+      };
+
+      setAvgMarmoreHourlyRate(avgHourlyRateFor(MARMORE_ROLES));
+      setAvgVidroProfessionalHourlyRate(avgHourlyRateFor(VIDRO_PROFESSIONAL_ROLES));
+      setAvgHelperHourlyRate(avgHourlyRateFor(HELPER_ROLES));
     };
     loadFixedCostRate();
 
@@ -648,10 +721,18 @@ const ProductModal: React.FC<ProductModalProps> = ({
     }
   }, [autoHourlyRate, hourlyRate]);
 
+  // Categorias sem família reconhecida (ex.: acessórios avulsos) não têm
+  // classificação/subcategoria/medidas próprias — sem isso, a categoria
+  // anterior (ex.: VIDRO) ficava "presa" no estado e a tela continuava
+  // mostrando a classificação/subcategoria/simulação de fórmula de um
+  // produto que não tem nada a ver com o acessório selecionado.
+  const isSimpleAccessoryCategory = normalizeText(category) === "ACESSORIO DE MOTOR";
+
   useEffect(() => {
     const family = resolveProductFamily(category);
-    if (family) {
-      setProductCategory(family);
+    setProductCategory(family || category);
+    if (family === "VIDRO" || family === "MARMORE") {
+      setLaborSector(family);
     }
   }, [category]);
 
@@ -676,11 +757,18 @@ const ProductModal: React.FC<ProductModalProps> = ({
   }, [category, productCategory]);
 
   useEffect(() => {
-    if (classificationOptions.length === 0) return;
+    if (classificationOptions.length === 0) {
+      // Acessório de motor não tem campo de classificação na tela (é um
+      // produto simples), então precisa de um valor padrão aqui — senão a
+      // validação do envio ("Informe a classificação do produto") bloqueia
+      // o salvamento sem dar ao usuário como preenchê-la.
+      setProductType(isSimpleAccessoryCategory ? "Acessorio" : "");
+      return;
+    }
     setProductType((prev) =>
       classificationOptions.includes(prev) ? prev : classificationOptions[0]
     );
-  }, [classificationOptions]);
+  }, [classificationOptions, isSimpleAccessoryCategory]);
 
   useEffect(() => {
     if (subCategory1Options.length === 0) {
@@ -764,29 +852,78 @@ const ProductModal: React.FC<ProductModalProps> = ({
     [compositionEntries]
   );
 
+  // Cores disponíveis para este produto: união das variantes de cor de
+  // todos os materiais usados na composição (ex.: Branco, Bronze, Inox...)
+  const productColorOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const names: string[] = [];
+    compositionEntries.forEach((entry) => {
+      if (!entry.material) return;
+      getMaterialVariants(entry.material).forEach((variant: any) => {
+        const name = getVariantName(variant);
+        const key = normalizeText(name);
+        if (name && !seen.has(key)) {
+          seen.add(key);
+          names.push(name);
+        }
+      });
+    });
+    return names.sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+  }, [compositionEntries]);
+
+  const handleMarginByColorChange = (color: string, value: string) => {
+    setMarginByColor((prev) => {
+      const next = { ...prev };
+      if (value.trim() === "") {
+        delete next[color];
+      } else {
+        next[color] = Number(value) || 0;
+      }
+      return next;
+    });
+  };
+
   const laborHoursTotal = useMemo(
     () => getPositiveNumber(productionHours) + getPositiveNumber(assemblyHours),
     [assemblyHours, productionHours]
   );
 
-  const professionalTotal = useMemo(
-    () => getPositiveNumber(professionalCount) * getPositiveNumber(professionalHours) * getPositiveNumber(professionalRate),
-    [professionalCount, professionalHours, professionalRate]
-  );
+  const professionalTotal = useMemo(() => {
+    const hours = getPositiveNumber(professionalHours);
+    const rate  = getPositiveNumber(professionalRate);
+    // Se qtd for 0 mas há horas e valor, assume 1 pessoa
+    const count = getPositiveNumber(professionalCount) || (hours > 0 && rate > 0 ? 1 : 0);
+    return count * hours * rate;
+  }, [professionalCount, professionalHours, professionalRate]);
 
-  const helperTotal = useMemo(
-    () => getPositiveNumber(helperCount) * getPositiveNumber(helperHours) * getPositiveNumber(helperRate),
-    [helperCount, helperHours, helperRate]
-  );
+  const helperTotal = useMemo(() => {
+    const hours = getPositiveNumber(helperHours);
+    const rate  = getPositiveNumber(helperRate);
+    const count = getPositiveNumber(helperCount) || (hours > 0 && rate > 0 ? 1 : 0);
+    return count * hours * rate;
+  }, [helperCount, helperHours, helperRate]);
+
+  const instProfTotal = useMemo(() => {
+    const hours = getPositiveNumber(instProfInstHours);
+    const rate  = getPositiveNumber(instProfRate);
+    const count = getPositiveNumber(instProfCount) || (hours > 0 && rate > 0 ? 1 : 0);
+    return count * hours * rate;
+  }, [instProfCount, instProfInstHours, instProfRate]);
+
+  const instHelpTotal = useMemo(() => {
+    const hours = getPositiveNumber(instHelpInstHours);
+    const rate  = getPositiveNumber(instHelpRate);
+    const count = getPositiveNumber(instHelpCount) || (hours > 0 && rate > 0 ? 1 : 0);
+    return count * hours * rate;
+  }, [instHelpCount, instHelpInstHours, instHelpRate]);
 
   const laborCost = useMemo(
     () => {
-      const detailed = professionalTotal + helperTotal;
-      // Se usou os campos detalhados, usa o total deles; senão cai no legado
+      const detailed = professionalTotal + helperTotal + instProfTotal + instHelpTotal;
       if (detailed > 0) return detailed;
       return laborHoursTotal * getPositiveNumber(hourlyRate);
     },
-    [professionalTotal, helperTotal, laborHoursTotal, hourlyRate]
+    [professionalTotal, helperTotal, instProfTotal, instHelpTotal, laborHoursTotal, hourlyRate]
   );
 
   // Todas as despesas variáveis percentuais cadastradas no sistema
@@ -825,33 +962,37 @@ const ProductModal: React.FC<ProductModalProps> = ({
 
   const baseOperationalCost = materialCost + laborCost;
   const totalCostBeforeMarkup = baseOperationalCost;
-  const markupRate =
-    getPositiveNumber(desiredProfitMargin) +
-    getPositiveNumber(fixedCostRate) +
-    taxRate +
-    commissionRate +
-    otherVariableRate;
+  // Passo 1: absorve custo fixo direto na base de custo (método planilha Excel)
+  const fixedFrac = Math.min(getPositiveNumber(fixedCostRate) / 100, 0.99);
+  const costWithFixed = fixedFrac > 0 ? baseOperationalCost / (1 - fixedFrac) : baseOperationalCost;
+  const fixedCostValue = costWithFixed - baseOperationalCost;
+  // Passo 2: aplica variáveis + lucro sobre o custo já absorvido
+  const variableAndProfitRate = (getPositiveNumber(desiredProfitMargin) + taxRate + commissionRate + otherVariableRate) / 100;
   const salePriceUnit =
-    markupRate < 100
-      ? totalCostBeforeMarkup / (1 - markupRate / 100)
-      : totalCostBeforeMarkup;
-  const taxValue = salePriceUnit * (taxRate / 100);
-  const commissionValue = salePriceUnit * (commissionRate / 100);
-  const otherVariableValue = salePriceUnit * (otherVariableRate / 100);
-  const fixedCostValue = salePriceUnit * (getPositiveNumber(fixedCostRate) / 100);
+    variableAndProfitRate < 0.99
+      ? costWithFixed / (1 - variableAndProfitRate)
+      : costWithFixed;
+  // Quando há preço fixo definido manualmente, a margem/lucro exibidos abaixo
+  // passam a refletir esse valor real (o que de fato será cobrado), em vez do
+  // preço teórico calculado por %. Assim o produto continua mostrando quanto
+  // de lucro ele realmente dá, mesmo ignorando o cálculo automático.
+  const effectiveSalePriceUnit = fixedSalePrice > 0 ? fixedSalePrice : salePriceUnit;
+  const taxValue = effectiveSalePriceUnit * (taxRate / 100);
+  const commissionValue = effectiveSalePriceUnit * (commissionRate / 100);
+  const otherVariableValue = effectiveSalePriceUnit * (otherVariableRate / 100);
   const netMarginValue =
-    salePriceUnit -
+    effectiveSalePriceUnit -
     totalCostBeforeMarkup -
     taxValue -
     commissionValue -
     otherVariableValue -
     fixedCostValue;
-  const netMarginRate = salePriceUnit > 0 ? (netMarginValue / salePriceUnit) * 100 : 0;
+  const netMarginRate = effectiveSalePriceUnit > 0 ? (netMarginValue / effectiveSalePriceUnit) * 100 : 0;
   const contributionValue =
-    salePriceUnit - materialCost - taxValue - commissionValue - otherVariableValue - fixedCostValue;
+    effectiveSalePriceUnit - materialCost - taxValue - commissionValue - otherVariableValue - fixedCostValue;
   const contributionRate =
-    salePriceUnit > 0 ? (contributionValue / salePriceUnit) * 100 : 0;
-  const finalTotal = salePriceUnit * getPositiveInteger(quantity, 1);
+    effectiveSalePriceUnit > 0 ? (contributionValue / effectiveSalePriceUnit) * 100 : 0;
+  const effectiveFinalTotal = effectiveSalePriceUnit * getPositiveInteger(quantity, 1);
 
   const lineOptions = useMemo(() => {
     const uniqueLines = Array.from(
@@ -975,7 +1116,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
   };
 
   const handleDraftMeasureFormulaChange = (
-    field: "target" | "intervalMm",
+    field: "target" | "intervalMm" | "spanPercent",
     value: unknown
   ) => {
     setDraftItem((prev) =>
@@ -985,6 +1126,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
             measureFormula: {
               target: prev.measureFormula?.target || "height",
               intervalMm: getPositiveInteger(prev.measureFormula?.intervalMm, 120),
+              spanPercent: Math.min(100, getPositiveNumber(prev.measureFormula?.spanPercent, 100) || 100),
               ...prev.measureFormula,
               [field]: value,
             },
@@ -1068,6 +1210,9 @@ const ProductModal: React.FC<ProductModalProps> = ({
       composition,
       image,
       desiredProfitMargin: getPositiveNumber(desiredProfitMargin),
+      marginByColor: Object.keys(marginByColor).length > 0 ? marginByColor : undefined,
+      minProfitValue: getPositiveNumber(minProfitValue),
+      fixedSalePrice: getPositiveNumber(fixedSalePrice),
       laborCost,
       productionHours: getPositiveNumber(productionHours),
       assemblyHours: getPositiveNumber(assemblyHours),
@@ -1078,7 +1223,14 @@ const ProductModal: React.FC<ProductModalProps> = ({
       helperCount: getPositiveNumber(helperCount),
       helperHours: getPositiveNumber(helperHours),
       helperRate: getPositiveNumber(helperRate),
+      instProfCount: getPositiveNumber(instProfCount),
+      instProfInstHours: getPositiveNumber(instProfInstHours),
+      instProfRate: getPositiveNumber(instProfRate),
+      instHelpCount: getPositiveNumber(instHelpCount),
+      instHelpInstHours: getPositiveNumber(instHelpInstHours),
+      instHelpRate: getPositiveNumber(instHelpRate),
       fixedCostRate: getPositiveNumber(fixedCostRate),
+      laborSector,
       quantityReference: getPositiveInteger(quantity, 1),
       selectedCategoryColor,
       referenceWidthMm: getPositiveInteger(referenceWidthMm, 1),
@@ -1214,6 +1366,14 @@ const ProductModal: React.FC<ProductModalProps> = ({
                   </div>
                 </div>
 
+                {isSimpleAccessoryCategory ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-sm text-slate-600">
+                      Acessorio de motor e um produto simples, sem classificacao,
+                      subcategoria ou medidas — o preco nao depende de largura/altura.
+                    </p>
+                  </div>
+                ) : (
                 <div className="grid gap-5 lg:grid-cols-[1.2fr,0.8fr]">
                   <div className="space-y-5">
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -1332,23 +1492,23 @@ const ProductModal: React.FC<ProductModalProps> = ({
                       </p>
                       <div className="mt-3 grid gap-3 sm:grid-cols-2">
                         <label className="text-sm text-slate-700">
-                          Acréscimo de Largura (mm)
-                          <input
-                            type="number"
-                            min={0}
-                            value={widthIncrement}
-                            onChange={(e) => setWidthIncrement(Number(e.target.value) || 0)}
-                            className="mt-2 w-full rounded-xl border border-orange-300 bg-white px-4 py-3 text-slate-900"
-                            placeholder="Ex: 40"
-                          />
-                        </label>
-                        <label className="text-sm text-slate-700">
                           Acréscimo de Altura (mm)
                           <input
                             type="number"
                             min={0}
                             value={heightIncrement}
                             onChange={(e) => setHeightIncrement(Number(e.target.value) || 0)}
+                            className="mt-2 w-full rounded-xl border border-orange-300 bg-white px-4 py-3 text-slate-900"
+                            placeholder="Ex: 40"
+                          />
+                        </label>
+                        <label className="text-sm text-slate-700">
+                          Acréscimo de Largura (mm)
+                          <input
+                            type="number"
+                            min={0}
+                            value={widthIncrement}
+                            onChange={(e) => setWidthIncrement(Number(e.target.value) || 0)}
                             className="mt-2 w-full rounded-xl border border-orange-300 bg-white px-4 py-3 text-slate-900"
                             placeholder="Ex: 40"
                           />
@@ -1363,19 +1523,6 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     </h3>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <label className="text-sm text-slate-700">
-                        Largura do vao (mm)
-                        <input
-                          type="number"
-                          min={1}
-                          value={referenceWidthMm}
-                          onChange={(event) =>
-                            setReferenceWidthMm(Number(event.target.value) || 0)
-                          }
-                          className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900"
-                        />
-                      </label>
-
-                      <label className="text-sm text-slate-700">
                         Altura do vao (mm)
                         <input
                           type="number"
@@ -1387,12 +1534,26 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900"
                         />
                       </label>
+
+                      <label className="text-sm text-slate-700">
+                        Largura do vao (mm)
+                        <input
+                          type="number"
+                          min={1}
+                          value={referenceWidthMm}
+                          onChange={(event) =>
+                            setReferenceWidthMm(Number(event.target.value) || 0)
+                          }
+                          className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900"
+                        />
+                      </label>
                     </div>
                     <p className="mt-2 text-xs text-slate-500">
                       Esses valores servem para testar a formula antes de salvar o produto.
                     </p>
                   </div>
                 </div>
+                )}
               </div>
             </section>
 
@@ -1573,73 +1734,110 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     </p>
                   </div>
 
-                  {/* PROFISSIONAL */}
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
-                    <p className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Profissional</p>
-                    <div className="grid gap-3 md:grid-cols-4">
-                      <label className="text-sm text-slate-700">
-                        Qtd pessoas
-                        <input type="number" min={0} value={professionalCount}
-                          onChange={(e) => setProfessionalCount(Number(e.target.value) || 0)}
-                          onFocus={(e) => e.target.select()}
-                          className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3" />
-                      </label>
-                      <label className="text-sm text-slate-700">
-                        Horas trabalhadas
-                        <input type="number" min={0} value={professionalHours}
-                          onChange={(e) => setProfessionalHours(Number(e.target.value) || 0)}
-                          onFocus={(e) => e.target.select()}
-                          className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3" />
-                      </label>
-                      <label className="text-sm text-slate-700">
-                        Valor hora (R$)
-                        <input type="text" inputMode="decimal" value={professionalRateInput}
-                          onChange={(e) => { const v = sanitizeMoneyInputBR(e.target.value); setProfessionalRateInput(v); setProfessionalRate(parseMoneyInputBR(v)); }}
-                          onBlur={() => setProfessionalRateInput(formatMoneyInputBR(professionalRate))}
-                          onFocus={(e) => e.target.select()}
-                          className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3" />
-                      </label>
-                      <label className="text-sm text-slate-700">
-                        Total profissional
-                        <input readOnly value={professionalTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                          className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 font-semibold text-slate-800" />
-                      </label>
+                  {/* Seletor de setor — define a taxa média do profissional */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Setor:</span>
+                    <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setLaborSector("MARMORE")}
+                        className={`px-3 py-1.5 text-xs font-semibold transition-colors ${laborSector === "MARMORE" ? "bg-primary-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                      >
+                        Mármore
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLaborSector("VIDRO")}
+                        className={`px-3 py-1.5 text-xs font-semibold transition-colors border-l border-slate-300 ${laborSector === "VIDRO" ? "bg-primary-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                      >
+                        Vidro
+                      </button>
                     </div>
                   </div>
 
-                  {/* AJUDANTE */}
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
-                    <p className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Ajudante</p>
-                    <div className="grid gap-3 md:grid-cols-4">
-                      <label className="text-sm text-slate-700">
-                        Qtd pessoas
-                        <input type="number" min={0} value={helperCount}
-                          onChange={(e) => setHelperCount(Number(e.target.value) || 0)}
-                          onFocus={(e) => e.target.select()}
-                          className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3" />
-                      </label>
-                      <label className="text-sm text-slate-700">
-                        Horas trabalhadas
-                        <input type="number" min={0} value={helperHours}
-                          onChange={(e) => setHelperHours(Number(e.target.value) || 0)}
-                          onFocus={(e) => e.target.select()}
-                          className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3" />
-                      </label>
-                      <label className="text-sm text-slate-700">
-                        Valor hora (R$)
-                        <input type="text" inputMode="decimal" value={helperRateInput}
-                          onChange={(e) => { const v = sanitizeMoneyInputBR(e.target.value); setHelperRateInput(v); setHelperRate(parseMoneyInputBR(v)); }}
-                          onBlur={() => setHelperRateInput(formatMoneyInputBR(helperRate))}
-                          onFocus={(e) => e.target.select()}
-                          className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3" />
-                      </label>
-                      <label className="text-sm text-slate-700">
-                        Total ajudante
-                        <input readOnly value={helperTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                          className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 font-semibold text-slate-800" />
-                      </label>
-                    </div>
-                  </div>
+                  {/* helper inline para não repetir JSX dos dois cards */}
+                  {(() => {
+                    const makeColHeader = (hourLabel: string) => (
+                      <div className="grid grid-cols-[76px_1fr_1fr_1fr_1fr] gap-x-1.5 mb-1">
+                        <span />
+                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Qtd</span>
+                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">{hourLabel}</span>
+                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Valor/h (R$)</span>
+                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Total</span>
+                      </div>
+                    );
+                    const inputCls = "w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm";
+                    const readCls  = "w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-800";
+                    return (
+                      <>
+                        {/* CARD PRODUÇÃO */}
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1.5">
+                          <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Produção</p>
+                          {makeColHeader("H. Produção")}
+                          {/* Profissional */}
+                          <div className="grid grid-cols-[76px_1fr_1fr_1fr_1fr] gap-x-1.5 items-center">
+                            <span className="text-xs font-medium text-slate-700">Profissional</span>
+                            <input type="number" min={0} value={professionalCount} onFocus={(e)=>e.target.select()} onChange={(e)=>setProfessionalCount(Number(e.target.value)||0)} className={inputCls} />
+                            <input type="number" min={0} value={professionalHours} onFocus={(e)=>e.target.select()} onChange={(e)=>setProfessionalHours(Number(e.target.value)||0)} className={inputCls} />
+                            <div>
+                              <input type="text" inputMode="decimal" value={professionalRateInput} onFocus={(e)=>e.target.select()}
+                                onChange={(e)=>{const v=sanitizeMoneyInputBR(e.target.value);setProfessionalRateInput(v);setProfessionalRate(parseMoneyInputBR(v));}}
+                                onBlur={()=>setProfessionalRateInput(formatMoneyInputBR(professionalRate))} className={inputCls} />
+                              {avgProfessionalHourlyRate>0&&<button type="button" onClick={()=>{setProfessionalRate(avgProfessionalHourlyRate);setProfessionalRateInput(formatMoneyInputBR(avgProfessionalHourlyRate));}} className="text-[10px] text-blue-600 hover:underline">taxa média</button>}
+                            </div>
+                            <input readOnly value={professionalTotal.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})} className={readCls} />
+                          </div>
+                          <div className="border-t border-slate-200" />
+                          {/* Ajudante */}
+                          <div className="grid grid-cols-[76px_1fr_1fr_1fr_1fr] gap-x-1.5 items-center">
+                            <span className="text-xs font-medium text-slate-700">Ajudante</span>
+                            <input type="number" min={0} value={helperCount} onFocus={(e)=>e.target.select()} onChange={(e)=>setHelperCount(Number(e.target.value)||0)} className={inputCls} />
+                            <input type="number" min={0} value={helperHours} onFocus={(e)=>e.target.select()} onChange={(e)=>setHelperHours(Number(e.target.value)||0)} className={inputCls} />
+                            <div>
+                              <input type="text" inputMode="decimal" value={helperRateInput} onFocus={(e)=>e.target.select()}
+                                onChange={(e)=>{const v=sanitizeMoneyInputBR(e.target.value);setHelperRateInput(v);setHelperRate(parseMoneyInputBR(v));}}
+                                onBlur={()=>setHelperRateInput(formatMoneyInputBR(helperRate))} className={inputCls} />
+                              {avgHelperHourlyRate>0&&<button type="button" onClick={()=>{setHelperRate(avgHelperHourlyRate);setHelperRateInput(formatMoneyInputBR(avgHelperHourlyRate));}} className="text-[10px] text-blue-600 hover:underline">taxa média</button>}
+                            </div>
+                            <input readOnly value={helperTotal.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})} className={readCls} />
+                          </div>
+                        </div>
+
+                        {/* CARD INSTALAÇÃO */}
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1.5">
+                          <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Instalação</p>
+                          {makeColHeader("H. Instalação")}
+                          {/* Profissional */}
+                          <div className="grid grid-cols-[76px_1fr_1fr_1fr_1fr] gap-x-1.5 items-center">
+                            <span className="text-xs font-medium text-slate-700">Profissional</span>
+                            <input type="number" min={0} value={instProfCount} onFocus={(e)=>e.target.select()} onChange={(e)=>setInstProfCount(Number(e.target.value)||0)} className={inputCls} />
+                            <input type="number" min={0} value={instProfInstHours} onFocus={(e)=>e.target.select()} onChange={(e)=>setInstProfInstHours(Number(e.target.value)||0)} className={inputCls} />
+                            <div>
+                              <input type="text" inputMode="decimal" value={instProfRateInput} onFocus={(e)=>e.target.select()}
+                                onChange={(e)=>{const v=sanitizeMoneyInputBR(e.target.value);setInstProfRateInput(v);setInstProfRate(parseMoneyInputBR(v));}}
+                                onBlur={()=>setInstProfRateInput(formatMoneyInputBR(instProfRate))} className={inputCls} />
+                              {avgProfessionalHourlyRate>0&&<button type="button" onClick={()=>{setInstProfRate(avgProfessionalHourlyRate);setInstProfRateInput(formatMoneyInputBR(avgProfessionalHourlyRate));}} className="text-[10px] text-blue-600 hover:underline">taxa média</button>}
+                            </div>
+                            <input readOnly value={instProfTotal.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})} className={readCls} />
+                          </div>
+                          <div className="border-t border-slate-200" />
+                          {/* Ajudante */}
+                          <div className="grid grid-cols-[76px_1fr_1fr_1fr_1fr] gap-x-1.5 items-center">
+                            <span className="text-xs font-medium text-slate-700">Ajudante</span>
+                            <input type="number" min={0} value={instHelpCount} onFocus={(e)=>e.target.select()} onChange={(e)=>setInstHelpCount(Number(e.target.value)||0)} className={inputCls} />
+                            <input type="number" min={0} value={instHelpInstHours} onFocus={(e)=>e.target.select()} onChange={(e)=>setInstHelpInstHours(Number(e.target.value)||0)} className={inputCls} />
+                            <div>
+                              <input type="text" inputMode="decimal" value={instHelpRateInput} onFocus={(e)=>e.target.select()}
+                                onChange={(e)=>{const v=sanitizeMoneyInputBR(e.target.value);setInstHelpRateInput(v);setInstHelpRate(parseMoneyInputBR(v));}}
+                                onBlur={()=>setInstHelpRateInput(formatMoneyInputBR(instHelpRate))} className={inputCls} />
+                              {avgHelperHourlyRate>0&&<button type="button" onClick={()=>{setInstHelpRate(avgHelperHourlyRate);setInstHelpRateInput(formatMoneyInputBR(avgHelperHourlyRate));}} className="text-[10px] text-blue-600 hover:underline">taxa média</button>}
+                            </div>
+                            <input readOnly value={instHelpTotal.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})} className={readCls} />
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
 
                   {/* TOTAL MÃO DE OBRA */}
                   <div className="flex items-center justify-between rounded-xl border border-primary-200 bg-primary-50 px-5 py-3">
@@ -1675,7 +1873,51 @@ const ProductModal: React.FC<ProductModalProps> = ({
                         className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
                       />
                     </label>
+
+                    <label className="text-sm text-slate-700">
+                      Lucro mínimo (R$)
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={minProfitValueInput}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => {
+                          const v = sanitizeMoneyInputBR(e.target.value);
+                          setMinProfitValueInput(v);
+                          setMinProfitValue(parseMoneyInputBR(v));
+                        }}
+                        onBlur={() => setMinProfitValueInput(formatMoneyInputBR(minProfitValue))}
+                        className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
+                      />
+                    </label>
                   </div>
+                  <p className="text-xs text-slate-500">
+                    Garante esse lucro mínimo por unidade no orçamento, mesmo que a % acima resulte em menos (útil em peças pequenas, onde a margem percentual gera pouco lucro em reais). Deixe em R$ 0,00 para não aplicar piso.
+                  </p>
+
+                  {productColorOptions.length > 0 && (
+                    <div className="mt-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                      <p className="text-sm font-semibold text-slate-700">Margem por cor (opcional)</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Deixe em branco para usar a margem geral ({getPositiveNumber(desiredProfitMargin)}%) nessa cor. Útil quando uma cor (ex.: inox, madeirado) tem matéria-prima mais cara e a margem padrão deixa o preço final muito alto.
+                      </p>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+                        {productColorOptions.map((color) => (
+                          <label key={color} className="text-xs text-slate-600">
+                            {color}
+                            <input
+                              type="number"
+                              min={0}
+                              placeholder={`${getPositiveNumber(desiredProfitMargin)}`}
+                              value={marginByColor[color] ?? ""}
+                              onChange={(event) => handleMarginByColorChange(color, event.target.value)}
+                              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                     <span className="font-semibold text-slate-700">Custos fixos:</span>{" "}
@@ -1715,7 +1957,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     </div>
                     {otherVariableExpenses.map((expense) => {
                       const rate = Number(expense.value || 0);
-                      const val = salePriceUnit * (rate / 100);
+                      const val = effectiveSalePriceUnit * (rate / 100);
                       return (
                         <div key={expense.id} className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
                           <span>{expense.name} ({rate.toFixed(2)}%)</span>
@@ -1728,7 +1970,14 @@ const ProductModal: React.FC<ProductModalProps> = ({
                       <strong>{formatCurrency(fixedCostValue)}</strong>
                     </div>
                     <div className="flex items-center justify-between rounded-2xl bg-blue-50 px-4 py-3 text-blue-900">
-                      <span>Preco sugerido por unidade</span>
+                      <span>
+                        Preco sugerido por unidade
+                        {fixedSalePrice > 0 && (
+                          <span className="block text-[11px] font-normal text-blue-700">
+                            Preço real (definido manualmente) é {formatCurrency(fixedSalePrice)} — a margem abaixo já considera esse valor.
+                          </span>
+                        )}
+                      </span>
                       <strong>{formatCurrency(salePriceUnit)}</strong>
                     </div>
                     <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
@@ -1746,14 +1995,90 @@ const ProductModal: React.FC<ProductModalProps> = ({
                   </div>
 
                   <div className="mt-5 rounded-[24px] bg-slate-900 px-5 py-4 text-white">
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
-                      Preco final
-                    </p>
-                    <p className="mt-2 text-3xl font-semibold">
-                      {formatCurrency(finalTotal)}
-                    </p>
-                    <p className="mt-1 text-sm text-slate-300">
-                      Considerando {getPositiveInteger(quantity, 1)} unidade(s) vendida(s).
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
+                        Preco final
+                      </p>
+                      {!isEditingFinalPrice && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFixedSalePriceInput(
+                              formatMoneyInputBR(fixedSalePrice > 0 ? fixedSalePrice : salePriceUnit)
+                            );
+                            setIsEditingFinalPrice(true);
+                          }}
+                          className="text-xs font-semibold text-primary-300 underline hover:text-primary-200"
+                        >
+                          Editar
+                        </button>
+                      )}
+                    </div>
+
+                    {isEditingFinalPrice ? (
+                      <div className="mt-2 space-y-2">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          autoFocus
+                          value={fixedSalePriceInput}
+                          onFocus={(e) => e.target.select()}
+                          onChange={(e) => setFixedSalePriceInput(sanitizeMoneyInputBR(e.target.value))}
+                          className="w-full rounded-xl border border-slate-600 bg-slate-800 px-4 py-2 text-2xl font-semibold text-white"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFixedSalePrice(parseMoneyInputBR(fixedSalePriceInput));
+                              setIsEditingFinalPrice(false);
+                            }}
+                            className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-semibold hover:bg-primary-500"
+                          >
+                            Salvar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingFinalPrice(false)}
+                            className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-slate-800"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="mt-2 text-3xl font-semibold">
+                          {formatCurrency(effectiveFinalTotal)}
+                        </p>
+                        <p className="mt-1 text-sm text-slate-300">
+                          Considerando {getPositiveInteger(quantity, 1)} unidade(s) vendida(s).
+                        </p>
+                        <p className="mt-1 text-sm text-slate-300">
+                          Margem líquida real: {formatCurrency(netMarginValue)} ({netMarginRate.toFixed(2)}%)
+                        </p>
+                        {fixedSalePrice > 0 && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
+                              Ajustado manualmente
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFixedSalePrice(0);
+                                setFixedSalePriceInput(formatMoneyInputBR(0));
+                              }}
+                              className="text-[11px] font-semibold text-slate-300 underline hover:text-white"
+                            >
+                              Usar cálculo automático
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    <p className="mt-3 text-[11px] text-slate-400">
+                      Ao definir um valor aqui, ele substitui o cálculo automático por margem sempre que esse produto for usado num orçamento.
                     </p>
                   </div>
                 </div>
@@ -2248,14 +2573,48 @@ const ProductModal: React.FC<ProductModalProps> = ({
                                 className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
                               />
                             </label>
+
+                            <label className="text-sm text-slate-700">
+                              Porcentagem do vao usada por essa peca (%)
+                              <input
+                                type="number"
+                                min={1}
+                                max={100}
+                                step={1}
+                                value={draftItem.measureFormula?.spanPercent ?? 100}
+                                onChange={(event) => {
+                                  const nextPercent = Math.min(
+                                    100,
+                                    Math.max(1, Number(event.target.value) || 100)
+                                  );
+                                  handleDraftMeasureFormulaChange(
+                                    "spanPercent",
+                                    nextPercent
+                                  );
+                                }}
+                                className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
+                              />
+                              <span className="mt-1 block text-xs text-slate-500">
+                                Use menos de 100% quando o vao for dividido entre 2 materiais
+                                diferentes (ex: 2 lambris de tamanhos distintos).
+                              </span>
+                            </label>
                           </div>
 
                           <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-                            O sistema vai adicionar uma nova peca ate completar toda a{" "}
-                            {(draftItem.measureFormula?.target || "height") === "height"
-                              ? "altura"
-                              : "largura"}{" "}
-                            do vao.
+                            {(() => {
+                              const spanPercent = Math.min(
+                                100,
+                                getPositiveNumber(draftItem.measureFormula?.spanPercent, 100) || 100
+                              );
+                              const axisLabel =
+                                (draftItem.measureFormula?.target || "height") === "height"
+                                  ? "altura"
+                                  : "largura";
+                              return spanPercent < 100
+                                ? `O sistema vai adicionar uma nova peca ate completar ${spanPercent}% da ${axisLabel} do vao.`
+                                : `O sistema vai adicionar uma nova peca ate completar toda a ${axisLabel} do vao.`;
+                            })()}
                           </div>
                         </div>
                       )}

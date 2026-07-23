@@ -1,6 +1,7 @@
 // src/components/CashFlowForm.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { CashFlowEntry } from "../types";
+import { supabase } from "../services/supabase";
 import {
   getCashFlow,
   createCashFlowEntry,
@@ -41,6 +42,13 @@ const formatBR = (ymd?: string) => {
   const [y, m, d] = ymd.split("-");
   if (!y || !m || !d) return ymd;
   return `${d}/${m}/${y}`;
+};
+
+const formatTimeBR = (isoCreatedAt?: string) => {
+  if (!isoCreatedAt) return "—";
+  const d = new Date(isoCreatedAt);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 };
 
 const money = (n: number) =>
@@ -396,6 +404,49 @@ const CashFlowForm: React.FC<Props> = ({ cashFlow, setCashFlow }) => {
     load();
   }, [setCashFlow]);
 
+  // Rede de segurança caso o Realtime do Supabase não esteja habilitado para
+  // a tabela "cashflow": ao voltar para esta aba (ex.: depois de fechar uma
+  // venda em outra aba) ou reconectar a internet, busca os dados de novo.
+  useEffect(() => {
+    const refetch = async () => {
+      const res = await getCashFlow();
+      if (res.ok) setCashFlow(res.data ?? []);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refetch();
+    };
+    window.addEventListener("focus", refetch);
+    window.addEventListener("online", refetch);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", refetch);
+      window.removeEventListener("online", refetch);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [setCashFlow]);
+
+  // Mantém o caixa sincronizado em tempo real: qualquer lançamento criado em
+  // outra tela (venda fechada, conta paga) ou outra aba/sessão atualiza esta
+  // tela automaticamente, em vez de deixar o saldo "preso" no que foi
+  // carregado quando a tela abriu.
+  useEffect(() => {
+    const channel = supabase
+      .channel("cashflow-sync")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "cashflow" },
+        async () => {
+          const res = await getCashFlow();
+          if (res.ok) setCashFlow(res.data ?? []);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [setCashFlow]);
+
   // -------- Helpers de cálculo
   const filtered = useMemo(() => {
     const list = Array.isArray(cashFlow) ? cashFlow : [];
@@ -484,7 +535,14 @@ const CashFlowForm: React.FC<Props> = ({ cashFlow, setCashFlow }) => {
         return;
       }
 
-      setCashFlow((prev) => [res.data as CashFlowEntry, ...(prev ?? [])]);
+      // busca a lista completa e atualizada do banco (em vez de só somar ao que já
+      // estava na memória) para refletir lançamentos feitos em outras abas/sessões
+      const refresh = await getCashFlow();
+      if (refresh.ok) {
+        setCashFlow(refresh.data ?? []);
+      } else {
+        setCashFlow((prev) => [res.data as CashFlowEntry, ...(prev ?? [])]);
+      }
 
       // limpa form
       setAmount(0);
@@ -797,6 +855,7 @@ const CashFlowForm: React.FC<Props> = ({ cashFlow, setCashFlow }) => {
           <thead className="bg-gray-100">
             <tr>
               <th className="p-3 text-left">Data</th>
+              <th className="p-3 text-left">Horário</th>
               <th className="p-3 text-left">Tipo</th>
               <th className="p-3 text-left">Categoria</th>
               <th className="p-3 text-left">Subcategoria</th>
@@ -809,7 +868,7 @@ const CashFlowForm: React.FC<Props> = ({ cashFlow, setCashFlow }) => {
           <tbody>
             {sorted.length === 0 ? (
               <tr>
-                <td colSpan={7} className="p-6 text-center text-gray-500">
+                <td colSpan={8} className="p-6 text-center text-gray-500">
                   Nenhum lançamento ainda.
                 </td>
               </tr>
@@ -817,6 +876,7 @@ const CashFlowForm: React.FC<Props> = ({ cashFlow, setCashFlow }) => {
               sorted.map((x) => (
                 <tr key={x.id} className="border-t">
                   <td className="p-3">{formatBR(x.date)}</td>
+                  <td className="p-3 text-gray-500">{formatTimeBR(x.createdAt)}</td>
                   <td className="p-3">{x.type}</td>
                   <td className="p-3">{x.category || "-"}</td>
                   <td className="p-3">{x.subcategory || "-"}</td>

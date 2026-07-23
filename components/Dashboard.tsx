@@ -1,8 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "./icons/Icon";
-import { View, User, Product, QuoteItem } from "../types";
+import { View, User, Product } from "../types";
 import motivationalQuotes from "../data/motivationalQuotes";
 import { supabase } from "../services/supabase";
+import {
+  DeliverySector,
+  SECTOR_LABELS,
+  SECTOR_DOT_COLORS,
+  buildDeliveryEntriesBySector,
+  parseDateFlexible,
+} from "../utils/deliveryEntries";
+import AgendaCard from "./agenda/AgendaCard";
 
 type SellerRow = {
   id: string | number;
@@ -17,16 +25,6 @@ type SaleRowAny = any;
 type QuoteRowAny = any;
 type ClientRowAny = any;
 type EmployeeRowAny = any;
-type DeliverySector = "GRANITO" | "VIDROS" | "ALUMINIO" | "PORTAO AUTOMATICO";
-
-type DeliveryEntry = {
-  id: string;
-  sector: DeliverySector;
-  saleDate: string;
-  deliveryDate: string;
-  clientName: string;
-  clientAddress: string;
-};
 
 type BirthdayMonthLabel = "Mês atual" | "Próximo mês" | "Próximos meses";
 
@@ -43,27 +41,79 @@ interface DashboardCardProps {
   title: string;
   value: string;
   icon: React.ReactNode;
-  color: string;
   onClick?: () => void;
+  change?: number | null;
+  invertChangeColor?: boolean;
+  progressPercent?: number;
 }
+
+const ChangeIndicator: React.FC<{ change?: number | null; invert?: boolean }> = ({ change, invert }) => {
+  if (change === undefined) return null;
+
+  if (change === null) {
+    return <span className="text-xs text-gray-400 dark:text-gray-500">— sem comparação</span>;
+  }
+
+  const rounded = Math.round(change);
+  const isUp = change > 0;
+  const isDown = change < 0;
+  const isGood = invert ? isDown : isUp;
+  const colorClass = rounded === 0
+    ? "text-gray-400 dark:text-gray-500"
+    : isGood
+    ? "text-green-600 dark:text-green-400"
+    : "text-red-600 dark:text-red-400";
+
+  return (
+    <span className={`flex items-center gap-1 text-xs font-semibold ${colorClass}`}>
+      {rounded !== 0 && (
+        <Icon className="w-3 h-3">
+          {isUp ? <path d="M18 15l-6-6-6 6" /> : <path d="M6 9l6 6 6-6" />}
+        </Icon>
+      )}
+      {rounded > 0 ? "+" : ""}
+      {rounded}% vs. mês anterior
+    </span>
+  );
+};
 
 const DashboardCard: React.FC<DashboardCardProps> = ({
   title,
   value,
   icon,
-  color,
   onClick,
+  change,
+  invertChangeColor,
+  progressPercent,
 }) => (
   <div
     onClick={onClick}
-    className={`bg-white p-6 rounded-xl shadow-md flex items-center justify-between
-    transition-transform transform hover:scale-105 ${onClick ? "cursor-pointer" : ""}`}
+    className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 ${
+      onClick ? "cursor-pointer hover:border-primary-300 dark:hover:border-primary-600 transition-colors" : ""
+    }`}
   >
-    <div>
-      <p className="text-sm font-medium text-gray-500">{title}</p>
-      <p className="text-2xl font-bold text-gray-800">{value}</p>
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{title}</p>
+        <p className="text-2xl font-bold text-gray-800 dark:text-white mt-1">{value}</p>
+      </div>
+      <div className="p-2.5 rounded-full bg-slate-100 dark:bg-gray-700 text-slate-400 dark:text-gray-300">
+        {icon}
+      </div>
     </div>
-    <div className={`p-3 rounded-full ${color}`}>{icon}</div>
+
+    <div className="mt-3">
+      <ChangeIndicator change={change} invert={invertChangeColor} />
+    </div>
+
+    {progressPercent !== undefined && (
+      <div className="mt-2 h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+        <div
+          className={`h-full rounded-full ${progressPercent >= 100 ? "bg-green-500" : "bg-primary-500"}`}
+          style={{ width: `${Math.min(Math.max(progressPercent, 0), 100)}%` }}
+        />
+      </div>
+    )}
   </div>
 );
 
@@ -75,163 +125,6 @@ interface DashboardProps {
 function money(v: number) {
   return v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
-
-const normalizeText = (value: unknown) =>
-  String(value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase();
-
-const parseIsoDate = (value: string) => {
-  if (!value) return null;
-  const [year, month, day] = value.split("-").map(Number);
-  if (!year || !month || !day) return null;
-  const parsed = new Date(year, month - 1, day);
-  if (
-    parsed.getFullYear() !== year ||
-    parsed.getMonth() !== month - 1 ||
-    parsed.getDate() !== day
-  ) {
-    return null;
-  }
-  return parsed;
-};
-
-const parseDateFlexible = (value: unknown) => {
-  if (!value) return null;
-
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value;
-  }
-
-  const raw = String(value).trim();
-  if (!raw) return null;
-
-  const iso = parseIsoDate(raw.slice(0, 10));
-  if (iso) return iso;
-
-  const brMatch = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (brMatch) {
-    const [, dd, mm, yyyy] = brMatch;
-    const parsed = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
-    if (Number.isNaN(parsed.getTime())) return null;
-    if (
-      parsed.getFullYear() !== Number(yyyy) ||
-      parsed.getMonth() !== Number(mm) - 1 ||
-      parsed.getDate() !== Number(dd)
-    ) {
-      return null;
-    }
-    return parsed;
-  }
-
-  const fallback = new Date(raw);
-  return Number.isNaN(fallback.getTime()) ? null : fallback;
-};
-
-const formatDateToISO = (date: Date) => {
-  const year = String(date.getFullYear());
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
-const formatDateShort = (value: string) => {
-  const parsed = parseDateFlexible(value);
-  return parsed ? parsed.toLocaleDateString("pt-BR") : "Data não informada";
-};
-
-const adjustToBusinessDay = (date: Date) => {
-  const adjusted = new Date(date);
-  while (adjusted.getDay() === 0 || adjusted.getDay() === 6) {
-    adjusted.setDate(adjusted.getDate() + 1);
-  }
-  return adjusted;
-};
-
-const calculateDeliveryDate = (saleDate: string, leadDays: number) => {
-  const parsedSale = parseDateFlexible(saleDate);
-  if (!parsedSale) return "";
-
-  const safeLeadDays = Math.max(0, Math.floor(Number(leadDays) || 0));
-  parsedSale.setDate(parsedSale.getDate() + safeLeadDays);
-  return formatDateToISO(adjustToBusinessDay(parsedSale));
-};
-
-const parseQuoteItems = (items: unknown): QuoteItem[] => {
-  if (Array.isArray(items)) return items as QuoteItem[];
-  if (typeof items === "string") {
-    try {
-      const parsed = JSON.parse(items);
-      return Array.isArray(parsed) ? (parsed as QuoteItem[]) : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-};
-
-const extractDeliveryMetadata = (notes: unknown) => {
-  const text = String(notes || "");
-  const daysMatch = text.match(/Prazo de entrega:\s*(\d+)/i);
-  const dateMatch = text.match(
-    /Data prevista de entrega:\s*(\d{2}\/\d{2}\/\d{4}|\d{4}-\d{2}-\d{2})/i
-  );
-
-  let deliveryDate = "";
-  if (dateMatch?.[1]) {
-    const parsed = parseDateFlexible(dateMatch[1]);
-    if (parsed) deliveryDate = formatDateToISO(parsed);
-  }
-
-  return {
-    deliveryLeadDays: daysMatch?.[1] ? Number(daysMatch[1]) : undefined,
-    deliveryDate,
-  };
-};
-
-const getClientAddressLabel = (client: ClientRowAny) => {
-  const address = client?.address;
-
-  if (typeof address === "string" && address.trim()) return address.trim();
-
-  if (address && typeof address === "object") {
-    const parts = [
-      address.street,
-      address.number,
-      address.neighborhood,
-      address.city,
-      address.state,
-    ]
-      .map((part: unknown) => String(part || "").trim())
-      .filter(Boolean);
-
-    if (parts.length > 0) return parts.join(", ");
-  }
-
-  const fallback = String(client?.address || "").trim();
-  return fallback || "Endereço não informado";
-};
-
-const inferSectorFromItem = (item: QuoteItem, productsMap: Record<string, Product>): DeliverySector => {
-  const product = productsMap[String(item.productId)] as Product | undefined;
-
-  // 1. Prioridade: categoria cadastrada no produto (mais confiável)
-  const category = normalizeText(product?.category || "");
-  if (category.includes("PORTAO")) return "PORTAO AUTOMATICO";
-  if (category.includes("VIDRO")) return "VIDROS";
-  if (category.includes("ALUMINIO")) return "ALUMINIO";
-  if (category.includes("GRANITO") || category.includes("PEDRA") || category.includes("MARMORE")) return "GRANITO";
-
-  // 2. Fallback: infere pelo nome/descrição (sem considerar categoria)
-  const nameText = normalizeText(
-    `${product?.name || ""} ${item.productName || ""} ${item.description || ""}`
-  );
-  if (nameText.includes("PORTAO")) return "PORTAO AUTOMATICO";
-  if (nameText.includes("VIDRO")) return "VIDROS";
-  if (nameText.includes("ALUMINIO")) return "ALUMINIO";
-  return "GRANITO";
-};
 
 function normalizeSale(row: SaleRowAny) {
   const saleDate = row?.saleDate ?? row?.sale_date ?? row?.date ?? null;
@@ -360,6 +253,27 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
   }, [loadEmployeesLite]);
 
   useEffect(() => {
+    const channel = supabase
+      .channel("dashboard-payables")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "payables" },
+        async () => {
+          const { data } = await supabase
+            .from("payables")
+            .select("*")
+            .order("due_date", { ascending: true });
+          if (data) setPayables(data);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
     const refreshOnFocus = () => {
       loadEmployeesLite();
     };
@@ -388,6 +302,17 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
 
+  // ------------------ data de hoje (faixa da mensagem do dia) ------------------
+  const todayLabel = useMemo(() => {
+    const label = now.toLocaleDateString("pt-BR", {
+      weekday: "short",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  }, []);
+
   const salesThisMonth = useMemo(() => {
     return (Array.isArray(sales) ? sales : []).filter((s: any) => {
       if (!s?.saleDate) return false;
@@ -406,6 +331,29 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
   const ticketMedioGeral =
     totalSalesCountMonth > 0 ? totalSalesAmountCurrentMonth / totalSalesCountMonth : 0;
 
+  // ------------------ mês anterior (comparação) ------------------
+  const previousMonthDate = new Date(currentYear, currentMonth - 1, 1);
+  const previousMonth = previousMonthDate.getMonth();
+  const previousYear = previousMonthDate.getFullYear();
+
+  const salesPreviousMonth = useMemo(() => {
+    return (Array.isArray(sales) ? sales : []).filter((s: any) => {
+      if (!s?.saleDate) return false;
+      const d = new Date(s.saleDate);
+      return d.getMonth() === previousMonth && d.getFullYear() === previousYear;
+    });
+  }, [sales, previousMonth, previousYear]);
+
+  const totalSalesCountPreviousMonth = salesPreviousMonth.length;
+
+  const totalSalesAmountPreviousMonth = salesPreviousMonth.reduce(
+    (sum: number, s: any) => sum + Number(s.amount || 0),
+    0
+  );
+
+  const ticketMedioPreviousMonth =
+    totalSalesCountPreviousMonth > 0 ? totalSalesAmountPreviousMonth / totalSalesCountPreviousMonth : 0;
+
   // ------------------ metas: soma das metas das vendedoras ativas ------------------
   const activeSellersWithGoals = sellers.filter((s) => Number(s.monthly_target || 0) > 0);
 
@@ -418,6 +366,19 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
     totalGoal > 0 ? Math.min((totalSalesAmountCurrentMonth / totalGoal) * 100, 100) : 0;
 
   const totalRemaining = Math.max(totalGoal - totalSalesAmountCurrentMonth, 0);
+
+  const totalRemainingPreviousMonth = Math.max(totalGoal - totalSalesAmountPreviousMonth, 0);
+
+  // ------------------ variação percentual vs. mês anterior ------------------
+  const computeChange = (current: number, previous: number) => {
+    if (!previous) return null;
+    return ((current - previous) / previous) * 100;
+  };
+
+  const changeSalesAmount = computeChange(totalSalesAmountCurrentMonth, totalSalesAmountPreviousMonth);
+  const changeSalesCount = computeChange(totalSalesCountMonth, totalSalesCountPreviousMonth);
+  const changeTicketMedio = computeChange(ticketMedioGeral, ticketMedioPreviousMonth);
+  const changeRemaining = computeChange(totalRemaining, totalRemainingPreviousMonth);
 
   // ------------------ vendas por vendedora (ID preferido, senão nome) ------------------
   const salesBySeller = useMemo(() => {
@@ -466,63 +427,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
   }, [activeSellersWithGoals, salesBySeller]);
 
   const deliveryEntriesBySector = useMemo(() => {
-    const productsMap = (Array.isArray(productsCatalog) ? productsCatalog : []).reduce(
-      (acc, product) => {
-        acc[String(product.id)] = product;
-        return acc;
-      },
-      {} as Record<string, Product>
-    );
-
-    const clientsMap = (Array.isArray(clients) ? clients : []).reduce((acc, client) => {
-      acc[String(client.id)] = client;
-      return acc;
-    }, {} as Record<string, ClientRowAny>);
-
-    const buckets: Record<DeliverySector, DeliveryEntry[]> = {
-      GRANITO: [],
-      VIDROS: [],
-      ALUMINIO: [],
-      "PORTAO AUTOMATICO": [],
-    };
-
-    (Array.isArray(quotes) ? quotes : []).filter((q: any) => q.status === "Aprovado").forEach((quote) => {
-      const quoteItems = parseQuoteItems(quote?.items);
-      if (quoteItems.length === 0) return;
-
-      const saleDateISO = formatDateToISO(parseDateFlexible(quote?.date) || new Date());
-      const metadata = extractDeliveryMetadata(quote?.measurementNotes);
-      const deliveryDateISO =
-        metadata.deliveryDate ||
-        calculateDeliveryDate(saleDateISO, Number(metadata.deliveryLeadDays ?? 20));
-
-      const quoteClient = clientsMap[String(quote?.clientId)];
-      const clientAddress = getClientAddressLabel(quoteClient);
-      const sectorsInQuote = new Set<DeliverySector>();
-
-      quoteItems.forEach((item) => sectorsInQuote.add(inferSectorFromItem(item, productsMap)));
-
-      sectorsInQuote.forEach((sector) => {
-        buckets[sector].push({
-          id: `${quote?.id || Date.now()}-${sector}`,
-          sector,
-          saleDate: saleDateISO,
-          deliveryDate: deliveryDateISO,
-          clientName: String(quote?.customerName || "Cliente não informado"),
-          clientAddress,
-        });
-      });
-    });
-
-    (Object.keys(buckets) as DeliverySector[]).forEach((sector) => {
-      buckets[sector] = buckets[sector].sort((a, b) => {
-        const aDate = parseDateFlexible(a.deliveryDate)?.getTime() || 0;
-        const bDate = parseDateFlexible(b.deliveryDate)?.getTime() || 0;
-        return aDate - bDate;
-      });
-    });
-
-    return buckets;
+    return buildDeliveryEntriesBySector(quotes, clients, productsCatalog);
   }, [clients, productsCatalog, quotes]);
 
   const upcomingBirthdays = useMemo(() => {
@@ -588,17 +493,16 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
   return (
     <div className="space-y-6">
       {/* MENSAGEM DO DIA */}
-      <div className="bg-gradient-to-r from-primary-800 to-primary-600 rounded-xl p-6 text-white shadow-lg flex flex-col md:flex-row items-center justify-between gap-4">
-        <div className="flex-1">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-primary-200 mb-2 flex items-center gap-2">
-            <Icon className="w-4 h-4">
-              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-            </Icon>
-            Mensagem do Dia
-          </h3>
-
-          <p className="text-xl font-serif italic">"{quoteOfTheDay}"</p>
-        </div>
+      <div className="flex items-center justify-between gap-3 bg-slate-50 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-lg px-4 py-2">
+        <p className="flex items-center gap-2 text-sm text-slate-600 dark:text-gray-300 italic truncate">
+          <Icon className="w-4 h-4 text-primary-500 shrink-0">
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+          </Icon>
+          <span className="truncate">"{quoteOfTheDay}"</span>
+        </p>
+        <span className="text-xs font-semibold text-slate-400 dark:text-gray-500 whitespace-nowrap">
+          {todayLabel}
+        </span>
       </div>
 
       {/* CARDS */}
@@ -607,34 +511,34 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
           title="Vendido no mês"
           value={`R$ ${money(totalSalesAmountCurrentMonth)}`}
           icon={
-            <Icon className="text-white">
+            <Icon>
               <line x1="12" y1="1" x2="12" y2="23" />
               <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
             </Icon>
           }
-          color="bg-green-500"
           onClick={() => setActiveView("sales")}
+          change={changeSalesAmount}
         />
 
         <DashboardCard
           title="Qtd. vendas (mês)"
           value={`${totalSalesCountMonth}`}
           icon={
-            <Icon className="text-white">
+            <Icon>
               <circle cx="9" cy="21" r="1" />
               <circle cx="20" cy="21" r="1" />
               <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
             </Icon>
           }
-          color="bg-blue-500"
           onClick={() => setActiveView("sales")}
+          change={changeSalesCount}
         />
 
         <DashboardCard
           title="Ticket médio (mês)"
           value={`R$ ${money(ticketMedioGeral)}`}
           icon={
-            <Icon className="text-white">
+            <Icon>
               <path d="M12 8V4H8" />
               <rect x="4" y="12" width="8" height="8" rx="2" />
               <path d="M8 12v-2a2 2 0 1 1 4 0v2" />
@@ -642,83 +546,81 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
               <path d="m18 20-2 2-2-2" />
             </Icon>
           }
-          color="bg-purple-500"
+          change={changeTicketMedio}
         />
 
         <DashboardCard
           title="Falta p/ meta (mês)"
           value={`R$ ${money(totalRemaining)}`}
           icon={
-            <Icon className="text-white">
+            <Icon>
               <path d="M3 3v18h18" />
               <path d="M7 14l4-4 4 4 5-6" />
             </Icon>
           }
-          color="bg-red-500"
+          change={changeRemaining}
+          invertChangeColor
+          progressPercent={totalProgressPercent}
         />
       </div>
 
       {/* ENTREGAS POR SETOR */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-        {(["GRANITO", "VIDROS", "ALUMINIO", "PORTAO AUTOMATICO"] as DeliverySector[]).map((sector) => (
-          <div key={sector} className="bg-white p-4 rounded-xl shadow-md border border-gray-100">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold text-gray-800">{sector}</h3>
-              <span className="text-xs font-semibold text-primary-700 bg-primary-50 px-2 py-1 rounded-full">
-                {deliveryEntriesBySector[sector]?.length || 0}
-              </span>
-            </div>
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+        <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-2">Entregas por setor</h3>
 
-            <div className="space-y-3 max-h-[260px] overflow-y-auto pr-1">
-              {(deliveryEntriesBySector[sector] || []).map((entry) => {
-                const delivParsed = parseDateFlexible(entry.deliveryDate);
-                const today = new Date(); today.setHours(0,0,0,0);
-                const daysLeft = delivParsed ? Math.ceil((delivParsed.getTime() - today.getTime()) / 86400000) : null;
-                const daysColor = daysLeft === null ? "" : daysLeft < 0 ? "text-red-600" : daysLeft <= 3 ? "text-red-500" : daysLeft <= 7 ? "text-orange-500" : "text-green-600";
-                const daysLabel = daysLeft === null ? "" : daysLeft < 0 ? `${Math.abs(daysLeft)}d atrasado` : daysLeft === 0 ? "Entrega hoje!" : `${daysLeft}d para entrega`;
-                return (
-                <div key={entry.id} className="border border-gray-100 rounded-lg p-3 bg-gray-50/60">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-xs text-gray-700">
-                      <b>Venda:</b> {formatDateShort(entry.saleDate)}{" "}
-                      <span className="mx-1">•</span>
-                      <b>Previsão:</b> {formatDateShort(entry.deliveryDate)}
-                    </p>
-                    {daysLabel && (
-                      <span className={`text-xs font-bold whitespace-nowrap ${daysColor}`}>
-                        ⏱ {daysLabel}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-800 mt-1">
-                    <b>Cliente:</b> {entry.clientName}
-                  </p>
-                  <p className="text-xs text-gray-600 mt-1">
-                    <b>END.</b> {entry.clientAddress}
-                  </p>
+        <div className="divide-y divide-gray-100 dark:divide-gray-700">
+          {(["GRANITO", "VIDROS", "ALUMINIO", "PORTAO AUTOMATICO"] as DeliverySector[]).map((sector) => {
+            const pendingCount = (deliveryEntriesBySector[sector] || []).filter((e) => e.isPending).length;
+
+            return (
+              <div
+                key={sector}
+                role="button"
+                tabIndex={0}
+                onClick={() => setActiveView(`delivery-sector-${sector}` as any)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setActiveView(`delivery-sector-${sector}` as any);
+                  }
+                }}
+                className="flex items-center justify-between gap-3 py-3 px-2 -mx-2 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-400"
+              >
+                <div className="flex items-center gap-3">
+                  <span className={`w-2.5 h-2.5 rounded-full ${SECTOR_DOT_COLORS[sector]}`} />
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                    {SECTOR_LABELS[sector]}
+                  </span>
                 </div>
-                );
-              })}
 
-              {(deliveryEntriesBySector[sector] || []).length === 0 && (
-                <p className="text-xs text-gray-400">Sem entregas previstas para este setor.</p>
-              )}
-            </div>
-          </div>
-        ))}
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+                    {pendingCount} {pendingCount === 1 ? "entrega pendente" : "entregas pendentes"}
+                  </span>
+                  <Icon className="w-4 h-4 text-gray-400">
+                    <path d="M9 18l6-6-6-6" />
+                  </Icon>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
+      {/* AGENDA */}
+      <AgendaCard />
+
       {/* META GERAL + METAS INDIVIDUAIS + ANIVERSARIANTES + CONTAS A PAGAR */}
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+      <div className={`grid grid-cols-1 gap-6 ${userRole === "Sales" ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
         {/* META GERAL */}
-        <div className="bg-white p-5 rounded-xl shadow-md">
-          <h3 className="text-base font-semibold text-gray-800 mb-4">Meta Geral da Empresa</h3>
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5">
+          <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-4">Meta Geral da Empresa</h3>
 
           <div className="flex flex-col items-center justify-center py-2">
             <div className="relative w-32 h-32">
               <svg className="w-full h-full" viewBox="0 0 36 36">
                 <path
-                  className="text-gray-200"
+                  className="text-gray-200 dark:text-gray-700"
                   d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                   fill="none"
                   stroke="currentColor"
@@ -735,40 +637,40 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
               </svg>
 
               <div className="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
-                <span className="text-2xl font-bold text-gray-800">
+                <span className="text-2xl font-bold text-gray-800 dark:text-white">
                   {totalProgressPercent.toFixed(0)}%
                 </span>
-                <span className="text-[11px] text-gray-500">Atingido</span>
+                <span className="text-[11px] text-gray-500 dark:text-gray-400">Atingido</span>
               </div>
             </div>
 
             <div className="mt-4 w-full text-sm space-y-1">
               <div className="flex justify-between">
-                <span className="text-gray-500">Vendido</span>
-                <span className="font-bold text-gray-800">R$ {money(totalSalesAmountCurrentMonth)}</span>
+                <span className="text-gray-500 dark:text-gray-400">Vendido</span>
+                <span className="font-bold text-gray-800 dark:text-white">R$ {money(totalSalesAmountCurrentMonth)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">Meta</span>
-                <span className="font-bold text-gray-800">R$ {money(totalGoal)}</span>
+                <span className="text-gray-500 dark:text-gray-400">Meta</span>
+                <span className="font-bold text-gray-800 dark:text-white">R$ {money(totalGoal)}</span>
               </div>
-              <div className="mt-2 p-2 bg-red-50 rounded text-red-600 text-sm font-semibold">
+              <div className="mt-2 p-2 bg-red-50 dark:bg-red-500/10 rounded text-red-600 dark:text-red-400 text-sm font-semibold">
                 Falta: R$ {money(totalRemaining)}
               </div>
-              {loading && <p className="text-xs text-gray-400">Carregando dados...</p>}
+              {loading && <p className="text-xs text-gray-400 dark:text-gray-500">Carregando dados...</p>}
             </div>
           </div>
         </div>
 
         {/* METAS INDIVIDUAIS (compacto) */}
-        <div className="bg-white p-5 rounded-xl shadow-md">
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5">
           <div className="flex items-start justify-between mb-4">
-            <h3 className="text-base font-semibold text-gray-800">
+            <h3 className="text-base font-semibold text-gray-800 dark:text-white">
               {userRole === "Sales" ? "Sua Meta" : "Metas de Vendedoras"}
             </h3>
             <div className="text-right">
-              <p className="text-[10px] font-bold uppercase text-gray-400">Top 3</p>
+              <p className="text-[10px] font-bold uppercase text-gray-400 dark:text-gray-500">Top 3</p>
               {ranking.slice(0, 2).map((r, idx) => (
-                <p key={String(r.id)} className="text-[11px] text-gray-700">
+                <p key={String(r.id)} className="text-[11px] text-gray-700 dark:text-gray-300">
                   {idx + 1}º {r.name}
                 </p>
               ))}
@@ -787,66 +689,69 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
               const remaining = Math.max(sellerGoal - sellerSales, 0);
 
               return (
-                <div key={keyId} className="border rounded-lg p-3">
+                <div key={keyId} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3">
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-700">
+                      <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-700 dark:text-gray-200">
                         {getInitials(seller.name)}
                       </div>
-                      <span className="text-sm font-semibold text-gray-800">{seller.name}</span>
+                      <span className="text-sm font-semibold text-gray-800 dark:text-white">{seller.name}</span>
                     </div>
-                    <span className="text-xs font-bold text-gray-700">{percent.toFixed(0)}%</span>
+                    <span className="text-xs font-bold text-gray-700 dark:text-gray-300">{percent.toFixed(0)}%</span>
                   </div>
 
-                  <div className="overflow-hidden h-2 rounded bg-gray-200 mb-2">
+                  <div className="overflow-hidden h-2 rounded bg-gray-200 dark:bg-gray-700 mb-2">
                     <div
                       style={{ width: `${percent}%` }}
                       className={`${percent >= 100 ? "bg-green-500" : "bg-primary-500"} h-2 rounded`}
                     />
                   </div>
 
-                  <p className="text-xs text-gray-600">
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
                     R$ {money(sellerSales)} de R$ {money(Number(seller.monthly_target || 0))}
                   </p>
-                  <p className="text-xs text-red-500">Falta: R$ {money(remaining)}</p>
+                  <p className="text-xs text-red-500 dark:text-red-400">Falta: R$ {money(remaining)}</p>
                 </div>
               );
             })}
 
             {!loading && displayableSellers.length === 0 && (
-              <p className="text-gray-500 text-sm text-center py-2">Nenhuma meta cadastrada.</p>
+              <p className="text-gray-500 dark:text-gray-400 text-sm text-center py-2">Nenhuma meta cadastrada.</p>
             )}
           </div>
         </div>
 
         {/* ANIVERSARIANTES */}
-        <div className="bg-white p-5 rounded-xl shadow-md">
-          <h3 className="text-base font-semibold text-gray-800 mb-4">Aniversariantes</h3>
-          <p className="text-xs text-gray-500 mb-3">Próximos aniversários (a partir de hoje)</p>
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5">
+          <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-4">Aniversariantes</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Próximos aniversários (a partir de hoje)</p>
 
           <div className="space-y-3 max-h-[320px] overflow-y-auto pr-1">
             {upcomingBirthdays.map((person) => (
-              <div key={person.id} className="border border-gray-100 rounded-lg p-3 bg-gray-50/60">
-                <p className="text-xs text-primary-700 font-semibold">{person.monthLabel}</p>
-                <p className="text-sm font-semibold text-gray-800">{person.name}</p>
-                <p className="text-xs text-gray-600">
+              <div key={person.id} className="border border-gray-100 dark:border-gray-700 rounded-lg p-3 bg-gray-50/60 dark:bg-gray-700/40">
+                <p className="text-xs text-primary-700 dark:text-primary-300 font-semibold">{person.monthLabel}</p>
+                <p className="text-sm font-semibold text-gray-800 dark:text-white">{person.name}</p>
+                <p className="text-xs text-gray-600 dark:text-gray-400">
                   {person.dateLabel} • {person.age} anos
                 </p>
               </div>
             ))}
             {upcomingBirthdays.length === 0 && (
-              <p className="text-sm text-gray-400">Sem aniversariantes cadastrados para o período.</p>
+              <p className="text-sm text-gray-400 dark:text-gray-500">Sem aniversariantes cadastrados para o período.</p>
             )}
           </div>
         </div>
 
-        {/* CONTAS A PAGAR */}
-        <div className="bg-white p-5 rounded-xl shadow-md">
+        {/* CONTAS A PAGAR — oculto para vendedoras */}
+        {userRole !== "Sales" && (
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-semibold text-gray-800">Contas a Pagar</h3>
-            <button onClick={() => setActiveView("payables")} className="text-xs text-blue-600 hover:underline">
-              Ver todas →
-            </button>
+            <h3 className="text-base font-semibold text-gray-800 dark:text-white">Contas a Pagar</h3>
+            {(userRole === "Admin" || userRole === "Finance") && (
+              <button onClick={() => setActiveView("payables")} className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
+                Ver todas →
+              </button>
+            )}
           </div>
           {(() => {
             const today = new Date().toISOString().split("T")[0];
@@ -870,6 +775,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
                 rows.push({ key: p.id, name: p.name, supplier: p.supplier || "", date: dueDate, amount: Number(p.amount || 0), isPaid });
               } else {
                 // Expande cada parcela pendente
+                const wholePayablePaid = (p.status || "") === "paid";
                 insts.forEach((inst: any, idx: number) => {
                   rows.push({
                     key: `${p.id}-${inst.id || idx}`,
@@ -877,50 +783,50 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
                     supplier: p.supplier || "",
                     date: inst.dueDate || inst.due_date || "",
                     amount: Number(inst.amount || 0),
-                    isPaid: inst.paid === true,
+                    isPaid: inst.paid === true || wholePayablePaid,
                     instLabel: `Parcela ${idx + 1}`,
                   });
                 });
               }
             });
 
-            // Sort by date ascending (earliest first), paid items at the bottom
-            rows.sort((a, b) => {
-              if (a.isPaid !== b.isPaid) return a.isPaid ? 1 : -1;
-              return a.date.localeCompare(b.date);
-            });
+            // Remove paid rows — only show pending/overdue
+            const unpaidRows = rows.filter((r) => !r.isPaid);
 
-            if (rows.length === 0) return <p className="text-sm text-gray-400 text-center py-4">Nenhuma conta cadastrada.</p>;
+            // Sort by date ascending (earliest first)
+            unpaidRows.sort((a, b) => a.date.localeCompare(b.date));
+
+            if (unpaidRows.length === 0) return <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-4">Nenhuma conta pendente.</p>;
 
             return (
               <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-                {rows.map((row) => {
+                {unpaidRows.map((row) => {
                   const daysUntil = row.date
                     ? Math.round((new Date(row.date + "T00:00:00").getTime() - new Date(today + "T00:00:00").getTime()) / 86400000)
                     : null;
                   const { label, cls } = row.isPaid
-                    ? { label: "Pago",           cls: "bg-green-100 text-green-700 border border-green-300" }
+                    ? { label: "Pago",           cls: "bg-green-100 text-green-700 border border-green-300 dark:bg-green-500/20 dark:text-green-300 dark:border-green-500/40" }
                     : daysUntil === null || daysUntil < 0
-                      ? { label: "Vencida",        cls: "bg-red-100 text-red-700 border border-red-400 font-bold" }
+                      ? { label: "Vencida",        cls: "bg-red-100 text-red-700 border border-red-400 font-bold dark:bg-red-500/20 dark:text-red-300 dark:border-red-500/40" }
                       : daysUntil === 0
-                        ? { label: "Vence hoje",   cls: "bg-blue-100 text-blue-700 border border-blue-400 font-bold" }
+                        ? { label: "Vence hoje",   cls: "bg-blue-100 text-blue-700 border border-blue-400 font-bold dark:bg-blue-500/20 dark:text-blue-300 dark:border-blue-500/40" }
                         : daysUntil <= 3
-                          ? { label: `${daysUntil}d`,  cls: "bg-yellow-100 text-yellow-800 border border-yellow-400 font-bold" }
-                          : { label: "A Vencer",   cls: "bg-green-100 text-green-700 border border-green-300" };
+                          ? { label: `${daysUntil}d`,  cls: "bg-yellow-100 text-yellow-800 border border-yellow-400 font-bold dark:bg-yellow-500/20 dark:text-yellow-300 dark:border-yellow-500/40" }
+                          : { label: "A Vencer",   cls: "bg-green-100 text-green-700 border border-green-300 dark:bg-green-500/20 dark:text-green-300 dark:border-green-500/40" };
                   return (
-                    <div key={row.key} className="border border-gray-100 rounded-lg p-3 bg-gray-50/60">
+                    <div key={row.key} className="border border-gray-100 dark:border-gray-700 rounded-lg p-3 bg-gray-50/60 dark:bg-gray-700/40">
                       <div className="flex items-start justify-between gap-1 mb-1">
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-800 leading-tight truncate">{row.name}</p>
+                          <p className="text-sm font-semibold text-gray-800 dark:text-white leading-tight truncate">{row.name}</p>
                           {(row.supplier || row.instLabel) && (
-                            <p className="text-xs text-gray-500">{[row.supplier, row.instLabel].filter(Boolean).join(" · ")}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">{[row.supplier, row.instLabel].filter(Boolean).join(" · ")}</p>
                           )}
                         </div>
                         <span className={`px-1.5 py-0.5 rounded-full text-xs font-semibold shrink-0 ${cls}`}>{label}</span>
                       </div>
                       <div className="flex items-center justify-between mt-1">
-                        <p className="text-xs text-gray-500">{fmt(row.date)}</p>
-                        <p className="text-sm font-bold text-gray-800">{money(row.amount)}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{fmt(row.date)}</p>
+                        <p className="text-sm font-bold text-gray-800 dark:text-white">{money(row.amount)}</p>
                       </div>
                     </div>
                   );
@@ -929,6 +835,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
             );
           })()}
         </div>
+        )}
       </div>
 
       {/* RODAPÉ */}

@@ -79,6 +79,8 @@ export default function InventoryForm({ id, onClose }: Props) {
   const [unit, setUnit] = useState("un");
   const [minStock, setMinStock] = useState(0);
   const [purchaseLengthMeters, setPurchaseLengthMeters] = useState(0);
+  const [jateadoPrice, setJateadoPrice] = useState(0);
+  const [jateadoPriceInput, setJateadoPriceInput] = useState(formatCurrencyInput(0));
   const [categoryId, setCategoryId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -142,6 +144,11 @@ const stockHelperText = useMemo(() => {
     return categories.find((cat) => cat.id === catId)?.name ?? "";
   };
 
+  const isGlassCategory = useMemo(
+    () => getCategoryNameById(categoryId).trim().toUpperCase().includes("VIDRO"),
+    [categoryId, categories]
+  );
+
   const fetchCategories = async () => {
     const { data, error } = await supabase.from("material_categories").select("*").order("name");
     if (error) {
@@ -200,6 +207,11 @@ const { data, error } = await supabase.from("category_colors").select("*").eq("c
     setPurchaseLengthMeters(
       Number(purchaseLengthRaw) || getMaterialPurchaseLengthCacheEntry(inventoryId) || 0
     );
+
+    const jateadoPriceRaw = getInventoryValue(row, ["jateado_price", "jateadoPrice"]);
+    const jateadoPriceValue = Number(jateadoPriceRaw) || 0;
+    setJateadoPrice(jateadoPriceValue);
+    setJateadoPriceInput(formatCurrencyInput(jateadoPriceValue));
 
     const inventoryCategoryId = Number(
       getInventoryValue(row, ["category_id", "material_category_id", "categoryId"])
@@ -543,6 +555,7 @@ const { data, error } = await supabase.from("category_colors").select("*").eq("c
       buy_length_meters: purchaseLengthMeters || null,
       length_meters: purchaseLengthMeters || null,
       standard_size: purchaseLengthMeters || null,
+      jateado_price: isGlassCategory ? jateadoPrice || null : null,
       category_id: categoryId,
       material_category_id: categoryId,
       usage_category: usageCategory,
@@ -579,6 +592,7 @@ const { data, error } = await supabase.from("category_colors").select("*").eq("c
           "photo_path",
           "image_path",
           "path",
+          "jateado_price",
         ].includes(column)
       );
 
@@ -730,6 +744,30 @@ if (inventoryId) {
                 O sistema divide o valor do material por essa metragem para encontrar o custo proporcional do perfil.
               </p>
             </div>
+
+            {isGlassCategory && (
+              <div>
+                <label className="mb-1 block text-sm font-semibold text-slate-700">
+                  Preço do Jateado (R$/m²)
+                </label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  className="w-full rounded-lg border border-slate-300 p-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-400"
+                  placeholder="0,00"
+                  value={jateadoPriceInput}
+                  onChange={(e) => {
+                    const rawValue = sanitizeCurrencyInput(e.target.value);
+                    setJateadoPriceInput(rawValue);
+                    setJateadoPrice(parseCurrencyInput(rawValue));
+                  }}
+                  onBlur={() => setJateadoPriceInput(formatCurrencyInput(jateadoPrice))}
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  Acréscimo por m² cobrado no orçamento quando a textura Jateado for selecionada para este vidro.
+                </p>
+              </div>
+            )}
 
             <div>
               <label className="mb-1 block text-sm font-semibold text-slate-700">Categoria</label>

@@ -30,8 +30,9 @@ const MarkupFaturamentoTab: React.FC = () => {
   const [variablePercent, setVariablePercent] = useState("18");
   const [minProfitPercent, setMinProfitPercent] = useState("20");
 
-  // custos fixos totais (funcionários + fixas)
+  // custos fixos totais (funcionários + sócios + fixas)
   const [employeesTotal, setEmployeesTotal] = useState(0);
+  const [partnersTotal, setPartnersTotal] = useState(0);
   const [fixedManualTotal, setFixedManualTotal] = useState(0);
 
   useEffect(() => {
@@ -56,13 +57,20 @@ const MarkupFaturamentoTab: React.FC = () => {
         if (s.min_profit_percent != null) setMinProfitPercent(String(s.min_profit_percent));
       }
 
-      // 2) soma funcionários (custo total)
-      const emp = await supabase.from("employees").select("total_monthly_cost");
-      const empTotal = (emp.data ?? []).reduce(
-        (sum: number, e: any) => sum + Number(e.total_monthly_cost || 0),
+      // 2) soma funcionários ADM + Vendas (produção é cobrada via MO por produto)
+      const emp = await supabase.from("employees").select("total_monthly_cost, department");
+      const empTotal = (emp.data ?? [])
+        .filter((e: any) => e.department !== "Produção")
+        .reduce((sum: number, e: any) => sum + Number(e.total_monthly_cost || 0), 0);
+      setEmployeesTotal(empTotal);
+
+      // 2.1) soma pró-labore bruto dos sócios
+      const partners = await supabase.from("partners").select("pro_labore");
+      const partnersSum = (partners.data ?? []).reduce(
+        (sum: number, p: any) => sum + Number(p.pro_labore || 0),
         0
       );
-      setEmployeesTotal(empTotal);
+      setPartnersTotal(partnersSum);
 
       // 3) soma despesas fixas manuais
       const fix = await supabase.from("fixed_expenses").select("value");
@@ -85,8 +93,8 @@ const MarkupFaturamentoTab: React.FC = () => {
   const minProfitPct = useMemo(() => Number(minProfitPercent) || 0, [minProfitPercent]);
 
   const fixedTotal = useMemo(
-    () => employeesTotal + fixedManualTotal,
-    [employeesTotal, fixedManualTotal]
+    () => employeesTotal + partnersTotal + fixedManualTotal,
+    [employeesTotal, partnersTotal, fixedManualTotal]
   );
 
   const fixedPercent = useMemo(() => {
@@ -99,9 +107,11 @@ const MarkupFaturamentoTab: React.FC = () => {
   const fixedPerHour = useMemo(() => (hoursMonth > 0 ? fixedTotal / hoursMonth : 0), [fixedTotal, hoursMonth]);
 
   const suggestedMarkupFactor = useMemo(() => {
-    const totalPct = (fixedPercent + variablePct + minProfitPct) / 100;
-    if (totalPct >= 0.95) return 0; // trava
-    return 1 / (1 - totalPct);
+    const fixedFrac = Math.min(fixedPercent / 100, 0.99);
+    const variableAndProfitFrac = (variablePct + minProfitPct) / 100;
+    if (fixedFrac >= 0.99 || variableAndProfitFrac >= 0.99) return 0;
+    // Dois passos: absorção do fixo na base + divisor de variáveis/lucro
+    return (1 / (1 - fixedFrac)) * (1 / (1 - variableAndProfitFrac));
   }, [fixedPercent, variablePct, minProfitPct]);
 
   const save = async () => {
@@ -227,7 +237,7 @@ const MarkupFaturamentoTab: React.FC = () => {
         <div className="p-4 rounded-lg bg-gray-50 border">
           <p className="text-sm text-gray-600">Custos fixos totais</p>
           <p className="font-bold">{formatBRL(fixedTotal)}</p>
-          <p className="text-xs text-gray-500">Funcionários + Fixas</p>
+          <p className="text-xs text-gray-500">ADM + Vendas + Sócios (pró-labore) + Fixas (produção cobrada via MO)</p>
         </div>
 
         <div className="p-4 rounded-lg bg-gray-50 border">
@@ -253,7 +263,7 @@ const MarkupFaturamentoTab: React.FC = () => {
           {suggestedMarkupFactor > 0 ? suggestedMarkupFactor.toFixed(4) : "-"}
         </p>
         <p className="text-xs text-blue-700">
-          Usando: Fixos% + Variáveis% + Margem mínima. (A margem real do produto pode ser diferente)
+          Fixos absorvidos na base de custo + Variáveis/Lucro no divisor. (A margem real do produto pode ser diferente)
         </p>
       </div>
     </div>

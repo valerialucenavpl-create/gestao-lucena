@@ -25,6 +25,9 @@ const FixedExpensesCards: React.FC = () => {
   // 👉 total automático dos funcionários (CUSTO TOTAL)
   const [employeesTotal, setEmployeesTotal] = useState(0);
 
+  // 👉 total automático dos sócios (pró-labore bruto)
+  const [partnersTotal, setPartnersTotal] = useState(0);
+
   const load = async () => {
     setLoading(true);
 
@@ -47,6 +50,18 @@ const FixedExpensesCards: React.FC = () => {
     );
 
     setEmployeesTotal(totalEmployees);
+
+    // 🔹 soma do pró-labore bruto dos sócios
+    const { data: partners } = await supabase
+      .from("partners")
+      .select("pro_labore");
+
+    const totalPartners = (partners ?? []).reduce(
+      (sum, p: any) => sum + Number(p.pro_labore || 0),
+      0
+    );
+
+    setPartnersTotal(totalPartners);
     setLoading(false);
   };
 
@@ -105,8 +120,8 @@ const FixedExpensesCards: React.FC = () => {
 
   // 🔥 TOTAL GERAL DAS DESPESAS FIXAS
   const totalFixedGeneral = useMemo(
-    () => totalFixedManual + employeesTotal,
-    [totalFixedManual, employeesTotal]
+    () => totalFixedManual + employeesTotal + partnersTotal,
+    [totalFixedManual, employeesTotal, partnersTotal]
   );
 
   if (loading) return <p>Carregando...</p>;
@@ -163,7 +178,7 @@ const FixedExpensesCards: React.FC = () => {
           </p>
 
           <p className="text-xs text-blue-700">
-            Funcionários + despesas fixas
+            Funcionários + sócios (pró-labore) + despesas fixas
           </p>
         </div>
 
@@ -180,6 +195,22 @@ const FixedExpensesCards: React.FC = () => {
 
           <p className="text-xs text-gray-500">
             Valor automático (custo total)
+          </p>
+        </div>
+
+        {/* 🔹 SÓCIOS (PRÓ-LABORE) */}
+        <div className="p-4 rounded-lg bg-gray-50 border">
+          <p className="font-semibold">Sócios (pró-labore)</p>
+
+          <p className="text-sm text-gray-600">
+            {partnersTotal.toLocaleString("pt-BR", {
+              style: "currency",
+              currency: "BRL",
+            })}
+          </p>
+
+          <p className="text-xs text-gray-500">
+            Valor automático (pró-labore bruto)
           </p>
         </div>
 
