@@ -173,11 +173,27 @@ export const getClientAddressLabel = (client: ClientRowAny) => {
 export const inferSectorFromItem = (item: QuoteItem, productsMap: Record<string, Product>): DeliverySector => {
   const product = productsMap[String(item.productId)] as Product | undefined;
 
-  // 1. Prioridade: categoria cadastrada no produto (mais confiável)
-  const category = normalizeText(product?.category || "");
+  // 1. Prioridade: categoria cadastrada no produto (mais confiável).
+  // O produto é salvo com "productCategory" (ex.: ALUMINIO, ACESSORIO DE
+  // MOTOR) — "category" quase nunca vem preenchido do banco, então usar só
+  // ele fazia essa checagem nunca bater e todo item cair no fallback por
+  // nome abaixo, classificando portões de alumínio como "Portão Automático"
+  // só porque o nome do produto contém a palavra "Portão".
+  const category = normalizeText(
+    (product as any)?.productCategory || product?.category || ""
+  );
+
+  // Alumínio: portas, portões, grades e acessórios de alumínio, além de
+  // motores residenciais (que ficam na mesma equipe/entrega de alumínio).
+  if (
+    category.includes("ALUMINIO") ||
+    category === "ACESSORIO DE MOTOR" ||
+    category === "MOTOR RESIDENCIAL"
+  ) {
+    return "ALUMINIO";
+  }
   if (category.includes("PORTAO")) return "PORTAO AUTOMATICO";
   if (category.includes("VIDRO")) return "VIDROS";
-  if (category.includes("ALUMINIO")) return "ALUMINIO";
   if (category.includes("GRANITO") || category.includes("PEDRA") || category.includes("MARMORE")) return "GRANITO";
 
   // 2. Fallback: infere pelo nome/descrição (sem considerar categoria)
