@@ -339,7 +339,11 @@ const NewQuote: React.FC<NewQuoteProps> = ({
       const [settingsRes, fixedRes, empRes] = await Promise.all([
         supabase.from("billing_settings").select("monthly_revenue_target").order("updated_at", { ascending: false }).limit(1),
         supabase.from("fixed_expenses").select("value"),
-        supabase.from("employees").select("total_monthly_cost"),
+        // v_custo_pessoal: view com o custo de pessoal agregado por setor.
+        // Substitui a leitura direta de "employees", que passou a ser restrita
+        // a Admin/Financeiro pelo RLS. Aqui só somamos o total, então o
+        // resultado é idêntico ao de antes.
+        supabase.from("v_custo_pessoal").select("total_monthly_cost"),
       ]);
       if (!active) return;
       const monthlyRevenue = Number(settingsRes.data?.[0]?.monthly_revenue_target || 0);
@@ -391,6 +395,17 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [alQuantity, setAlQuantity] = useState<number>(1);
   const [alExtraService, setAlExtraService] = useState<number>(0);
   const [alExtraServiceInput, setAlExtraServiceInput] = useState<string>(formatMoneyInputBR(0));
+
+  // MÁRMORE (produtos do catálogo, categoria "MARMORE")
+  const [mrSelectedProductId, setMrSelectedProductId] = useState<string>("");
+  const [mrProductSearch, setMrProductSearch] = useState<string>("");
+  // Várias medidas (ex.: pia em L = 2 retângulos) somam num único item do
+  // orçamento — o cliente vê só o valor final, não uma linha por peça.
+  const [mrPieces, setMrPieces] = useState<
+    { id: string; length: number; width: number; quantity: number }[]
+  >([{ id: "1", length: 0, width: 0, quantity: 1 }]);
+  const [mrExtraService, setMrExtraService] = useState<number>(0);
+  const [mrExtraServiceInput, setMrExtraServiceInput] = useState<string>(formatMoneyInputBR(0));
 
   // PORTÃO
   const [poMaterialId, setPoMaterialId] = useState<string>("");
@@ -474,6 +489,18 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     return aluminumProducts.filter((product) => product.name.toLowerCase().includes(search));
   }, [alProductSearch, aluminumProducts]);
 
+  // Produtos cadastrados em Produtos com categoria "MARMORE" (ex.: Pia de
+  // Cozinha) — é o que aparece pra escolher na aba Mármore do orçamento.
+  const marmoreProducts = useMemo(() => {
+    return products.filter((product) => normalizeText(product.category || "").includes("MARMORE"));
+  }, [products]);
+
+  const filteredMarmoreProducts = useMemo(() => {
+    const search = mrProductSearch.trim().toLowerCase();
+    if (!search) return marmoreProducts;
+    return marmoreProducts.filter((product) => product.name.toLowerCase().includes(search));
+  }, [mrProductSearch, marmoreProducts]);
+
   const glassTypeOptions = useMemo(() => {
     const uniqueById = new Map<string, InventoryItem>();
 
@@ -532,6 +559,15 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     return availableColors;
   }, [alSelectedProductId, availableColors, products, rawMaterials]);
 
+  const mrColorOptions = useMemo(() => {
+    if (!mrSelectedProductId) return availableColors;
+
+    const productColors = getProductColorOptions(mrSelectedProductId);
+    if (productColors.length > 0) return productColors;
+
+    return availableColors;
+  }, [mrSelectedProductId, availableColors, products, rawMaterials]);
+
   useEffect(() => {
     if (glassTypeOptions.length === 0) {
       setGwGlassTypeId("");
@@ -559,7 +595,20 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   }, [aluminumProducts]);
 
   useEffect(() => {
-    if (activeCategory === "VIDROS" || activeCategory === "ALUMINIO") return;
+    if (marmoreProducts.length === 0) {
+      setMrSelectedProductId("");
+      return;
+    }
+
+    setMrSelectedProductId((prev) =>
+      prev && marmoreProducts.some((product) => product.id === prev)
+        ? prev
+        : marmoreProducts[0].id
+    );
+  }, [marmoreProducts]);
+
+  useEffect(() => {
+    if (activeCategory === "VIDROS" || activeCategory === "ALUMINIO" || activeCategory === "GRANITO") return;
 
     if (availableColors.length === 0) {
       setSelectedColor("");
@@ -592,6 +641,17 @@ const NewQuote: React.FC<NewQuoteProps> = ({
 
     setSelectedColor((prev) => (prev && alColorOptions.includes(prev) ? prev : alColorOptions[0]));
   }, [activeCategory, alColorOptions]);
+
+  useEffect(() => {
+    if (activeCategory !== "GRANITO") return;
+
+    if (mrColorOptions.length === 0) {
+      setSelectedColor("");
+      return;
+    }
+
+    setSelectedColor((prev) => (prev && mrColorOptions.includes(prev) ? prev : mrColorOptions[0]));
+  }, [activeCategory, mrColorOptions]);
 
   useEffect(() => {
     if (isDeliveryDateManual) return;
@@ -772,12 +832,83 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     };
   };
 
+  // Soma o preço de cada medida (peça) lançada para o produto de mármore
+  // escolhido — uma pia em L, por exemplo, vira 2 (ou mais) retângulos que
+  // são calculados separadamente e somados num único total.
+  const getMarmoreCalculations = () => {
+    if (!mrSelectedProductId) return null;
+
+    const validPieces = mrPieces.filter((p) => p.length > 0 && p.width > 0 && p.quantity > 0);
+    if (validPieces.length === 0) return null;
+
+    let totalPrice = 0;
+    let totalCost = 0;
+    let totalMaterialCost = 0;
+    let totalLaborCost = 0;
+    let totalFixedCostValue = 0;
+    let totalAreaM2 = 0;
+    const materialMap = new Map<string, QuoteItemMaterialLine>();
+    const laborMap = new Map<string, QuoteItemLaborLine>();
+
+    validPieces.forEach((piece) => {
+      const heightMm = piece.length * 1000;
+      const widthMm = piece.width * 1000;
+      const { price, cost, materialCost, laborCost, fixedCostValue, materialBreakdown, laborBreakdown } =
+        calculateItemPrice(mrSelectedProductId, widthMm, heightMm, piece.quantity, selectedColor);
+
+      totalPrice += price;
+      totalCost += cost;
+      totalMaterialCost += materialCost;
+      totalLaborCost += laborCost;
+      totalFixedCostValue += fixedCostValue;
+      totalAreaM2 += piece.length * piece.width * piece.quantity;
+
+      materialBreakdown.forEach((line) => {
+        const key = `${line.name}|${line.color}|${line.unit}`;
+        const existing = materialMap.get(key);
+        if (existing) {
+          existing.quantity += line.quantity;
+          existing.totalCost += line.totalCost;
+        } else {
+          materialMap.set(key, { ...line });
+        }
+      });
+
+      laborBreakdown.forEach((line) => {
+        const existing = laborMap.get(line.role);
+        if (existing) {
+          existing.total += line.total;
+        } else {
+          laborMap.set(line.role, { ...line });
+        }
+      });
+    });
+
+    return {
+      totalPrice,
+      totalCost,
+      totalMaterialCost,
+      totalLaborCost,
+      totalFixedCostValue,
+      totalAreaM2,
+      materialBreakdown: Array.from(materialMap.values()),
+      laborBreakdown: Array.from(laborMap.values()),
+    };
+  };
+
+  // Valor estimado em tempo real, conforme o usuário digita as medidas —
+  // sem isso, só dava pra saber o preço depois de clicar em "Adicionar".
+  const mrLivePrice = useMemo(() => {
+    const calc = getMarmoreCalculations();
+    if (!calc) return null;
+    return calc.totalPrice + (Number(mrExtraService) || 0);
+  }, [mrSelectedProductId, mrPieces, selectedColor, mrExtraService, products, rawMaterials]);
 
   // ============================
 const categories = [
   {
     id: "GRANITO" as const,
-    label: "Granito",
+    label: "Mármore",
     description: "Bancadas, soleiras e degraus em pedra.",
     icon: (
       <Icon className="w-4 h-4">
@@ -987,6 +1118,55 @@ if (!ensureColorSelected()) return;
     };
 
     setItems((prev) => [...prev, newItem]);
+  };
+
+  const handleAddMarmoreItem = () => {
+    if (!mrSelectedProductId) return alert("Selecione um produto de mármore.");
+    if (!ensureColorSelected()) return;
+
+    const selectedProduct = products.find((product) => product.id === mrSelectedProductId);
+    if (!selectedProduct) return;
+
+    const calc = getMarmoreCalculations();
+    if (!calc) return alert("Adicione medidas válidas.");
+
+    const totalExtra = Number(mrExtraService) || 0;
+    const finalPrice = calc.totalPrice + totalExtra;
+    const totalCost = calc.totalCost + totalExtra;
+
+    const validPieces = mrPieces.filter((p) => p.length > 0 && p.width > 0 && p.quantity > 0);
+    const piecesDesc = validPieces
+      .map((p, idx) => `Peça ${idx + 1}: ${p.quantity}x (${p.length.toFixed(2)}m x ${p.width.toFixed(2)}m)`)
+      .join("\n");
+
+    const description = [
+      `Cor: ${selectedColor || "Não informado"}`,
+      `Área total: ${calc.totalAreaM2.toFixed(2)} m²`,
+      `Acréscimo por serviço: R$ ${totalExtra.toFixed(2)}`,
+    ].join(" | ") + `\n\n[Detalhamento]\n${piecesDesc}`;
+
+    const newItem: QuoteItem = {
+      id: `qi-marmore-${Date.now()}`,
+      productId: selectedProduct.id,
+      productName: selectedProduct.name,
+      selectedColor,
+      description,
+      width: 0,
+      height: 0,
+      quantity: 1,
+      price: finalPrice,
+      cost: totalCost,
+      materialCost: calc.totalMaterialCost,
+      laborCost: calc.totalLaborCost,
+      fixedCostValue: calc.totalFixedCostValue,
+      materialBreakdown: calc.materialBreakdown,
+      laborBreakdown: calc.laborBreakdown,
+    };
+
+    setItems((prev) => [...prev, newItem]);
+    setMrPieces([{ id: Date.now().toString(), length: 0, width: 0, quantity: 1 }]);
+    setMrExtraService(0);
+    setMrExtraServiceInput(formatMoneyInputBR(0));
   };
 
   const handleAddGlassItem = () => {
@@ -1204,11 +1384,12 @@ const grossTotal = subtotal + freight + installation;
 const discountPercent = discountMode === "percent" ? Number(discountInput) || 0 : 0;
 const discountFixed  = discountMode === "fixed"   ? discount : 0;
 
-// No modo R$: o desconto sai da taxa da maquininha, então o preço ao cliente não muda
-// No modo %: desconto reduz o total e a diferença sai da taxa do cartão
+// Os dois modos reduzem o total que o cliente vê — % calcula em cima do
+// valor bruto, R$ é abatido direto (limitado ao valor bruto, pra não gerar
+// total negativo).
 const discountValue  = discountMode === "percent"
   ? grossTotal * (discountPercent / 100)
-  : 0; // R$: preço final não muda, desconto é absorvido pela taxa do cartão
+  : Math.min(discountFixed, grossTotal);
 
 // Base do orçamento (antes da comissão de indicação)
 const baseTotal = grossTotal - discountValue;
@@ -1256,11 +1437,9 @@ const effectiveCardRate = discountMode === "percent"
 
 const commissionValue = totalPrice * (commissionRate / 100);
 const taxValue = totalPrice * (taxRate / 100);
-// Taxa de cartão sempre calculada (visível independente da forma de pagamento)
-// No modo R$: desconto subtrai diretamente do valor da taxa
-const cardValue = discountMode === "fixed" && discountFixed > 0
-  ? Math.max(0, grossTotal * (cardRate / 100) - discountFixed)
-  : totalPrice * (effectiveCardRate / 100);
+// Taxa de cartão sempre calculada (visível independente da forma de pagamento),
+// sobre o total já com desconto aplicado.
+const cardValue = totalPrice * (effectiveCardRate / 100);
 
 // Custo fixo real embutido no preço de cada item (usa o % de custo fixo
 // específico do produto, não um % global genérico, para a margem bater
@@ -1973,23 +2152,232 @@ const handleSavePDF = async () => {
           </div>
         </div>
 
-        {activeCategory === "GRANITO" &&
-          renderMultiPieceCalculator({
-            materialId: grMaterialId,
-            setMaterialId: setGrMaterialId,
-            variantName: grVariantName,
-            setVariantName: setGrVariantName,
-            pieces: grPieces,
-            setPieces: setGrPieces,
-            description: grDescription,
-            setDescription: setGrDescription,
-            onAdd: () =>
-              handleAddPieceItem("GRANITO", grMaterialId, grVariantName, grPieces, grDescription, () => {
-                setGrPieces([{ id: Date.now().toString(), length: 0, width: 0, quantity: 1 }]);
-                setGrDescription("");
-              }),
-            categoryFilter: "GRANITO",
-          })}
+        {activeCategory === "GRANITO" && (
+          <div className="mt-6 space-y-5 border border-blue-100 rounded-xl p-4 bg-blue-50/40">
+            {/* 1. PRODUTO — a receita/composição depende de qual produto é */}
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">
+                1. Produto
+              </label>
+              <input
+                type="text"
+                value={mrProductSearch}
+                onChange={(e) => setMrProductSearch(e.target.value)}
+                placeholder="Buscar produto de mármore"
+                className="w-full h-11 px-3 border rounded-lg text-gray-900 mb-3"
+              />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-60 overflow-auto pr-1">
+                {filteredMarmoreProducts.map((product) => (
+                  <button
+                    key={product.id}
+                    type="button"
+                    onClick={() => setMrSelectedProductId(product.id)}
+                    className={`p-3 border rounded-lg text-left flex gap-3 items-center ${
+                      mrSelectedProductId === product.id
+                        ? "border-primary-600 bg-primary-50"
+                        : "border-gray-200 bg-white"
+                    }`}
+                  >
+                    <div className="w-14 h-14 rounded-md bg-gray-100 overflow-hidden flex items-center justify-center shrink-0">
+                      {product.image ? (
+                        <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-[10px] text-gray-400">Sem foto</span>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">{product.name}</p>
+                      <p className="text-xs text-gray-500">{product.category || "Mármore"}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {filteredMarmoreProducts.length === 0 && (
+                <div className="mt-3 text-sm text-red-600 border border-red-200 bg-red-50 rounded-lg p-3">
+                  Nenhum produto de mármore encontrado. Cadastre em Produtos, categoria "Mármore".
+                </div>
+              )}
+            </div>
+
+            {/* 2. COR — define qual chapa/material (e seu custo) será usado */}
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">2. Cor</label>
+              <select
+                value={selectedColor}
+                onChange={(e) => setSelectedColor(e.target.value)}
+                disabled={mrColorOptions.length === 0}
+                className="w-full h-11 px-3 border rounded-lg text-gray-900 disabled:bg-gray-100 disabled:text-gray-400"
+              >
+                {mrColorOptions.length === 0 && <option value="">Sem cores cadastradas</option>}
+                {mrColorOptions.map((color) => (
+                  <option key={color} value={color}>
+                    {color}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 3. MEDIDA — várias peças somam num único item (ex.: pia em L) */}
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">3. Medida</label>
+
+              <div className="grid grid-cols-12 gap-2 text-center text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">
+                <div className="col-span-3">Altura (m)</div>
+                <div className="col-span-3">Largura (m)</div>
+                <div className="col-span-2">Qtd</div>
+                <div className="col-span-2">M²</div>
+                <div className="col-span-2">Valor</div>
+              </div>
+
+              {mrPieces.map((piece, index) => {
+                const pieceM2 = piece.length * piece.width * piece.quantity;
+                const pieceValue =
+                  mrSelectedProductId && piece.length > 0 && piece.width > 0
+                    ? calculateItemPrice(
+                        mrSelectedProductId,
+                        piece.width * 1000,
+                        piece.length * 1000,
+                        piece.quantity,
+                        selectedColor
+                      ).price
+                    : 0;
+
+                return (
+                  <div key={piece.id} className="grid grid-cols-12 gap-2 items-center relative group mb-2">
+                    <div className="col-span-3">
+                      <input
+                        type="number"
+                        value={piece.length || ""}
+                        onChange={(e) =>
+                          updatePiece(index, "length", parseFloat(e.target.value), setMrPieces, mrPieces)
+                        }
+                        className="w-full h-10 px-3 border rounded-lg bg-primary-600 text-white border-primary-500 font-bold text-center focus:ring-2 focus:ring-offset-1 focus:ring-primary-400 placeholder-blue-200"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="col-span-3">
+                      <input
+                        type="number"
+                        value={piece.width || ""}
+                        onChange={(e) =>
+                          updatePiece(index, "width", parseFloat(e.target.value), setMrPieces, mrPieces)
+                        }
+                        className="w-full h-10 px-3 border rounded-lg bg-primary-600 text-white border-primary-500 font-bold text-center focus:ring-2 focus:ring-offset-1 focus:ring-primary-400 placeholder-blue-200"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <input
+                        type="number"
+                        value={piece.quantity}
+                        onChange={(e) =>
+                          updatePiece(index, "quantity", parseInt(e.target.value), setMrPieces, mrPieces)
+                        }
+                        className="w-full h-10 px-1 border rounded-lg bg-primary-600 text-white border-primary-500 font-bold text-center focus:ring-2 focus:ring-offset-1 focus:ring-primary-400 placeholder-blue-200"
+                        min={1}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <div className="w-full h-10 flex items-center justify-center border rounded-lg bg-primary-600 text-white font-bold border-primary-500 shadow-inner">
+                        {pieceM2.toFixed(2)}
+                      </div>
+                    </div>
+                    <div className="col-span-2">
+                      <div className="h-10 flex items-center justify-end px-2 rounded-lg bg-primary-700 text-white border border-primary-600 font-bold text-xs sm:text-sm shadow-inner">
+                        {pieceValue.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+
+                    {mrPieces.length > 1 && (
+                      <button
+                        onClick={() => removePiece(index, setMrPieces, mrPieces)}
+                        className="absolute -right-8 top-2 text-red-500 hover:text-red-700 transition-colors"
+                        title="Remover medida"
+                      >
+                        <Icon className="w-5 h-5">
+                          <line x1="18" y1="6" x2="6" y2="18"></line>
+                          <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </Icon>
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+
+              <div className="flex justify-end mb-4">
+                <button
+                  onClick={() => addPiece(setMrPieces, mrPieces)}
+                  className="px-4 py-2 bg-primary-600 text-white text-sm font-bold rounded hover:bg-primary-700 transition-colors flex items-center gap-2 shadow-md"
+                >
+                  + ADICIONAR MEDIDA
+                </button>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-white p-3 max-w-xs">
+                <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">
+                  Acréscimo (R$)
+                </label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={mrExtraServiceInput}
+                  onChange={(e) => {
+                    const rawValue = sanitizeMoneyInputBR(e.target.value);
+                    setMrExtraServiceInput(rawValue);
+                    setMrExtraService(parseMoneyInputBR(rawValue));
+                  }}
+                  onBlur={() => setMrExtraServiceInput(formatMoneyInputBR(mrExtraService))}
+                  className="w-full h-11 px-3 border rounded-lg text-gray-900"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between rounded-xl border border-primary-200 bg-white px-4 py-3">
+              <span className="text-sm font-semibold text-gray-600 uppercase">Valor estimado (total)</span>
+              <span className="text-xl font-bold text-primary-700">
+                {mrLivePrice !== null
+                  ? `R$ ${mrLivePrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : "Informe as medidas"}
+              </span>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={handleAddMarmoreItem}
+                className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg"
+              >
+                Adicionar produto de mármore
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeCategory === "GRANITO" && (
+          <div className="mt-8">
+            <p className="text-xs font-bold text-gray-500 uppercase mb-2">
+              Ou corte uma chapa personalizada da matéria-prima
+            </p>
+            {renderMultiPieceCalculator({
+              materialId: grMaterialId,
+              setMaterialId: setGrMaterialId,
+              variantName: grVariantName,
+              setVariantName: setGrVariantName,
+              pieces: grPieces,
+              setPieces: setGrPieces,
+              description: grDescription,
+              setDescription: setGrDescription,
+              onAdd: () =>
+                handleAddPieceItem("GRANITO", grMaterialId, grVariantName, grPieces, grDescription, () => {
+                  setGrPieces([{ id: Date.now().toString(), length: 0, width: 0, quantity: 1 }]);
+                  setGrDescription("");
+                }),
+              categoryFilter: "GRANITO",
+            })}
+          </div>
+        )}
         {activeCategory === "ALUMINIO" && (
           <div className="mt-6 space-y-5 border border-blue-100 rounded-xl p-4 bg-blue-50/40">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
@@ -2118,7 +2506,7 @@ const handleSavePDF = async () => {
           </div>
         )}
 
-{(activeCategory === "GRANITO" || activeCategory === "PORTAO") && (
+{activeCategory === "PORTAO" && (
   <div className="mt-6">
     <label className="block text-xs font-bold text-gray-600 mb-2 uppercase">
       Escolha a Cor *
@@ -2503,11 +2891,6 @@ const handleSavePDF = async () => {
                   Taxa de cartão: {cardRate}% − {discountPercent}% desc. = {effectiveCardRate.toFixed(2)}% efetivo
                 </p>
               )}
-              {discountMode === "fixed" && discountFixed > 0 && (
-                <p className="text-xs text-gray-500">
-                  Desconto de R$ {discountFixed.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} absorvido pela taxa da maquininha
-                </p>
-              )}
             </div>
 
             {/* Linha do total */}
@@ -2616,9 +2999,7 @@ const handleSavePDF = async () => {
                       <span>
                         Taxa de cartão ({discountMode === "percent" && discountPercent > 0
                           ? `${cardRate}% − ${discountPercent}% = ${effectiveCardRate.toFixed(2)}%`
-                          : discountMode === "fixed" && discountFixed > 0
-                            ? `${cardRate}% − R$ ${fmt(discountFixed)}`
-                            : `${cardRate}%`}):
+                          : `${cardRate}%`}):
                       </span>
                       <span className="font-medium">R$ {fmt(cardValue)}</span>
                     </div>

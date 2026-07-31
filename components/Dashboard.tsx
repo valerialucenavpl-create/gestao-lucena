@@ -88,16 +88,16 @@ const DashboardCard: React.FC<DashboardCardProps> = ({
 }) => (
   <div
     onClick={onClick}
-    className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 ${
-      onClick ? "cursor-pointer hover:border-primary-300 dark:hover:border-primary-600 transition-colors" : ""
+    className={`bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-800/60 rounded-xl p-4 ${
+      onClick ? "cursor-pointer hover:border-orange-400 dark:hover:border-orange-500 transition-colors" : ""
     }`}
   >
     <div className="flex items-center justify-between">
       <div>
-        <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{title}</p>
-        <p className="text-2xl font-bold text-gray-800 dark:text-white mt-1">{value}</p>
+        <p className="text-sm font-medium text-orange-700/80 dark:text-orange-300/80">{title}</p>
+        <p className="text-2xl font-bold text-orange-900 dark:text-white mt-1">{value}</p>
       </div>
-      <div className="p-2.5 rounded-full bg-slate-100 dark:bg-gray-700 text-slate-400 dark:text-gray-300">
+      <div className="p-2.5 rounded-full bg-orange-100 dark:bg-orange-900/50 text-orange-500 dark:text-orange-300">
         {icon}
       </div>
     </div>
@@ -107,9 +107,9 @@ const DashboardCard: React.FC<DashboardCardProps> = ({
     </div>
 
     {progressPercent !== undefined && (
-      <div className="mt-2 h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+      <div className="mt-2 h-1.5 rounded-full bg-orange-200 dark:bg-orange-900/60 overflow-hidden">
         <div
-          className={`h-full rounded-full ${progressPercent >= 100 ? "bg-green-500" : "bg-primary-500"}`}
+          className={`h-full rounded-full ${progressPercent >= 100 ? "bg-green-500" : "bg-orange-500"}`}
           style={{ width: `${Math.min(Math.max(progressPercent, 0), 100)}%` }}
         />
       </div>
@@ -182,7 +182,11 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
             .from("quotes")
             .select("*")
             .order("date", { ascending: false }),
-          supabase.from("products").select("*"),
+          // Só usamos nome/categoria pra montar "Entregas por setor" — o
+          // Dashboard não mostra foto de produto. Buscar "*" trazia a foto em
+          // base64 de cada produto (60+ MB no total) e deixava o painel
+          // demorando muito pra carregar por causa só desse payload.
+          supabase.from("products").select("id,name,productCategory"),
           supabase.from("clients").select("*"),
           supabase.from("employees").select("id,name,birth_date"),
           supabase.from("payables").select("*").order("due_date", { ascending: true }),
@@ -493,14 +497,14 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
   return (
     <div className="space-y-6">
       {/* MENSAGEM DO DIA */}
-      <div className="flex items-center justify-between gap-3 bg-slate-50 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-lg px-4 py-2">
-        <p className="flex items-center gap-2 text-sm text-slate-600 dark:text-gray-300 italic truncate">
-          <Icon className="w-4 h-4 text-primary-500 shrink-0">
+      <div className="flex items-center justify-between gap-3 bg-primary-50 dark:bg-primary-950/40 border border-primary-200 dark:border-primary-800/60 rounded-lg px-4 py-2">
+        <p className="flex items-center gap-2 text-sm text-primary-900 dark:text-primary-100 italic truncate">
+          <Icon className="w-4 h-4 text-primary-600 dark:text-primary-300 shrink-0">
             <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
           </Icon>
           <span className="truncate">"{quoteOfTheDay}"</span>
         </p>
-        <span className="text-xs font-semibold text-slate-400 dark:text-gray-500 whitespace-nowrap">
+        <span className="text-xs font-semibold text-primary-500 dark:text-primary-400 whitespace-nowrap">
           {todayLabel}
         </span>
       </div>

@@ -258,17 +258,36 @@ export async function generateQuotePDF(
   // Validade padrão da proposta (período comercial fixo da empresa).
   clientFields.push({ label: "VALIDADE DA PROPOSTA", value: "15 dias" });
 
-  const fieldGap = contentW / clientFields.length;
+  // Larguras desiguais (cliente ganha mais espaço) em vez de dividir o
+  // card em partes iguais — um nome de cliente longo (ex.: "ANTONIO DE
+  // PAULO DE LIMA VIEIRA") estourava a coluna e ficava escrito por cima
+  // do campo "VENDEDOR(A)" ao lado.
+  const fieldWidths =
+    clientFields.length === 3
+      ? [contentW * 0.44, contentW * 0.28, contentW * 0.28]
+      : clientFields.map(() => contentW / clientFields.length);
+
+  let fieldX = margin + 8;
   clientFields.forEach((f, i) => {
-    const fx = margin + 8 + i * fieldGap;
+    const fx = fieldX;
+    const maxWidth = fieldWidths[i] - 6;
+
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
     setTxt(doc, NAVY);
     doc.text(f.label, fx, y + 6.5);
+
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
     setTxt(doc, INK);
-    doc.text(f.value, fx, y + 12.5);
+    let displayValue = f.value;
+    while (displayValue.length > 3 && doc.getTextWidth(displayValue) > maxWidth) {
+      displayValue = displayValue.slice(0, -1);
+    }
+    if (displayValue !== f.value) displayValue = `${displayValue.trimEnd()}…`;
+    doc.text(displayValue, fx, y + 12.5);
+
+    fieldX += fieldWidths[i];
   });
 
   y += clientCardH + 8;
