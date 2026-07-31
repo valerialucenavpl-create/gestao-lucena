@@ -167,7 +167,7 @@ const Sales: React.FC<SalesProps> = ({ sales, quotes, cashFlow, onOpenQuote, onD
     const saleDateMs = saleDate ? saleDate.getTime() : null;
 
     const payments = safeCashFlow.filter((entry: any) => {
-      if (entry.type !== "income") return false;
+      if (entry.type !== "Entrada") return false;
 
        const desc = toSafeText(entry.description).toLowerCase();
       const quote = getQuote(getSaleQuoteId(sale));

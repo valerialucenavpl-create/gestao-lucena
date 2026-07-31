@@ -79,14 +79,14 @@ export const getUserProfile = async (
     }
 
     if (!data) {
-      // fallback se ainda não existir linha
+      // fallback se ainda não existir linha — nunca conceder Admin por padrão
       return {
         ok: true,
         data: {
           id: authUserId,
           name: (emailFallback ?? "User").split("@")[0],
           email: emailFallback ?? "",
-          role: "Admin",
+          role: "Sales",
         },
       };
     }

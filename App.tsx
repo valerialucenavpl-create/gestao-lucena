@@ -606,7 +606,7 @@ const App: React.FC = () => {
   // ===============================
   // PERMISSÕES (SEM LOOP)
   // ===============================
-  const role = currentUser?.role ?? "Admin";
+  const role = currentUser?.role ?? "Sales";
 
   const canAccess = useMemo(() => {
     return (view: View) => {
