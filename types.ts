@@ -312,6 +312,22 @@ export interface Sale {
   amount: number; // total do orçamento
   status: "Aprovado" | "Concluído" | "Pendente" | "Cancelado";
 }
+// ---------------------------------------------
+// Contas a Receber (geradas automaticamente ao aprovar um orçamento)
+// ---------------------------------------------
+export interface Receivable {
+  id: string;
+  quoteId: string;
+  customerName: string;
+  amount: number;
+  paymentMethod: string;
+  dueDate: string;
+  status: "pending" | "received";
+  receivedAt?: string;
+  receivedBy?: string;
+  createdAt?: string;
+}
+
 export type Message = {
   id: number;
   text: string;
