@@ -44,6 +44,17 @@ const todayISO = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
+const getCurrentMonthStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+
+const formatMonthLabel = (monthStr: string) => {
+  const [y, m] = monthStr.split("-").map(Number);
+  const d = new Date(y, (m || 1) - 1, 1);
+  return d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+};
+
 const formatBR = (ymd?: string) => {
   if (!ymd) return "-";
   const [y, m, d] = ymd.split("-");
@@ -78,6 +89,8 @@ const Payables: React.FC = () => {
   const [showPayment, setShowPayment] = useState(false);
   const [payingPayable, setPayingPayable] = useState<Payable | null>(null);
   const [filterStatus, setFilterStatus] = useState<"all" | "pending" | "paid">("all");
+  const [filterMonth, setFilterMonth] = useState<string>(getCurrentMonthStr());
+  const [showAllPeriods, setShowAllPeriods] = useState(false);
 
   useEffect(() => {
     loadPayables();
@@ -143,18 +156,37 @@ const Payables: React.FC = () => {
     return               { label: "A Vencer", cls: "bg-blue-100 text-blue-700" };
   };
 
-  const filtered = useMemo(() => payables.filter((p) => {
-    const s = getStatus(p);
-    if (filterStatus === "pending") return s !== "paid";
-    if (filterStatus === "paid")    return s === "paid";
-    return true;
-  }), [payables, filterStatus, today]);
+  // Contas sem data de vencimento não têm como ser classificadas num mês —
+  // ficam sempre visíveis, em vez de simplesmente sumir do filtro.
+  const monthFiltered = useMemo(() => {
+    if (showAllPeriods) return payables;
+    return payables.filter((p) => !p.dueDate || p.dueDate.startsWith(filterMonth));
+  }, [payables, filterMonth, showAllPeriods]);
 
+  const filtered = useMemo(() => {
+    const base = monthFiltered.filter((p) => {
+      const s = getStatus(p);
+      if (filterStatus === "pending") return s !== "paid";
+      if (filterStatus === "paid")    return s === "paid";
+      return true;
+    });
+
+    // Vencidas/a vencer primeiro (por ordem de vencimento); pagas vão pro final.
+    return [...base].sort((a, b) => {
+      const aPaid = getStatus(a) === "paid";
+      const bPaid = getStatus(b) === "paid";
+      if (aPaid !== bPaid) return aPaid ? 1 : -1;
+      return (a.dueDate || "").localeCompare(b.dueDate || "");
+    });
+  }, [monthFiltered, filterStatus, today]);
+
+  // Os totais acompanham o período selecionado (mês atual por padrão);
+  // só refletem tudo quando "Ver todo o período" está marcado.
   const stats = useMemo(() => ({
-    pending: payables.filter((p) => getStatus(p) !== "paid").reduce((s, p) => s + p.amount, 0),
-    overdue: payables.filter((p) => getStatus(p) === "overdue").reduce((s, p) => s + p.amount, 0),
-    paid:    payables.filter((p) => getStatus(p) === "paid").reduce((s, p) => s + p.amount, 0),
-  }), [payables, today]);
+    pending: monthFiltered.filter((p) => getStatus(p) !== "paid").reduce((s, p) => s + p.amount, 0),
+    overdue: monthFiltered.filter((p) => getStatus(p) === "overdue").reduce((s, p) => s + p.amount, 0),
+    paid:    monthFiltered.filter((p) => getStatus(p) === "paid").reduce((s, p) => s + p.amount, 0),
+  }), [monthFiltered, today]);
 
   return (
     <div className="bg-white p-6 rounded-xl shadow-md">
@@ -162,7 +194,12 @@ const Payables: React.FC = () => {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold">Contas a Pagar</h2>
-          <p className="text-gray-500 text-sm">Gerencie contas e dê baixa automática no Caixa</p>
+          <p className="text-gray-500 text-sm">
+            Gerencie contas e dê baixa automática no Caixa •{" "}
+            <span className="font-semibold capitalize">
+              {showAllPeriods ? "todo o período" : formatMonthLabel(filterMonth)}
+            </span>
+          </p>
         </div>
         <button
           onClick={() => { setEditingPayable(null); setShowForm(true); }}
@@ -170,6 +207,28 @@ const Payables: React.FC = () => {
         >
           + Nova Conta
         </button>
+      </div>
+
+      {/* Filtro de mês */}
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Mês</label>
+          <input
+            type="month"
+            disabled={showAllPeriods}
+            value={filterMonth}
+            onChange={(e) => setFilterMonth(e.target.value || getCurrentMonthStr())}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm disabled:opacity-50 disabled:bg-gray-100"
+          />
+        </div>
+        <label className="flex items-center gap-2 text-sm text-gray-600 pb-2.5">
+          <input
+            type="checkbox"
+            checked={showAllPeriods}
+            onChange={(e) => setShowAllPeriods(e.target.checked)}
+          />
+          Ver todo o período
+        </label>
       </div>
 
       {/* Stats */}
