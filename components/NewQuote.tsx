@@ -1712,44 +1712,25 @@ const handleSavePDF = async () => {
 
     setIsSavingClient(true);
 
-    // Tenta salvar no Supabase (várias tabelas/colunas como fallback)
-    // Se falhar, prossegue com ID local — o orçamento ainda será gerado
-    const TABLE_CANDIDATES = ["clients", "clientes"];
-    const COLUMN_SETS = [
-      { name: newClientName, phone: newClientPhone || null, notes: newClientNotes || null, street: newClientAddress || null, complement: newClientReferencePoint || null },
-      { name: newClientName, phone: newClientPhone || null, notes: newClientNotes || null },
-      { name: newClientName, phone: newClientPhone || null },
-      { name: newClientName },
-    ];
+    // A tabela "clients" só tem uma coluna de endereço (sem rua/complemento
+    // separados), então tudo isso é combinado num só texto antes de salvar
+    // — mesmo padrão usado no cadastro de clientes (components/Clients.tsx).
+    const addressCombined = [newClientAddress, newClientReferencePoint, newClientNotes ? `Obs: ${newClientNotes}` : ""]
+      .filter((v) => v && v.trim())
+      .join(" | ");
 
-    let savedId: string | null = null;
+    const { data: saved, error: saveError } = await supabase
+      .from("clients")
+      .insert({ name: newClientName, phone: newClientPhone || null, address: addressCombined || null })
+      .select("id")
+      .maybeSingle();
 
-    outer: for (const tbl of TABLE_CANDIDATES) {
-      for (const cols of COLUMN_SETS) {
-        const { error } = await supabase.from(tbl as any).insert(cols);
-        if (!error) {
-          // Busca ID real
-          const { data: found } = await supabase
-            .from(tbl as any)
-            .select("id")
-            .eq("name", newClientName)
-            .order("id", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          if (found) savedId = String((found as any).id);
-          break outer;
-        }
-        const msg = String(error.message || "").toLowerCase();
-        // Se for erro de tabela, tenta próxima tabela
-        if (msg.includes("could not find the table") || msg.includes("schema cache")) break;
-        // Se for erro de coluna, tenta próximo conjunto de colunas
-        if (!msg.includes("column")) break; // outro erro — abandona
-      }
-    }
+    if (saveError) console.error("Erro ao salvar novo cliente:", saveError);
 
     setIsSavingClient(false);
 
-    const clientId = savedId ?? `local_${Date.now()}`;
+    // Se o salvamento falhar, o orçamento ainda é gerado com um ID local.
+    const clientId = saved ? String((saved as any).id) : `local_${Date.now()}`;
     const newClient: Client = {
       id: clientId,
       name: newClientName,

@@ -17,7 +17,7 @@ const normalizeSearch = (s: string) =>
     .replace(/[̀-ͯ]/g, "")
     .trim();
 
-const CLIENTS_TABLE_CANDIDATES = ["clients", "clientes"] as const;
+const CLIENTS_TABLE = "clients";
 
 const emptyForm: Omit<Client, "id"> = {
   name: "",
@@ -54,70 +54,13 @@ const Clients: React.FC = () => {
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
 
-  const isTableNotFound = (message: string) => {
-    const text = message.toLowerCase();
-    return text.includes("could not find the table") || text.includes("relation") || text.includes("does not exist");
-  };
-
-  const runWithTableFallback = async <T,>(
-    action: (tableName: string) => any
-  ): Promise<{ data?: T; tableName?: string; error?: any }> => {
-    let lastError: any = null;
-
-    for (const tableName of CLIENTS_TABLE_CANDIDATES) {
-      const { data, error } = await action(tableName);
-      if (!error) return { data, tableName };
-
-      lastError = error;
-      const message = String(error?.message ?? "");
-      if (!isTableNotFound(message)) {
-        return { error };
-      }
-    }
-
-    return { error: lastError };
-  };
-
-  const getMissingColumnFromError = (error: any): string | null => {
-    const message = String(error?.message ?? "");
-    const match = message.match(/Could not find the '([^']+)' column/i);
-    return match?.[1] ?? null;
-  };
-
-  const saveWithColumnFallback = async (
-    tableName: string,
-    mode: "insert" | "update",
-    payload: Record<string, any>,
-    id?: string
-  ) => {
-    const workingPayload: Record<string, any> = { ...payload };
-
-    for (let i = 0; i < 6; i += 1) {
-      const query =
-        mode === "insert"
-          ? supabase.from(tableName).insert(workingPayload)
-          : supabase.from(tableName).update(workingPayload).eq("id", id);
-
-      const { error } = await query;
-      if (!error) return { error: null };
-
-      const missingColumn = getMissingColumnFromError(error);
-      if (!missingColumn || !(missingColumn in workingPayload)) {
-        return { error };
-      }
-
-      delete workingPayload[missingColumn];
-    }
-
-    return { error: { message: "Falha ao ajustar payload para schema da tabela." } };
-  };
-
   const loadClients = async () => {
     setLoading(true);
 
-    const { data, tableName, error } = await runWithTableFallback<Client[]>(async (candidate) => {
-      return await supabase.from(candidate).select("*").is("deleted_at", null);
-    });
+    const { data, error } = await supabase
+      .from(CLIENTS_TABLE)
+      .select("*")
+      .is("deleted_at", null);
 
     if (error) {
       console.error("Erro ao carregar clientes:", error);
@@ -127,7 +70,6 @@ const Clients: React.FC = () => {
       return;
     }
 
-    console.log(`Clientes carregados da tabela: ${tableName}`);
     const sorted = [...((data as Client[]) || [])].sort((a, b) =>
       a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" })
     );
@@ -175,18 +117,14 @@ const Clients: React.FC = () => {
     };
 
     if (editing) {
-      const { error } = await runWithTableFallback((tableName) =>
-        saveWithColumnFallback(tableName, "update", basePayload, editing.id)
-      );
+      const { error } = await supabase.from(CLIENTS_TABLE).update(basePayload).eq("id", editing.id);
       if (error) {
         console.error(error);
         alert(`Erro ao atualizar cliente: ${error.message}`);
         return;
       }
     } else {
-      const { error } = await runWithTableFallback((tableName) =>
-        saveWithColumnFallback(tableName, "insert", basePayload)
-      );
+      const { error } = await supabase.from(CLIENTS_TABLE).insert(basePayload);
       if (error) {
         console.error(error);
         alert(`Erro ao salvar cliente: ${error.message}`);
@@ -210,14 +148,12 @@ const Clients: React.FC = () => {
     // afeta nenhuma linha — por isso confirmamos com .select() que a
     // linha realmente voltou.
     const { data: authData } = await supabase.auth.getUser();
-    const { data, error } = await runWithTableFallback((tableName) =>
-      supabase
-        .from(tableName)
-        .update({ deleted_at: new Date().toISOString(), deleted_by: authData.user?.id ?? null })
-        .eq("id", id)
-        .select("id")
-        .maybeSingle()
-    );
+    const { data, error } = await supabase
+      .from(CLIENTS_TABLE)
+      .update({ deleted_at: new Date().toISOString(), deleted_by: authData.user?.id ?? null })
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
     if (error || !data) {
       console.error(error);
       alert(`Erro ao excluir cliente: ${error?.message ?? "nenhuma linha foi alterada (verifique permissão)"}`);

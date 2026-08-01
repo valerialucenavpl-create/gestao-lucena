@@ -537,19 +537,8 @@ const App: React.FC = () => {
 
     const loadSystemData = async () => {
       try {
-      let clientsData: Client[] = [];
-      for (const tbl of ["clients", "clientes"]) {
-        const c = await supabase.from(tbl).select("*");
-        if (Array.isArray(c.data) && c.data.length > 0) {
-          clientsData = c.data as Client[];
-          break;
-        }
-        if (Array.isArray(c.data) && !c.error) {
-          clientsData = [];
-          break;
-        }
-      }
-      setClients(clientsData);
+      const clientsRes = await supabase.from("clients").select("*").is("deleted_at", null);
+      setClients(Array.isArray(clientsRes.data) ? (clientsRes.data as Client[]) : []);
 
       const iWithVariants = await fetchAllWithRetry<MaterialVariantRow>(() =>
         supabase.from(INVENTORY_TABLE).select("*, inventory_variants(*)")

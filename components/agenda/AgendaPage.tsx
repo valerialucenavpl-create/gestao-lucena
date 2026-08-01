@@ -16,8 +16,6 @@ interface AgendaPageProps {
   currentUser: User;
 }
 
-const CLIENTS_TABLE_CANDIDATES = ["clients", "clientes"] as const;
-
 const AgendaPage: React.FC<AgendaPageProps> = () => {
   const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
   const [sellers, setSellers] = useState<AgendaSellerOption[]>([]);
@@ -39,13 +37,8 @@ const AgendaPage: React.FC<AgendaPageProps> = () => {
       setAgendamentos(agendaRes.ok ? agendaRes.data : []);
       setSellers(Array.isArray(sellersRes.data) ? (sellersRes.data as AgendaSellerOption[]) : []);
 
-      for (const table of CLIENTS_TABLE_CANDIDATES) {
-        const { data, error } = await supabase.from(table).select("id,name,phone");
-        if (!error) {
-          setClients(Array.isArray(data) ? (data as AgendaClientOption[]) : []);
-          break;
-        }
-      }
+      const clientsRes = await supabase.from("clients").select("id,name,phone").is("deleted_at", null);
+      setClients(Array.isArray(clientsRes.data) ? (clientsRes.data as AgendaClientOption[]) : []);
 
       setLoading(false);
     };
