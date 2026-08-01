@@ -10,10 +10,12 @@ import {
   CompanySettings,
   Client,
   CashFlowEntry,
+  User,
 } from "../types";
 import { calculateQuoteCompositionLineCost } from "../utils/materialFormulas";
 import { createCashFlowEntry } from "../services/cashFlowServices";
 import { generateQuotePDF } from "../utils/generateQuotePDF";
+import { normalizeText } from "../utils/deliveryEntries";
 import {
   formatMoneyInputBR,
   parseMoneyInputBR,
@@ -22,6 +24,7 @@ import {
 
 interface QuoteDetailProps {
   quote: Quote;
+  currentUser: User;
   clients?: Client[];
   rawMaterials: InventoryItem[];
   products: Product[];
@@ -84,6 +87,7 @@ const PAYMENT_OPTIONS = ["A Definir", "PIX", "Cartão", "Dinheiro", "Transferên
 // ─── Main component ──────────────────────────────────────────────────────────
 const QuoteDetail: React.FC<QuoteDetailProps> = ({
   quote,
+  currentUser,
   clients = [],
   rawMaterials,
   products,
@@ -154,6 +158,134 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
   };
   const clientInfo = clients.find((c) => c.id === localQuote.clientId);
   const safeItems = Array.isArray(localQuote.items) ? localQuote.items : [];
+
+  // ── Detalhamento financeiro (Admin) — mesma lógica/descrição de custos do
+  // orçamento (utils/../NewQuote.tsx), só que a partir dos valores já salvos
+  // no pedido em vez de recalcular tudo do zero.
+  const adminBreakdown = useMemo(() => {
+    if (currentUser?.role !== "Admin") return null;
+
+    const totalPrice = Number(localQuote.totalPrice || 0);
+    const totalCostOfGoods = Number(localQuote.costOfGoods || 0);
+    const taxValue = Number(localQuote.taxes || 0);
+    const cardValue = Number(localQuote.machineFee || 0);
+    const fixedCostValue = Number(localQuote.fixedCosts || 0);
+    const discountValue = Number(localQuote.discount || 0);
+    const referralCommissionValue = Number(localQuote.referralCommissionValue || 0);
+    const subtotal = Number(localQuote.subtotal || 0);
+
+    const commissionRate =
+      (variableExpenses ?? []).find((e) => normalizeText(e.name).includes(normalizeText("comissão")))?.value || 0;
+    const commissionValue = totalPrice * (commissionRate / 100);
+
+    const totalMaterialCost = safeItems.reduce((s, i) => s + (i.materialCost ?? 0), 0);
+    const totalLaborCost = safeItems.reduce((s, i) => s + (i.laborCost ?? 0), 0);
+
+    const netProfit = totalPrice - totalCostOfGoods - commissionValue - taxValue - cardValue - fixedCostValue;
+    const netProfitMargin = totalPrice > 0 ? (netProfit / totalPrice) * 100 : 0;
+
+    const variableCosts = commissionValue + taxValue + cardValue + referralCommissionValue;
+    const contribuicao = totalPrice - totalCostOfGoods - variableCosts;
+    const contribuicaoPct = totalPrice > 0 ? (contribuicao / totalPrice) * 100 : 0;
+
+    const total = {
+      label: "Total do Orçamento",
+      materialCost: totalMaterialCost,
+      laborCost: totalLaborCost,
+      costOfGoods: totalCostOfGoods,
+      taxValue,
+      commissionValue,
+      discountValue,
+      cardValue,
+      fixedCostValue,
+      referralCommissionValue,
+      totalPrice,
+      netProfit,
+      netProfitMargin,
+      contribuicao,
+      contribuicaoPct,
+    };
+
+    // Categoria de cada item pelo produto do catálogo (mesma lógica de
+    // Entregas por setor); itens de chapa cortada direto da matéria-prima
+    // (sem productId de catálogo) caem no fallback pelo prefixo do id.
+    const getItemCategoryKey = (item: QuoteItem): "MARMORE" | "VIDRO" | "ALUMINIO" | "ACESSORIOS" | null => {
+      const product = products.find((p) => p.id === item.productId);
+      const cat = normalizeText(product?.category || "");
+      if (cat.includes("MARMORE")) return "MARMORE";
+      if (cat.includes("VIDRO")) return "VIDRO";
+      if (cat.includes("ALUMINIO")) return "ALUMINIO";
+      if (cat.includes("ACESSORIO DE MOTOR") || cat.includes("MOTOR RESIDENCIAL")) return "ACESSORIOS";
+
+      if (item.id.startsWith("qi-granito-") || item.id.startsWith("qi-marmore-")) return "MARMORE";
+      if (item.id.startsWith("qi-glass-")) return "VIDRO";
+      if (item.id.startsWith("qi-aluminum-") || item.id.startsWith("qi-portao-")) return "ALUMINIO";
+      if (item.id.startsWith("qi-acessorio-")) return "ACESSORIOS";
+      return null;
+    };
+
+    const CATEGORY_LABELS = {
+      MARMORE: "Mármore",
+      VIDRO: "Vidro",
+      ALUMINIO: "Alumínio",
+      ACESSORIOS: "Acessórios",
+    } as const;
+
+    const buckets: Record<string, QuoteItem[]> = {};
+    safeItems.forEach((item) => {
+      const key = getItemCategoryKey(item);
+      if (!key) return;
+      (buckets[key] = buckets[key] || []).push(item);
+    });
+
+    const categories = (Object.keys(CATEGORY_LABELS) as (keyof typeof CATEGORY_LABELS)[])
+      .filter((key) => (buckets[key]?.length || 0) > 0)
+      .map((key) => {
+        const catItems = buckets[key];
+        const categoryPrice = catItems.reduce((s, i) => s + i.price, 0);
+        const share = subtotal > 0 ? categoryPrice / subtotal : 0;
+
+        const materialCost = catItems.reduce((s, i) => s + (i.materialCost ?? 0), 0);
+        const laborCost = catItems.reduce((s, i) => s + (i.laborCost ?? 0), 0);
+        const costOfGoods = catItems.reduce((s, i) => s + i.cost, 0);
+        const catFixedCostValue = catItems.reduce((s, i) => s + (i.fixedCostValue ?? 0), 0);
+
+        const catTotalPrice = share * totalPrice;
+        const catCommissionValue = share * commissionValue;
+        const catTaxValue = share * taxValue;
+        const catCardValue = share * cardValue;
+        const catDiscountValue = share * discountValue;
+        const catReferralCommissionValue = share * referralCommissionValue;
+
+        const catNetProfit =
+          catTotalPrice - costOfGoods - catCommissionValue - catTaxValue - catCardValue - catFixedCostValue;
+        const catNetProfitMargin = catTotalPrice > 0 ? (catNetProfit / catTotalPrice) * 100 : 0;
+
+        const catVariableCosts = catCommissionValue + catTaxValue + catCardValue + catReferralCommissionValue;
+        const catContribuicao = catTotalPrice - costOfGoods - catVariableCosts;
+        const catContribuicaoPct = catTotalPrice > 0 ? (catContribuicao / catTotalPrice) * 100 : 0;
+
+        return {
+          label: CATEGORY_LABELS[key],
+          materialCost,
+          laborCost,
+          costOfGoods,
+          taxValue: catTaxValue,
+          commissionValue: catCommissionValue,
+          discountValue: catDiscountValue,
+          cardValue: catCardValue,
+          fixedCostValue: catFixedCostValue,
+          referralCommissionValue: catReferralCommissionValue,
+          totalPrice: catTotalPrice,
+          netProfit: catNetProfit,
+          netProfitMargin: catNetProfitMargin,
+          contribuicao: catContribuicao,
+          contribuicaoPct: catContribuicaoPct,
+        };
+      });
+
+    return { total, categories };
+  }, [currentUser?.role, localQuote, safeItems, products, variableExpenses]);
 
   const totalVariablePercent = useMemo(
     () => (variableExpenses ?? []).filter((e) => e?.type === "percent").reduce((s, e) => s + (Number(e?.value) || 0), 0),
@@ -266,7 +398,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
 
       {/* Top bar */}
       <div className="flex items-center justify-between mb-5">
-        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, color: "#636b85", fontSize: 14, background: "none", border: "none", cursor: "pointer" }}>
+        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, color: "#a9b8dc", fontSize: 14, background: "none", border: "none", cursor: "pointer" }}>
           <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
           Voltar para Orçamentos
         </button>
@@ -274,7 +406,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
           <button
             onClick={handleViewPdf}
             disabled={generatingPdf}
-            style={{ display: "flex", alignItems: "center", gap: 6, background: "#252b45", border: "1px solid #3d4166", borderRadius: 8, padding: "8px 16px", color: "#c8d0e7", fontWeight: 600, fontSize: 14, cursor: generatingPdf ? "default" : "pointer", opacity: generatingPdf ? 0.7 : 1 }}
+            style={{ display: "flex", alignItems: "center", gap: 6, background: "#2C53A0", border: "1px solid #4a68a8", borderRadius: 8, padding: "8px 16px", color: "#dde4f5", fontWeight: 600, fontSize: 14, cursor: generatingPdf ? "default" : "pointer", opacity: generatingPdf ? 0.7 : 1 }}
           >
             <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
             {generatingPdf ? "Gerando…" : "Imprimir / PDF"}
@@ -292,14 +424,14 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
       </div>
 
       {/* ── CARD PRINCIPAL ── */}
-      <div style={{ background: "#1a1f36", borderRadius: 18, overflow: "hidden", boxShadow: "0 8px 40px rgba(0,0,0,0.35)" }}>
+      <div style={{ background: "#1E3D7A", borderRadius: 18, overflow: "hidden", boxShadow: "0 8px 40px rgba(0,0,0,0.35)" }}>
 
         {/* ── CABEÇALHO ── */}
-        <div style={{ padding: "22px 24px 16px", borderBottom: "1px solid #2d3148" }}>
-          <div style={{ fontSize: 11, color: "#636b85", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Orçamento</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: "#e8eaf0" }}>
+        <div style={{ padding: "22px 24px 16px", borderBottom: "1px solid #3a5590" }}>
+          <div style={{ fontSize: 11, color: "#a9b8dc", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Orçamento</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "#f5f6fa" }}>
             N° {localQuote.quoteNumber ?? "—"}
-            <span style={{ fontSize: 14, fontWeight: 400, color: "#636b85", marginLeft: 10 }}>
+            <span style={{ fontSize: 14, fontWeight: 400, color: "#a9b8dc", marginLeft: 10 }}>
               / {localQuote.date ? new Date(localQuote.date.slice(0, 10) + "T12:00:00").getFullYear() : "—"}
             </span>
           </div>
@@ -307,28 +439,28 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
           {/* Status row */}
           <div style={{ display: "flex", gap: 14, marginTop: 16, flexWrap: "wrap" }}>
             <div>
-              <div style={{ fontSize: 10, color: "#636b85", textTransform: "uppercase", marginBottom: 4 }}>Status do cliente</div>
+              <div style={{ fontSize: 10, color: "#a9b8dc", textTransform: "uppercase", marginBottom: 4 }}>Status do cliente</div>
               <div style={{ position: "relative", display: "inline-block" }}>
                 <select
                   value={localQuote.status}
                   onChange={(e) => handleStatusChange("status", e.target.value)}
                   style={{ background: clientStyle.bg, color: clientStyle.color, border: `1px solid ${clientStyle.color}55`, borderRadius: 20, padding: "7px 30px 7px 14px", fontWeight: 700, fontSize: 12, cursor: "pointer", outline: "none", appearance: "none" }}
                 >
-                  {CLIENT_STATUS_OPTIONS.map((s) => <option key={s} value={s} style={{ background: "#1a1f36" }}>{s}</option>)}
+                  {CLIENT_STATUS_OPTIONS.map((s) => <option key={s} value={s} style={{ background: "#1E3D7A" }}>{s}</option>)}
                 </select>
                 <svg width="10" height="10" fill="none" stroke={clientStyle.color} strokeWidth="2" viewBox="0 0 24 24" style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}><polyline points="6 9 12 15 18 9"/></svg>
               </div>
             </div>
 
             <div>
-              <div style={{ fontSize: 10, color: "#636b85", textTransform: "uppercase", marginBottom: 4 }}>Status interno (produção)</div>
+              <div style={{ fontSize: 10, color: "#a9b8dc", textTransform: "uppercase", marginBottom: 4 }}>Status interno (produção)</div>
               <div style={{ position: "relative", display: "inline-block" }}>
                 <select
                   value={localQuote.internalStatus ?? "Pedido"}
                   onChange={(e) => handleStatusChange("internalStatus", e.target.value)}
                   style={{ background: internalStyle.bg, color: internalStyle.color, border: `1px solid ${internalStyle.color}55`, borderRadius: 20, padding: "7px 30px 7px 14px", fontWeight: 700, fontSize: 12, cursor: "pointer", outline: "none", appearance: "none" }}
                 >
-                  {INTERNAL_STATUS_OPTIONS.map((s) => <option key={s} value={s} style={{ background: "#1a1f36" }}>{s}</option>)}
+                  {INTERNAL_STATUS_OPTIONS.map((s) => <option key={s} value={s} style={{ background: "#1E3D7A" }}>{s}</option>)}
                 </select>
                 <svg width="10" height="10" fill="none" stroke={internalStyle.color} strokeWidth="2" viewBox="0 0 24 24" style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}><polyline points="6 9 12 15 18 9"/></svg>
               </div>
@@ -338,59 +470,59 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
           {/* Datas */}
           <div style={{ display: "flex", gap: 20, marginTop: 16, flexWrap: "wrap" }}>
             <div>
-              <div style={{ fontSize: 10, color: "#636b85", textTransform: "uppercase", marginBottom: 4 }}>Data da venda</div>
+              <div style={{ fontSize: 10, color: "#a9b8dc", textTransform: "uppercase", marginBottom: 4 }}>Data da venda</div>
               <input
                 type="date"
                 value={isoToInput(localQuote.date)}
                 onChange={(e) => setLocalQuote((p) => ({ ...p, date: e.target.value }))}
-                style={{ background: "#252b45", border: "1px solid #3d4166", borderRadius: 8, color: "#c8d0e7", fontSize: 13, padding: "7px 10px", outline: "none" }}
+                style={{ background: "#2C53A0", border: "1px solid #4a68a8", borderRadius: 8, color: "#dde4f5", fontSize: 13, padding: "7px 10px", outline: "none" }}
               />
             </div>
             <div>
-              <div style={{ fontSize: 10, color: "#636b85", textTransform: "uppercase", marginBottom: 4 }}>Previsão de entrega</div>
+              <div style={{ fontSize: 10, color: "#a9b8dc", textTransform: "uppercase", marginBottom: 4 }}>Previsão de entrega</div>
               <input
                 type="date"
                 value={isoToInput(localQuote.deliveryDate)}
                 onChange={(e) => setLocalQuote((p) => ({ ...p, deliveryDate: e.target.value }))}
-                style={{ background: "#252b45", border: "1px solid #3d4166", borderRadius: 8, color: "#c8d0e7", fontSize: 13, padding: "7px 10px", outline: "none" }}
+                style={{ background: "#2C53A0", border: "1px solid #4a68a8", borderRadius: 8, color: "#dde4f5", fontSize: 13, padding: "7px 10px", outline: "none" }}
               />
             </div>
           </div>
         </div>
 
         {/* ── CLIENTE ── */}
-        <div style={{ padding: "18px 24px", borderBottom: "1px solid #2d3148" }}>
-          <div style={{ fontSize: 11, color: "#636b85", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>Cliente</div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: "#e8eaf0", marginBottom: 6 }}>
+        <div style={{ padding: "18px 24px", borderBottom: "1px solid #3a5590" }}>
+          <div style={{ fontSize: 11, color: "#a9b8dc", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>Cliente</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#f5f6fa", marginBottom: 6 }}>
             {localQuote.customerName || "—"}
           </div>
           {clientInfo?.phone && (
-            <div style={{ fontSize: 13, color: "#8892b0", display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
-              <svg width="13" height="13" fill="none" stroke="#6c8ef5" strokeWidth="2" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.43 2 2 0 0 1 3.59 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.56a16 16 0 0 0 6.29 6.29l.88-.88a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            <div style={{ fontSize: 13, color: "#b8c4e0", display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
+              <svg width="13" height="13" fill="none" stroke="#8fa8ff" strokeWidth="2" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.43 2 2 0 0 1 3.59 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.56a16 16 0 0 0 6.29 6.29l.88-.88a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
               {clientInfo.phone}
             </div>
           )}
           {clientInfo?.email && (
-            <div style={{ fontSize: 13, color: "#8892b0", display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
-              <svg width="13" height="13" fill="none" stroke="#6c8ef5" strokeWidth="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            <div style={{ fontSize: 13, color: "#b8c4e0", display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
+              <svg width="13" height="13" fill="none" stroke="#8fa8ff" strokeWidth="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
               {clientInfo.email}
             </div>
           )}
           {addrParts && (
-            <div style={{ fontSize: 13, color: "#8892b0", display: "flex", alignItems: "flex-start", gap: 7, marginTop: 4 }}>
-              <svg width="13" height="13" fill="none" stroke="#6c8ef5" strokeWidth="2" viewBox="0 0 24 24" style={{ flexShrink: 0, marginTop: 1 }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-              <span>{addrParts}{clientInfo?.address?.referencePoint && <span style={{ color: "#636b85" }}> — Ref: {clientInfo.address.referencePoint}</span>}</span>
+            <div style={{ fontSize: 13, color: "#b8c4e0", display: "flex", alignItems: "flex-start", gap: 7, marginTop: 4 }}>
+              <svg width="13" height="13" fill="none" stroke="#8fa8ff" strokeWidth="2" viewBox="0 0 24 24" style={{ flexShrink: 0, marginTop: 1 }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+              <span>{addrParts}{clientInfo?.address?.referencePoint && <span style={{ color: "#a9b8dc" }}> — Ref: {clientInfo.address.referencePoint}</span>}</span>
             </div>
           )}
         </div>
 
         {/* ── PRODUTOS ── */}
-        <div style={{ padding: "18px 24px", borderBottom: "1px solid #2d3148" }}>
-          <div style={{ fontSize: 11, color: "#636b85", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 14 }}>
+        <div style={{ padding: "18px 24px", borderBottom: "1px solid #3a5590" }}>
+          <div style={{ fontSize: 11, color: "#a9b8dc", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 14 }}>
             Produtos ({safeItems.length})
           </div>
           {safeItems.length === 0 ? (
-            <div style={{ color: "#636b85", fontSize: 13 }}>Nenhum produto neste orçamento.</div>
+            <div style={{ color: "#a9b8dc", fontSize: 13 }}>Nenhum produto neste orçamento.</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {safeItems.map((item) => {
@@ -398,30 +530,30 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
                 const hDisp = item.height >= 1000 ? `${(item.height / 1000).toFixed(2).replace(".", ",")}m` : item.height > 0 ? `${item.height}mm` : null;
                 const cleanDesc = (item.description || "").split(" | ").filter((p) => !p.toLowerCase().startsWith("acréscimo por serviço")).join(" | ");
                 return (
-                  <div key={item.id} style={{ background: "#252b45", borderRadius: 12, padding: "14px 16px", border: "1px solid #3d4166" }}>
+                  <div key={item.id} style={{ background: "#2C53A0", borderRadius: 12, padding: "14px 16px", border: "1px solid #4a68a8" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 700, color: "#e8eaf0", fontSize: 15, marginBottom: 5 }}>{item.productName}</div>
+                        <div style={{ fontWeight: 700, color: "#f5f6fa", fontSize: 15, marginBottom: 5 }}>{item.productName}</div>
                         {(wDisp || hDisp) && (
-                          <div style={{ fontSize: 12, color: "#8892b0", marginBottom: 3 }}>
+                          <div style={{ fontSize: 12, color: "#b8c4e0", marginBottom: 3 }}>
                             📐 {[hDisp, wDisp].filter(Boolean).join(" × ")}
                           </div>
                         )}
                         {item.selectedColor && item.selectedColor !== "Padrão" && (
-                          <div style={{ fontSize: 12, color: "#6c8ef5", display: "flex", alignItems: "center", gap: 5, marginBottom: 3 }}>
-                            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#6c8ef5", display: "inline-block" }} />
+                          <div style={{ fontSize: 12, color: "#8fa8ff", display: "flex", alignItems: "center", gap: 5, marginBottom: 3 }}>
+                            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#8fa8ff", display: "inline-block" }} />
                             {item.selectedColor}
                           </div>
                         )}
                         {cleanDesc && (
-                          <div style={{ fontSize: 12, color: "#636b85", marginTop: 3 }}>{cleanDesc}</div>
+                          <div style={{ fontSize: 12, color: "#a9b8dc", marginTop: 3 }}>{cleanDesc}</div>
                         )}
-                        <div style={{ fontSize: 11, color: "#636b85", marginTop: 4 }}>Qtd: {item.quantity}</div>
+                        <div style={{ fontSize: 11, color: "#a9b8dc", marginTop: 4 }}>Qtd: {item.quantity}</div>
                       </div>
                       <div style={{ textAlign: "right", flexShrink: 0 }}>
                         <div style={{ fontSize: 16, fontWeight: 700, color: "#22c55e" }}>{fmt(item.price)}</div>
                         {item.quantity > 1 && (
-                          <div style={{ fontSize: 11, color: "#636b85" }}>
+                          <div style={{ fontSize: 11, color: "#a9b8dc" }}>
                             {fmt(item.price / item.quantity)} / un
                           </div>
                         )}
@@ -435,49 +567,49 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
         </div>
 
         {/* ── TOTAIS ── */}
-        <div style={{ padding: "16px 24px", borderBottom: "1px solid #2d3148" }}>
+        <div style={{ padding: "16px 24px", borderBottom: "1px solid #3a5590" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {(localQuote.subtotal > 0 && localQuote.subtotal !== localQuote.totalPrice) && (
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#636b85", fontSize: 13 }}>Subtotal</span>
-                <span style={{ color: "#c8d0e7", fontSize: 13 }}>{fmt(localQuote.subtotal)}</span>
+                <span style={{ color: "#a9b8dc", fontSize: 13 }}>Subtotal</span>
+                <span style={{ color: "#dde4f5", fontSize: 13 }}>{fmt(localQuote.subtotal)}</span>
               </div>
             )}
             {localQuote.freight > 0 && (
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#636b85", fontSize: 13 }}>Frete</span>
-                <span style={{ color: "#c8d0e7", fontSize: 13 }}>{fmt(localQuote.freight)}</span>
+                <span style={{ color: "#a9b8dc", fontSize: 13 }}>Frete</span>
+                <span style={{ color: "#dde4f5", fontSize: 13 }}>{fmt(localQuote.freight)}</span>
               </div>
             )}
             {localQuote.installation > 0 && (
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#636b85", fontSize: 13 }}>Instalação</span>
-                <span style={{ color: "#c8d0e7", fontSize: 13 }}>{fmt(localQuote.installation)}</span>
+                <span style={{ color: "#a9b8dc", fontSize: 13 }}>Instalação</span>
+                <span style={{ color: "#dde4f5", fontSize: 13 }}>{fmt(localQuote.installation)}</span>
               </div>
             )}
             {localQuote.discount > 0 && (
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#636b85", fontSize: 13 }}>Desconto</span>
+                <span style={{ color: "#a9b8dc", fontSize: 13 }}>Desconto</span>
                 <span style={{ color: "#ef4444", fontSize: 13 }}>-{fmt(localQuote.discount)}</span>
               </div>
             )}
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 12, marginTop: 8, borderTop: "1px solid #2d3148" }}>
-            <span style={{ color: "#e8eaf0", fontSize: 16, fontWeight: 700 }}>Total</span>
+          <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 12, marginTop: 8, borderTop: "1px solid #3a5590" }}>
+            <span style={{ color: "#f5f6fa", fontSize: 16, fontWeight: 700 }}>Total</span>
             <span style={{ color: "#22c55e", fontSize: 20, fontWeight: 800 }}>{fmt(localQuote.totalPrice)}</span>
           </div>
         </div>
 
         {/* ── FORMA DE PAGAMENTO ── */}
-        <div style={{ padding: "14px 24px", borderBottom: "1px solid #2d3148", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ padding: "14px 24px", borderBottom: "1px solid #3a5590", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <svg width="15" height="15" fill="none" stroke="#6c8ef5" strokeWidth="2" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-            <span style={{ fontSize: 12, color: "#636b85", textTransform: "uppercase", letterSpacing: "0.05em" }}>Forma de pagamento</span>
+            <svg width="15" height="15" fill="none" stroke="#8fa8ff" strokeWidth="2" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+            <span style={{ fontSize: 12, color: "#a9b8dc", textTransform: "uppercase", letterSpacing: "0.05em" }}>Forma de pagamento</span>
           </div>
           <select
             value={localQuote.paymentMethod}
             onChange={(e) => setLocalQuote((p) => ({ ...p, paymentMethod: e.target.value as any }))}
-            style={{ background: "#252b45", border: "1px solid #3d4166", borderRadius: 8, color: "#c8d0e7", fontSize: 13, padding: "7px 10px", outline: "none" }}
+            style={{ background: "#2C53A0", border: "1px solid #4a68a8", borderRadius: 8, color: "#dde4f5", fontSize: 13, padding: "7px 10px", outline: "none" }}
           >
             {PAYMENT_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
           </select>
@@ -485,31 +617,100 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
 
         {/* ── RESUMO FINANCEIRO ── */}
         <div style={{ padding: "20px 24px" }}>
-          <div style={{ fontSize: 11, color: "#636b85", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 16 }}>Resumo financeiro do pedido</div>
+          <div style={{ fontSize: 11, color: "#a9b8dc", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 16 }}>Resumo financeiro do pedido</div>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
             <div>
-              <div style={{ fontSize: 11, color: "#636b85", marginBottom: 2 }}>Recebido</div>
+              <div style={{ fontSize: 11, color: "#a9b8dc", marginBottom: 2 }}>Recebido</div>
               <div style={{ fontSize: 18, fontWeight: 800, color: "#22c55e" }}>{fmt(totalReceived)}</div>
             </div>
             <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 11, color: "#636b85", marginBottom: 2 }}>Pendente</div>
+              <div style={{ fontSize: 11, color: "#a9b8dc", marginBottom: 2 }}>Pendente</div>
               <div style={{ fontSize: 18, fontWeight: 800, color: totalPending > 0 ? "#ef4444" : "#22c55e" }}>{fmt(totalPending)}</div>
             </div>
           </div>
-          <div style={{ height: 8, background: "#2d3148", borderRadius: 4, overflow: "hidden", marginBottom: 18 }}>
-            <div style={{ height: "100%", width: `${receivedPct}%`, background: receivedPct >= 100 ? "#22c55e" : "#6c8ef5", borderRadius: 4, transition: "width 0.4s" }} />
+          <div style={{ height: 8, background: "#3a5590", borderRadius: 4, overflow: "hidden", marginBottom: 18 }}>
+            <div style={{ height: "100%", width: `${receivedPct}%`, background: receivedPct >= 100 ? "#22c55e" : "#8fa8ff", borderRadius: 4, transition: "width 0.4s" }} />
           </div>
           <button
             onClick={() => setShowFinances(true)}
-            style={{ width: "100%", background: "#252b45", border: "1px solid #3d4166", borderRadius: 12, padding: "14px 18px", color: "#c8d0e7", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", transition: "border-color 0.2s" }}
-            onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#6c8ef5")}
-            onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#3d4166")}
+            style={{ width: "100%", background: "#2C53A0", border: "1px solid #4a68a8", borderRadius: 12, padding: "14px 18px", color: "#dde4f5", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", transition: "border-color 0.2s" }}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#8fa8ff")}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#4a68a8")}
           >
             Ver finanças do pedido
-            <svg width="16" height="16" fill="none" stroke="#6c8ef5" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            <svg width="16" height="16" fill="none" stroke="#8fa8ff" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
           </button>
         </div>
       </div>
+
+      {/* ── DETALHAMENTO FINANCEIRO (ADMIN) ── */}
+      {adminBreakdown && (() => {
+        const row = (label: string, value: number, color = "#dde4f5") => (
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ color: "#a9b8dc", fontSize: 13 }}>{label}</span>
+            <span style={{ color, fontSize: 13, fontWeight: 600 }}>{fmt(value)}</span>
+          </div>
+        );
+
+        const renderPanel = (title: string, d: (typeof adminBreakdown)["total"]) => (
+          <div
+            key={title}
+            style={{
+              flex: "1 1 260px",
+              minWidth: 260,
+              background: "#16305F",
+              border: "1px solid #f59e0b55",
+              borderLeft: "4px solid #f59e0b",
+              borderRadius: 14,
+              padding: 18,
+            }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#f59e0b", marginBottom: 12 }}>{title}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {row("Custo matéria-prima", d.materialCost)}
+              {d.laborCost > 0 && row("Mão de obra", d.laborCost)}
+              <div style={{ borderTop: "1px solid #3a5590", paddingTop: 6, marginTop: 2 }}>
+                {row("CMV total", d.costOfGoods, "#f5f6fa")}
+              </div>
+              {d.taxValue > 0 && row("Impostos", d.taxValue)}
+              {d.commissionValue > 0 && row("Comissão vendedora", d.commissionValue)}
+              {d.discountValue > 0 && row("Desconto", -d.discountValue, "#22c55e")}
+              {d.cardValue > 0 && row("Taxa de cartão", d.cardValue, "#ef4444")}
+              {d.fixedCostValue > 0 && row("Custos fixos", d.fixedCostValue)}
+              {d.referralCommissionValue > 0 && row("Comissão de indicação", d.referralCommissionValue)}
+
+              <div style={{ display: "flex", justifyContent: "space-between", background: "#2C53A0", borderRadius: 8, padding: "6px 10px", marginTop: 6 }}>
+                <span style={{ color: "#dde4f5", fontSize: 13, fontWeight: 700 }}>Preço total</span>
+                <span style={{ color: "#8fa8ff", fontSize: 13, fontWeight: 800 }}>{fmt(d.totalPrice)}</span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #3a5590", paddingTop: 8, marginTop: 4 }}>
+                <span style={{ color: d.netProfit >= 0 ? "#22c55e" : "#ef4444", fontSize: 13, fontWeight: 700 }}>Lucro líquido estimado</span>
+                <span style={{ color: d.netProfit >= 0 ? "#22c55e" : "#ef4444", fontSize: 13, fontWeight: 800 }}>{fmt(d.netProfit)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: d.netProfit >= 0 ? "#22c55e" : "#ef4444", fontSize: 12, fontWeight: 600 }}>Margem de lucro</span>
+                <span style={{ color: d.netProfit >= 0 ? "#22c55e" : "#ef4444", fontSize: 12, fontWeight: 600 }}>{d.netProfitMargin.toFixed(2)}%</span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 4 }}>
+                <span style={{ color: "#dde4f5", fontSize: 12, fontWeight: 600 }}>Margem de contribuição</span>
+                <span style={{ color: "#dde4f5", fontSize: 12, fontWeight: 600 }}>
+                  {fmt(d.contribuicao)} <span style={{ color: "#a9b8dc", fontWeight: 400 }}>({d.contribuicaoPct.toFixed(2)}%)</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+
+        return (
+          <div style={{ marginTop: 20, display: "flex", flexWrap: "wrap", gap: 16 }}>
+            {renderPanel("Total do Orçamento (Admin)", adminBreakdown.total)}
+            {adminBreakdown.categories.length > 1 &&
+              adminBreakdown.categories.map((cat) => renderPanel(cat.label, cat))}
+          </div>
+        );
+      })()}
 
       {/* ══════════════════════════════════════════════════════════════ */}
       {/* DRAWER — FINANÇAS DO PEDIDO                                  */}
@@ -518,13 +719,13 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", justifyContent: "flex-end" }}>
           <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)" }} onClick={() => { setShowFinances(false); setShowAddPayment(false); }} />
 
-          <div style={{ position: "relative", width: "100%", maxWidth: 480, background: "#141827", height: "100%", overflowY: "auto", boxShadow: "-8px 0 40px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column" }}>
+          <div style={{ position: "relative", width: "100%", maxWidth: 480, background: "#16305F", height: "100%", overflowY: "auto", boxShadow: "-8px 0 40px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column" }}>
 
             {/* drawer header */}
-            <div style={{ padding: "18px 20px 14px", borderBottom: "1px solid #2d3148", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0, position: "sticky", top: 0, background: "#141827", zIndex: 2 }}>
+            <div style={{ padding: "18px 20px 14px", borderBottom: "1px solid #3a5590", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0, position: "sticky", top: 0, background: "#16305F", zIndex: 2 }}>
               <div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "#e8eaf0" }}>Finanças do Pedido</div>
-                <div style={{ fontSize: 12, color: "#636b85", marginTop: 2 }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "#f5f6fa" }}>Finanças do Pedido</div>
+                <div style={{ fontSize: 12, color: "#a9b8dc", marginTop: 2 }}>
                   N° {localQuote.quoteNumber ?? "—"} - {localQuote.date ? new Date(localQuote.date.slice(0, 10) + "T12:00:00").getFullYear() : "—"}
                 </div>
               </div>
@@ -534,15 +735,15 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
                   style={{ background: "#22c55e", border: "none", borderRadius: 8, width: 36, height: 36, color: "#fff", fontSize: 22, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}
                   title="Novo recebimento"
                 >+</button>
-                <button onClick={() => { setShowFinances(false); setShowAddPayment(false); }} style={{ background: "#252b45", border: "1px solid #3d4166", borderRadius: 8, width: 36, height: 36, color: "#8892b0", fontSize: 16, cursor: "pointer" }}>✕</button>
+                <button onClick={() => { setShowFinances(false); setShowAddPayment(false); }} style={{ background: "#2C53A0", border: "1px solid #4a68a8", borderRadius: 8, width: 36, height: 36, color: "#b8c4e0", fontSize: 16, cursor: "pointer" }}>✕</button>
               </div>
             </div>
 
             {/* tabs */}
-            <div style={{ display: "flex", borderBottom: "1px solid #2d3148", flexShrink: 0 }}>
+            <div style={{ display: "flex", borderBottom: "1px solid #3a5590", flexShrink: 0 }}>
               {(["receitas", "despesas"] as const).map((tab) => (
                 <button key={tab} onClick={() => setPaymentTab(tab)}
-                  style={{ flex: 1, padding: "13px", fontSize: 13, fontWeight: 600, background: "none", border: "none", cursor: "pointer", color: paymentTab === tab ? "#6c8ef5" : "#636b85", borderBottom: paymentTab === tab ? "2px solid #6c8ef5" : "2px solid transparent", textTransform: "capitalize" }}>
+                  style={{ flex: 1, padding: "13px", fontSize: 13, fontWeight: 600, background: "none", border: "none", cursor: "pointer", color: paymentTab === tab ? "#8fa8ff" : "#a9b8dc", borderBottom: paymentTab === tab ? "2px solid #8fa8ff" : "2px solid transparent", textTransform: "capitalize" }}>
                   {tab === "receitas" ? "Receitas" : "Despesas"}
                 </button>
               ))}
@@ -553,60 +754,60 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
               <div style={{ padding: "16px 20px", flex: 1 }}>
 
                 {/* Resumo valor pedido */}
-                <div style={{ background: "#1a1f36", borderRadius: 12, padding: "14px 16px", marginBottom: 12, border: "1px solid #2d3148" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#c8d0e7", marginBottom: 12 }}>Resumo do valor do pedido</div>
+                <div style={{ background: "#1E3D7A", borderRadius: 12, padding: "14px 16px", marginBottom: 12, border: "1px solid #3a5590" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#dde4f5", marginBottom: 12 }}>Resumo do valor do pedido</div>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                     <div>
-                      <div style={{ fontSize: 11, color: "#636b85" }}>Valor do pedido</div>
+                      <div style={{ fontSize: 11, color: "#a9b8dc" }}>Valor do pedido</div>
                       <div style={{ fontSize: 15, fontWeight: 700, color: "#22c55e" }}>{fmt(localQuote.totalPrice)}</div>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 11, color: "#636b85" }}>Pendente</div>
+                      <div style={{ fontSize: 11, color: "#a9b8dc" }}>Pendente</div>
                       <div style={{ fontSize: 15, fontWeight: 700, color: totalPending > 0 ? "#ef4444" : "#22c55e" }}>{fmt(totalPending)}</div>
                     </div>
                   </div>
-                  <div style={{ height: 6, background: "#2d3148", borderRadius: 3, overflow: "hidden", marginTop: 10 }}>
-                    <div style={{ height: "100%", width: `${receivedPct}%`, background: "#6c8ef5", borderRadius: 3 }} />
+                  <div style={{ height: 6, background: "#3a5590", borderRadius: 3, overflow: "hidden", marginTop: 10 }}>
+                    <div style={{ height: "100%", width: `${receivedPct}%`, background: "#8fa8ff", borderRadius: 3 }} />
                   </div>
                 </div>
 
                 {/* Receitas do pedido */}
-                <div style={{ background: "#1a1f36", borderRadius: 12, padding: "14px 16px", marginBottom: 16, border: "1px solid #2d3148" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#c8d0e7", marginBottom: 12 }}>Receitas do pedido</div>
+                <div style={{ background: "#1E3D7A", borderRadius: 12, padding: "14px 16px", marginBottom: 16, border: "1px solid #3a5590" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#dde4f5", marginBottom: 12 }}>Receitas do pedido</div>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                    <span style={{ fontSize: 12, color: "#636b85" }}>Total de receitas</span>
-                    <span style={{ fontSize: 13, color: "#c8d0e7", fontWeight: 600 }}>{fmt(totalReceived)}</span>
+                    <span style={{ fontSize: 12, color: "#a9b8dc" }}>Total de receitas</span>
+                    <span style={{ fontSize: 13, color: "#dde4f5", fontWeight: 600 }}>{fmt(totalReceived)}</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
                     <div>
-                      <div style={{ fontSize: 11, color: "#636b85" }}>Recebido</div>
+                      <div style={{ fontSize: 11, color: "#a9b8dc" }}>Recebido</div>
                       <div style={{ fontSize: 15, fontWeight: 700, color: "#22c55e" }}>{fmt(totalReceived)}</div>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 11, color: "#636b85" }}>A receber</div>
+                      <div style={{ fontSize: 11, color: "#a9b8dc" }}>A receber</div>
                       <div style={{ fontSize: 15, fontWeight: 700, color: "#ef4444" }}>{fmt(totalPending)}</div>
                     </div>
                   </div>
-                  <div style={{ height: 6, background: "#2d3148", borderRadius: 3, overflow: "hidden" }}>
+                  <div style={{ height: 6, background: "#3a5590", borderRadius: 3, overflow: "hidden" }}>
                     <div style={{ height: "100%", width: `${receivedPct}%`, background: "#22c55e", borderRadius: 3 }} />
                   </div>
                 </div>
 
                 {/* Histórico de pagamentos */}
                 {groupedPayments.length === 0 ? (
-                  <div style={{ color: "#636b85", fontSize: 13, textAlign: "center", padding: "30px 0" }}>
+                  <div style={{ color: "#a9b8dc", fontSize: 13, textAlign: "center", padding: "30px 0" }}>
                     Nenhum pagamento registrado ainda.<br />
                     <span style={{ fontSize: 12 }}>Clique em + para adicionar o primeiro recebimento.</span>
                   </div>
                 ) : (
                   groupedPayments.map(([date, entries]) => (
                     <div key={date} style={{ marginBottom: 16 }}>
-                      <div style={{ fontSize: 12, color: "#6c8ef5", fontWeight: 600, marginBottom: 8, textTransform: "capitalize" }}>{formatGroupDate(date)}</div>
+                      <div style={{ fontSize: 12, color: "#8fa8ff", fontWeight: 600, marginBottom: 8, textTransform: "capitalize" }}>{formatGroupDate(date)}</div>
                       {entries.map((e) => (
-                        <div key={e.id} style={{ background: "#1a1f36", borderRadius: 10, padding: "12px 14px", marginBottom: 6, borderLeft: "3px solid #22c55e", display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid #2d3148", borderLeftColor: "#22c55e" }}>
+                        <div key={e.id} style={{ background: "#1E3D7A", borderRadius: 10, padding: "12px 14px", marginBottom: 6, borderLeft: "3px solid #22c55e", display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid #3a5590", borderLeftColor: "#22c55e" }}>
                           <div>
-                            <div style={{ fontSize: 13, color: "#e8eaf0", fontWeight: 600 }}>{localQuote.customerName}</div>
-                            <div style={{ fontSize: 11, color: "#636b85", marginTop: 2 }}>{fmtDate(e.date)}</div>
+                            <div style={{ fontSize: 13, color: "#f5f6fa", fontWeight: 600 }}>{localQuote.customerName}</div>
+                            <div style={{ fontSize: 11, color: "#a9b8dc", marginTop: 2 }}>{fmtDate(e.date)}</div>
                           </div>
                           <div style={{ textAlign: "right" }}>
                             <div style={{ fontSize: 15, fontWeight: 700, color: "#22c55e" }}>{fmt(e.amount)}</div>
@@ -621,7 +822,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
             )}
 
             {paymentTab === "despesas" && (
-              <div style={{ padding: "20px", color: "#636b85", fontSize: 13, textAlign: "center", paddingTop: 40 }}>
+              <div style={{ padding: "20px", color: "#a9b8dc", fontSize: 13, textAlign: "center", paddingTop: 40 }}>
                 Nenhuma despesa vinculada a este pedido.
               </div>
             )}
@@ -635,34 +836,34 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
       {showAddPayment && (
         <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
           <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.65)" }} onClick={() => setShowAddPayment(false)} />
-          <div style={{ position: "relative", width: "100%", maxWidth: 480, background: "#141827", borderRadius: "18px 18px 0 0", padding: "20px 20px 32px", boxShadow: "0 -8px 40px rgba(0,0,0,0.5)", maxHeight: "92vh", overflowY: "auto" }}>
+          <div style={{ position: "relative", width: "100%", maxWidth: 480, background: "#16305F", borderRadius: "18px 18px 0 0", padding: "20px 20px 32px", boxShadow: "0 -8px 40px rgba(0,0,0,0.5)", maxHeight: "92vh", overflowY: "auto" }}>
 
             {/* header */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#e8eaf0" }}>Nova receita</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#f5f6fa" }}>Nova receita</div>
               <div style={{ display: "flex", gap: 10 }}>
                 <button onClick={handleSavePayment} disabled={savingPayment}
                   style={{ background: "#22c55e", color: "#fff", border: "none", borderRadius: 8, padding: "9px 22px", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
                   {savingPayment ? "Salvando…" : "Salvar"}
                 </button>
                 <button onClick={() => setShowAddPayment(false)}
-                  style={{ background: "#252b45", border: "1px solid #3d4166", borderRadius: 8, padding: "9px 14px", color: "#8892b0", fontSize: 14, cursor: "pointer" }}>✕</button>
+                  style={{ background: "#2C53A0", border: "1px solid #4a68a8", borderRadius: 8, padding: "9px 14px", color: "#b8c4e0", fontSize: 14, cursor: "pointer" }}>✕</button>
               </div>
             </div>
 
             {/* Valor destaque */}
             <div style={{ textAlign: "center", marginBottom: 16 }}>
-              <div style={{ fontSize: 11, color: "#636b85", textTransform: "uppercase", marginBottom: 4 }}>Valor da receita</div>
-              <div style={{ fontSize: 34, fontWeight: 800, color: payAmount > 0 ? "#22c55e" : "#636b85" }}>
+              <div style={{ fontSize: 11, color: "#a9b8dc", textTransform: "uppercase", marginBottom: 4 }}>Valor da receita</div>
+              <div style={{ fontSize: 34, fontWeight: 800, color: payAmount > 0 ? "#22c55e" : "#a9b8dc" }}>
                 {payAmount > 0 ? fmt(payAmount) : "R$ 0,00"}
               </div>
             </div>
 
             {/* Valor + Vencimento */}
-            <div style={{ background: "#1a1f36", borderRadius: 12, padding: "14px 16px", marginBottom: 10, border: "1px solid #2d3148" }}>
+            <div style={{ background: "#1E3D7A", borderRadius: 12, padding: "14px 16px", marginBottom: 10, border: "1px solid #3a5590" }}>
               <div style={{ display: "flex", gap: 12 }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, color: "#636b85", marginBottom: 5 }}>Subtotal</div>
+                  <div style={{ fontSize: 11, color: "#a9b8dc", marginBottom: 5 }}>Subtotal</div>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -674,56 +875,56 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
                     }}
                     onBlur={() => setPayAmountInput(formatMoneyInputBR(payAmount))}
                     placeholder="0,00"
-                    style={{ width: "100%", background: "#252b45", border: "1px solid #3d4166", borderRadius: 8, color: "#e8eaf0", fontSize: 14, padding: "9px 10px", outline: "none", boxSizing: "border-box" }}
+                    style={{ width: "100%", background: "#2C53A0", border: "1px solid #4a68a8", borderRadius: 8, color: "#f5f6fa", fontSize: 14, padding: "9px 10px", outline: "none", boxSizing: "border-box" }}
                   />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, color: "#636b85", marginBottom: 5 }}>Vencimento</div>
+                  <div style={{ fontSize: 11, color: "#a9b8dc", marginBottom: 5 }}>Vencimento</div>
                   <input
                     type="date"
                     value={payDate}
                     onChange={(e) => setPayDate(e.target.value)}
-                    style={{ width: "100%", background: "#252b45", border: "1px solid #3d4166", borderRadius: 8, color: "#e8eaf0", fontSize: 13, padding: "9px 10px", outline: "none", boxSizing: "border-box" }}
+                    style={{ width: "100%", background: "#2C53A0", border: "1px solid #4a68a8", borderRadius: 8, color: "#f5f6fa", fontSize: 13, padding: "9px 10px", outline: "none", boxSizing: "border-box" }}
                   />
                 </div>
               </div>
             </div>
 
             {/* Já foi recebida */}
-            <div style={{ background: "#1a1f36", borderRadius: 12, padding: "14px 16px", marginBottom: 10, border: "1px solid #2d3148" }}>
+            <div style={{ background: "#1E3D7A", borderRadius: 12, padding: "14px 16px", marginBottom: 10, border: "1px solid #3a5590" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                  <svg width="15" height="15" fill="none" stroke="#6c8ef5" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                  <span style={{ fontSize: 14, color: "#c8d0e7" }}>Já foi recebida</span>
+                  <svg width="15" height="15" fill="none" stroke="#8fa8ff" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                  <span style={{ fontSize: 14, color: "#dde4f5" }}>Já foi recebida</span>
                 </div>
                 <button onClick={() => setPayReceived((v) => !v)}
-                  style={{ width: 46, height: 26, borderRadius: 13, background: payReceived ? "#22c55e" : "#2d3148", border: "none", cursor: "pointer", position: "relative", transition: "background 0.2s", flexShrink: 0 }}>
+                  style={{ width: 46, height: 26, borderRadius: 13, background: payReceived ? "#22c55e" : "#3a5590", border: "none", cursor: "pointer", position: "relative", transition: "background 0.2s", flexShrink: 0 }}>
                   <span style={{ position: "absolute", top: 3, left: payReceived ? 23 : 3, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left 0.2s" }} />
                 </button>
               </div>
               {payReceived && (
                 <div style={{ marginTop: 12 }}>
-                  <div style={{ fontSize: 11, color: "#636b85", marginBottom: 5 }}>Data do recebimento</div>
+                  <div style={{ fontSize: 11, color: "#a9b8dc", marginBottom: 5 }}>Data do recebimento</div>
                   <input
                     type="date"
                     value={payReceivedDate}
                     onChange={(e) => setPayReceivedDate(e.target.value)}
-                    style={{ width: "100%", background: "#252b45", border: "1px solid #3d4166", borderRadius: 8, color: "#e8eaf0", fontSize: 13, padding: "9px 10px", outline: "none", boxSizing: "border-box" }}
+                    style={{ width: "100%", background: "#2C53A0", border: "1px solid #4a68a8", borderRadius: 8, color: "#f5f6fa", fontSize: 13, padding: "9px 10px", outline: "none", boxSizing: "border-box" }}
                   />
                 </div>
               )}
             </div>
 
             {/* Forma de pagamento */}
-            <div style={{ background: "#1a1f36", borderRadius: 12, padding: "14px 16px", marginBottom: 10, border: "1px solid #2d3148" }}>
+            <div style={{ background: "#1E3D7A", borderRadius: 12, padding: "14px 16px", marginBottom: 10, border: "1px solid #3a5590" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
-                <svg width="15" height="15" fill="none" stroke="#6c8ef5" strokeWidth="2" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-                <span style={{ fontSize: 14, color: "#c8d0e7" }}>Forma de pagamento</span>
+                <svg width="15" height="15" fill="none" stroke="#8fa8ff" strokeWidth="2" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                <span style={{ fontSize: 14, color: "#dde4f5" }}>Forma de pagamento</span>
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {PAYMENT_OPTIONS.filter((o) => o !== "A Definir").map((o) => (
                   <button key={o} onClick={() => setPayMethod(o)}
-                    style={{ padding: "7px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "1px solid", background: payMethod === o ? "#6c8ef5" : "#252b45", color: payMethod === o ? "#fff" : "#8892b0", borderColor: payMethod === o ? "#6c8ef5" : "#3d4166" }}>
+                    style={{ padding: "7px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "1px solid", background: payMethod === o ? "#8fa8ff" : "#2C53A0", color: payMethod === o ? "#fff" : "#b8c4e0", borderColor: payMethod === o ? "#8fa8ff" : "#4a68a8" }}>
                     {o}
                   </button>
                 ))}
@@ -731,37 +932,37 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
             </div>
 
             {/* Referência */}
-            <div style={{ background: "#1a1f36", borderRadius: 12, padding: "14px 16px", marginBottom: 10, border: "1px solid #2d3148" }}>
+            <div style={{ background: "#1E3D7A", borderRadius: 12, padding: "14px 16px", marginBottom: 10, border: "1px solid #3a5590" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
-                <svg width="15" height="15" fill="none" stroke="#6c8ef5" strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <span style={{ fontSize: 14, color: "#c8d0e7" }}>Referência (opcional)</span>
+                <svg width="15" height="15" fill="none" stroke="#8fa8ff" strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <span style={{ fontSize: 14, color: "#dde4f5" }}>Referência (opcional)</span>
               </div>
               <input
                 type="text"
                 value={payReference}
                 onChange={(e) => setPayReference(e.target.value)}
                 placeholder="Ex: entrada, parcela 1/3, saldo final…"
-                style={{ width: "100%", background: "#252b45", border: "1px solid #3d4166", borderRadius: 8, color: "#e8eaf0", fontSize: 13, padding: "9px 10px", outline: "none", boxSizing: "border-box" }}
+                style={{ width: "100%", background: "#2C53A0", border: "1px solid #4a68a8", borderRadius: 8, color: "#f5f6fa", fontSize: 13, padding: "9px 10px", outline: "none", boxSizing: "border-box" }}
               />
             </div>
 
             {/* Pedido + Cliente (leitura) */}
-            <div style={{ background: "#1a1f36", borderRadius: 12, padding: "14px 16px", border: "1px solid #2d3148" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 10, borderBottom: "1px solid #2d3148" }}>
+            <div style={{ background: "#1E3D7A", borderRadius: 12, padding: "14px 16px", border: "1px solid #3a5590" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 10, borderBottom: "1px solid #3a5590" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <svg width="14" height="14" fill="none" stroke="#6c8ef5" strokeWidth="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                  <span style={{ fontSize: 12, color: "#636b85" }}>Pedido</span>
+                  <svg width="14" height="14" fill="none" stroke="#8fa8ff" strokeWidth="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  <span style={{ fontSize: 12, color: "#a9b8dc" }}>Pedido</span>
                 </div>
-                <span style={{ fontSize: 13, color: "#c8d0e7", fontWeight: 600 }}>
+                <span style={{ fontSize: 13, color: "#dde4f5", fontWeight: 600 }}>
                   n° {localQuote.quoteNumber ?? "—"} - {localQuote.date ? new Date(localQuote.date.slice(0, 10) + "T12:00:00").getFullYear() : "—"}
                 </span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 10 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <svg width="14" height="14" fill="none" stroke="#6c8ef5" strokeWidth="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                  <span style={{ fontSize: 12, color: "#636b85" }}>Cliente</span>
+                  <svg width="14" height="14" fill="none" stroke="#8fa8ff" strokeWidth="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                  <span style={{ fontSize: 12, color: "#a9b8dc" }}>Cliente</span>
                 </div>
-                <span style={{ fontSize: 13, color: "#c8d0e7", fontWeight: 600 }}>{localQuote.customerName}</span>
+                <span style={{ fontSize: 13, color: "#dde4f5", fontWeight: 600 }}>{localQuote.customerName}</span>
               </div>
             </div>
 

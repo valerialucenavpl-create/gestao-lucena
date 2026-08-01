@@ -765,6 +765,7 @@ if (
         return selectedQuote ? (
           <QuoteDetail
             quote={selectedQuote}
+            currentUser={currentUser}
             clients={clients}
             rawMaterials={rawMaterials}
             products={products}

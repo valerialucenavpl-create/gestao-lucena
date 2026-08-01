@@ -369,7 +369,7 @@ const NewQuote: React.FC<NewQuoteProps> = ({
 
   // Categoria ativa
   const [activeCategory, setActiveCategory] = useState<
-    "GRANITO" | "VIDROS" | "ALUMINIO" | "PORTAO"
+    "GRANITO" | "VIDROS" | "ALUMINIO" | "PORTAO" | "ACESSORIOS"
   >("GRANITO");
 
   // GRANITO
@@ -407,6 +407,14 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [mrExtraService, setMrExtraService] = useState<number>(0);
   const [mrExtraServiceInput, setMrExtraServiceInput] = useState<string>(formatMoneyInputBR(0));
 
+  // ACESSÓRIOS / PRODUTOS PRONTOS (categoria "ACESSORIO DE MOTOR" — produtos
+  // soltos, sem fórmula de medida: controles, fechaduras, cremalheiras, etc.)
+  const [acSelectedProductId, setAcSelectedProductId] = useState<string>("");
+  const [acProductSearch, setAcProductSearch] = useState<string>("");
+  const [acQuantity, setAcQuantity] = useState<number>(1);
+  const [acExtraService, setAcExtraService] = useState<number>(0);
+  const [acExtraServiceInput, setAcExtraServiceInput] = useState<string>(formatMoneyInputBR(0));
+
   // PORTÃO
   const [poMaterialId, setPoMaterialId] = useState<string>("");
   const [poVariantName, setPoVariantName] = useState<string>("");
@@ -431,7 +439,7 @@ const NewQuote: React.FC<NewQuoteProps> = ({
  // ---------------------------
   // CORES POR CATEGORIA (BOTÕES)
   // ---------------------------
-  const mapCategoryToUsage = (cat: "GRANITO" | "VIDROS" | "ALUMINIO" | "PORTAO") => {
+  const mapCategoryToUsage = (cat: "GRANITO" | "VIDROS" | "ALUMINIO" | "PORTAO" | "ACESSORIOS") => {
     switch (cat) {
       case "VIDROS":
         return "VIDRO";
@@ -441,6 +449,8 @@ const NewQuote: React.FC<NewQuoteProps> = ({
         return "PORTAO";
       case "GRANITO":
         return "MARMORE"; // ou "GRANITO", depende do que você usa no seu cadastro
+      case "ACESSORIOS":
+        return "ACESSORIO DE MOTOR";
       default:
         return "OUTROS";
     }
@@ -500,6 +510,18 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     if (!search) return marmoreProducts;
     return marmoreProducts.filter((product) => product.name.toLowerCase().includes(search));
   }, [mrProductSearch, marmoreProducts]);
+
+  // Produtos "prontos" (categoria "ACESSORIO DE MOTOR") — controles,
+  // fechaduras, cremalheiras, etc. Não têm fórmula por medida, só preço/qtd.
+  const accessoryProducts = useMemo(() => {
+    return products.filter((product) => normalizeText(product.category || "").includes("ACESSORIO DE MOTOR"));
+  }, [products]);
+
+  const filteredAccessoryProducts = useMemo(() => {
+    const search = acProductSearch.trim().toLowerCase();
+    if (!search) return accessoryProducts;
+    return accessoryProducts.filter((product) => product.name.toLowerCase().includes(search));
+  }, [acProductSearch, accessoryProducts]);
 
   const glassTypeOptions = useMemo(() => {
     const uniqueById = new Map<string, InventoryItem>();
@@ -568,6 +590,15 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     return availableColors;
   }, [mrSelectedProductId, availableColors, products, rawMaterials]);
 
+  const acColorOptions = useMemo(() => {
+    if (!acSelectedProductId) return availableColors;
+
+    const productColors = getProductColorOptions(acSelectedProductId);
+    if (productColors.length > 0) return productColors;
+
+    return availableColors;
+  }, [acSelectedProductId, availableColors, products, rawMaterials]);
+
   useEffect(() => {
     if (glassTypeOptions.length === 0) {
       setGwGlassTypeId("");
@@ -608,7 +639,26 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   }, [marmoreProducts]);
 
   useEffect(() => {
-    if (activeCategory === "VIDROS" || activeCategory === "ALUMINIO" || activeCategory === "GRANITO") return;
+    if (accessoryProducts.length === 0) {
+      setAcSelectedProductId("");
+      return;
+    }
+
+    setAcSelectedProductId((prev) =>
+      prev && accessoryProducts.some((product) => product.id === prev)
+        ? prev
+        : accessoryProducts[0].id
+    );
+  }, [accessoryProducts]);
+
+  useEffect(() => {
+    if (
+      activeCategory === "VIDROS" ||
+      activeCategory === "ALUMINIO" ||
+      activeCategory === "GRANITO" ||
+      activeCategory === "ACESSORIOS"
+    )
+      return;
 
     if (availableColors.length === 0) {
       setSelectedColor("");
@@ -652,6 +702,17 @@ const NewQuote: React.FC<NewQuoteProps> = ({
 
     setSelectedColor((prev) => (prev && mrColorOptions.includes(prev) ? prev : mrColorOptions[0]));
   }, [activeCategory, mrColorOptions]);
+
+  useEffect(() => {
+    if (activeCategory !== "ACESSORIOS") return;
+
+    if (acColorOptions.length === 0) {
+      setSelectedColor("");
+      return;
+    }
+
+    setSelectedColor((prev) => (prev && acColorOptions.includes(prev) ? prev : acColorOptions[0]));
+  }, [activeCategory, acColorOptions]);
 
   useEffect(() => {
     if (isDeliveryDateManual) return;
@@ -851,17 +912,16 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     const laborMap = new Map<string, QuoteItemLaborLine>();
 
     validPieces.forEach((piece) => {
-      const heightMm = piece.length * 1000;
-      const widthMm = piece.width * 1000;
+      // piece.length/piece.width já vêm em milímetros.
       const { price, cost, materialCost, laborCost, fixedCostValue, materialBreakdown, laborBreakdown } =
-        calculateItemPrice(mrSelectedProductId, widthMm, heightMm, piece.quantity, selectedColor);
+        calculateItemPrice(mrSelectedProductId, piece.width, piece.length, piece.quantity, selectedColor);
 
       totalPrice += price;
       totalCost += cost;
       totalMaterialCost += materialCost;
       totalLaborCost += laborCost;
       totalFixedCostValue += fixedCostValue;
-      totalAreaM2 += piece.length * piece.width * piece.quantity;
+      totalAreaM2 += (piece.length / 1000) * (piece.width / 1000) * piece.quantity;
 
       materialBreakdown.forEach((line) => {
         const key = `${line.name}|${line.color}|${line.unit}`;
@@ -950,6 +1010,17 @@ const categories = [
         <rect x="3" y="5" width="18" height="14" rx="2" />
         <path d="M7 5v14" />
         <path d="M17 5v14" />
+      </Icon>
+    ),
+  },
+  {
+    id: "ACESSORIOS" as const,
+    label: "Produtos Prontos",
+    description: "Controles, fechaduras, cremalheiras e itens sem medida.",
+    icon: (
+      <Icon className="w-4 h-4">
+        <rect x="3" y="7" width="18" height="13" rx="2" />
+        <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
       </Icon>
     ),
   }, // <- pode deixar essa vírgula ou remover (tanto faz)
@@ -1136,7 +1207,7 @@ if (!ensureColorSelected()) return;
 
     const validPieces = mrPieces.filter((p) => p.length > 0 && p.width > 0 && p.quantity > 0);
     const piecesDesc = validPieces
-      .map((p, idx) => `Peça ${idx + 1}: ${p.quantity}x (${p.length.toFixed(2)}m x ${p.width.toFixed(2)}m)`)
+      .map((p, idx) => `Peça ${idx + 1}: ${p.quantity}x (${p.length}mm x ${p.width}mm)`)
       .join("\n");
 
     const description = [
@@ -1167,6 +1238,59 @@ if (!ensureColorSelected()) return;
     setMrPieces([{ id: Date.now().toString(), length: 0, width: 0, quantity: 1 }]);
     setMrExtraService(0);
     setMrExtraServiceInput(formatMoneyInputBR(0));
+  };
+
+  // Produto pronto (categoria "ACESSORIO DE MOTOR"): sem medida, preço vem
+  // direto da composição/valor fixo cadastrado no produto, só multiplica
+  // pela quantidade.
+  const handleAddAccessoryItem = () => {
+    if (!acSelectedProductId) return alert("Selecione um produto.");
+    if (!ensureColorSelected()) return;
+
+    const selectedProduct = products.find((product) => product.id === acSelectedProductId);
+    if (!selectedProduct) return;
+
+    const {
+      price: basePrice,
+      cost: baseCost,
+      materialCost: baseMat,
+      laborCost: baseLab,
+      fixedCostValue: baseFixed,
+      materialBreakdown,
+      laborBreakdown,
+    } = calculateItemPrice(acSelectedProductId, 1, 1, acQuantity, selectedColor);
+
+    const totalExtra = Number(acExtraService) || 0;
+    const finalPrice = basePrice + totalExtra;
+    const totalCost = baseCost + totalExtra;
+
+    const description = [
+      `Cor: ${selectedColor || "Não informado"}`,
+      `Acréscimo por serviço: R$ ${totalExtra.toFixed(2)}`,
+    ].join(" | ");
+
+    const newItem: QuoteItem = {
+      id: `qi-acessorio-${Date.now()}`,
+      productId: selectedProduct.id,
+      productName: selectedProduct.name,
+      selectedColor,
+      description,
+      width: 0,
+      height: 0,
+      quantity: acQuantity,
+      price: finalPrice,
+      cost: totalCost,
+      materialCost: baseMat,
+      laborCost: baseLab,
+      fixedCostValue: baseFixed,
+      materialBreakdown,
+      laborBreakdown,
+    };
+
+    setItems((prev) => [...prev, newItem]);
+    setAcQuantity(1);
+    setAcExtraService(0);
+    setAcExtraServiceInput(formatMoneyInputBR(0));
   };
 
   const handleAddGlassItem = () => {
@@ -2099,7 +2223,7 @@ const handleSavePDF = async () => {
             <span className="text-[11px] uppercase tracking-wide text-gray-400">Categorias</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             {categories.map((cat) => (
               <button
                 key={cat.id}
@@ -2224,21 +2348,21 @@ const handleSavePDF = async () => {
               <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">3. Medida</label>
 
               <div className="grid grid-cols-12 gap-2 text-center text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">
-                <div className="col-span-3">Altura (m)</div>
-                <div className="col-span-3">Largura (m)</div>
+                <div className="col-span-3">Altura (mm)</div>
+                <div className="col-span-3">Largura (mm)</div>
                 <div className="col-span-2">Qtd</div>
                 <div className="col-span-2">M²</div>
                 <div className="col-span-2">Valor</div>
               </div>
 
               {mrPieces.map((piece, index) => {
-                const pieceM2 = piece.length * piece.width * piece.quantity;
+                const pieceM2 = (piece.length / 1000) * (piece.width / 1000) * piece.quantity;
                 const pieceValue =
                   mrSelectedProductId && piece.length > 0 && piece.width > 0
                     ? calculateItemPrice(
                         mrSelectedProductId,
-                        piece.width * 1000,
-                        piece.length * 1000,
+                        piece.width,
+                        piece.length,
                         piece.quantity,
                         selectedColor
                       ).price
@@ -2254,7 +2378,7 @@ const handleSavePDF = async () => {
                           updatePiece(index, "length", parseFloat(e.target.value), setMrPieces, mrPieces)
                         }
                         className="w-full h-10 px-3 border rounded-lg bg-primary-600 text-white border-primary-500 font-bold text-center focus:ring-2 focus:ring-offset-1 focus:ring-primary-400 placeholder-blue-200"
-                        placeholder="0.00"
+                        placeholder="0000"
                       />
                     </div>
                     <div className="col-span-3">
@@ -2265,7 +2389,7 @@ const handleSavePDF = async () => {
                           updatePiece(index, "width", parseFloat(e.target.value), setMrPieces, mrPieces)
                         }
                         className="w-full h-10 px-3 border rounded-lg bg-primary-600 text-white border-primary-500 font-bold text-center focus:ring-2 focus:ring-offset-1 focus:ring-primary-400 placeholder-blue-200"
-                        placeholder="0.00"
+                        placeholder="0000"
                       />
                     </div>
                     <div className="col-span-2">
@@ -2378,6 +2502,113 @@ const handleSavePDF = async () => {
             })}
           </div>
         )}
+
+        {activeCategory === "ACESSORIOS" && (
+          <div className="mt-6 space-y-5 border border-blue-100 rounded-xl p-4 bg-blue-50/40">
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">
+                Buscar produto
+              </label>
+              <input
+                type="text"
+                value={acProductSearch}
+                onChange={(e) => setAcProductSearch(e.target.value)}
+                placeholder="Digite o nome do produto (controle, fechadura, cremalheira...)"
+                className="w-full h-11 px-3 border rounded-lg text-gray-900 mb-3"
+              />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-60 overflow-auto pr-1">
+                {filteredAccessoryProducts.map((product) => (
+                  <button
+                    key={product.id}
+                    type="button"
+                    onClick={() => setAcSelectedProductId(product.id)}
+                    className={`p-3 border rounded-lg text-left flex gap-3 items-center ${
+                      acSelectedProductId === product.id
+                        ? "border-primary-600 bg-primary-50"
+                        : "border-gray-200 bg-white"
+                    }`}
+                  >
+                    <div className="w-14 h-14 rounded-md bg-gray-100 overflow-hidden flex items-center justify-center shrink-0">
+                      {product.image ? (
+                        <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-[10px] text-gray-400">Sem foto</span>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">{product.name}</p>
+                      <p className="text-xs text-gray-500">{product.category || "Produto pronto"}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {filteredAccessoryProducts.length === 0 && (
+                <div className="mt-3 text-sm text-red-600 border border-red-200 bg-red-50 rounded-lg p-3">
+                  Nenhum produto encontrado. Cadastre em Produtos, categoria "Acessório de Motor".
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-4">
+              <div className="rounded-xl border border-gray-200 bg-white p-3">
+                <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Cor</label>
+                <select
+                  value={selectedColor}
+                  onChange={(e) => setSelectedColor(e.target.value)}
+                  disabled={acColorOptions.length === 0}
+                  className="w-full h-11 px-3 border rounded-lg text-gray-900 disabled:bg-gray-100 disabled:text-gray-400"
+                >
+                  {acColorOptions.length === 0 && <option value="">Sem cores cadastradas</option>}
+                  {acColorOptions.map((color) => (
+                    <option key={color} value={color}>
+                      {color}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-white p-3">
+                <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Quantidade</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={acQuantity}
+                  onChange={(e) => setAcQuantity(Number(e.target.value) || 1)}
+                  className="w-full h-11 px-3 border rounded-lg text-gray-900"
+                />
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-white p-3">
+                <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Acréscimo (R$)</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={acExtraServiceInput}
+                  onChange={(e) => {
+                    const rawValue = sanitizeMoneyInputBR(e.target.value);
+                    setAcExtraServiceInput(rawValue);
+                    setAcExtraService(parseMoneyInputBR(rawValue));
+                  }}
+                  onBlur={() => setAcExtraServiceInput(formatMoneyInputBR(acExtraService))}
+                  className="w-full h-11 px-3 border rounded-lg text-gray-900"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={handleAddAccessoryItem}
+                className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg"
+              >
+                Adicionar produto
+              </button>
+            </div>
+          </div>
+        )}
+
         {activeCategory === "ALUMINIO" && (
           <div className="mt-6 space-y-5 border border-blue-100 rounded-xl p-4 bg-blue-50/40">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
@@ -2929,18 +3160,126 @@ const handleSavePDF = async () => {
           const variableCosts = commissionValue + taxValue + cardValue + referralCommissionValue;
           const contribuicao = totalPrice - totalCostOfGoods - variableCosts;
           const contribuicaoPct = totalPrice > 0 ? (contribuicao / totalPrice) * 100 : 0;
-          return (
-            <div className="mt-6 border-l-4 border-yellow-400 bg-yellow-50 p-5 rounded-r-lg shadow-sm">
-              <h4 className="text-md font-semibold text-yellow-800 mb-4">
-                Detalhamento Financeiro do Orçamento (Admin)
-              </h4>
 
-              <div className="space-y-1 text-sm max-w-lg">
-                {/* Custos de produção */}
+          // Descobre a categoria de um item pelo produto do catálogo (mesma
+          // lógica usada em Entregas por setor); itens de chapa cortada direto
+          // da matéria-prima (sem productId de catálogo) caem no fallback pelo
+          // prefixo do id, que já indica de qual aba do orçamento vieram.
+          const getItemCategoryKey = (item: QuoteItem): "MARMORE" | "VIDRO" | "ALUMINIO" | "ACESSORIOS" | null => {
+            const product = products.find((p) => p.id === item.productId);
+            const cat = normalizeText(product?.category || "");
+            if (cat.includes("MARMORE")) return "MARMORE";
+            if (cat.includes("VIDRO")) return "VIDRO";
+            if (cat.includes("ALUMINIO")) return "ALUMINIO";
+            if (cat.includes("ACESSORIO DE MOTOR") || cat.includes("MOTOR RESIDENCIAL")) return "ACESSORIOS";
+
+            if (item.id.startsWith("qi-granito-") || item.id.startsWith("qi-marmore-")) return "MARMORE";
+            if (item.id.startsWith("qi-glass-")) return "VIDRO";
+            if (item.id.startsWith("qi-aluminum-") || item.id.startsWith("qi-portao-")) return "ALUMINIO";
+            if (item.id.startsWith("qi-acessorio-")) return "ACESSORIOS";
+            return null;
+          };
+
+          const CATEGORY_LABELS = {
+            MARMORE: "Mármore",
+            VIDRO: "Vidro",
+            ALUMINIO: "Alumínio",
+            ACESSORIOS: "Acessórios",
+          } as const;
+
+          // Agrupa os itens por categoria e recalcula a mesma cascata
+          // (matéria-prima -> CMV -> impostos/comissão/taxa -> lucro) só com a
+          // fatia daquela categoria. Custos proporcionais ao preço (impostos,
+          // comissão, taxa de cartão, desconto, comissão de indicação) são
+          // rateados pela participação da categoria no subtotal do orçamento.
+          const buckets: Record<string, QuoteItem[]> = {};
+          items.forEach((item) => {
+            const key = getItemCategoryKey(item);
+            if (!key) return;
+            (buckets[key] = buckets[key] || []).push(item);
+          });
+
+          const categoryBreakdowns = (Object.keys(CATEGORY_LABELS) as (keyof typeof CATEGORY_LABELS)[])
+            .filter((key) => (buckets[key]?.length || 0) > 0)
+            .map((key) => {
+              const catItems = buckets[key];
+              const categoryPrice = catItems.reduce((s, i) => s + i.price, 0);
+              const share = subtotal > 0 ? categoryPrice / subtotal : 0;
+
+              const materialCost = catItems.reduce((s, i) => s + (i.materialCost ?? 0), 0);
+              const laborCost = catItems.reduce((s, i) => s + (i.laborCost ?? 0), 0);
+              const costOfGoods = catItems.reduce((s, i) => s + i.cost, 0);
+              const fixedCostValue = catItems.reduce(
+                (s, i) => s + (i.fixedCostValue ?? i.price * (globalFixedCostRate / 100)),
+                0
+              );
+
+              const catTotalPrice = share * totalPrice;
+              const catCommissionValue = share * commissionValue;
+              const catTaxValue = share * taxValue;
+              const catCardValue = share * cardValue;
+              const catDiscountValue = share * discountValue;
+              const catReferralCommissionValue = share * referralCommissionValue;
+
+              const catNetProfit =
+                catTotalPrice - costOfGoods - catCommissionValue - catTaxValue - catCardValue - fixedCostValue;
+              const catNetProfitMargin = catTotalPrice > 0 ? (catNetProfit / catTotalPrice) * 100 : 0;
+
+              const catVariableCosts = catCommissionValue + catTaxValue + catCardValue + catReferralCommissionValue;
+              const catContribuicao = catTotalPrice - costOfGoods - catVariableCosts;
+              const catContribuicaoPct = catTotalPrice > 0 ? (catContribuicao / catTotalPrice) * 100 : 0;
+
+              return {
+                key,
+                label: CATEGORY_LABELS[key],
+                materialCost,
+                laborCost,
+                costOfGoods,
+                taxValue: catTaxValue,
+                commissionValue: catCommissionValue,
+                discountValue: catDiscountValue,
+                cardValue: catCardValue,
+                fixedCostValue,
+                fixedCostPercent: catTotalPrice > 0 ? (fixedCostValue / catTotalPrice) * 100 : 0,
+                referralCommissionValue: catReferralCommissionValue,
+                totalPrice: catTotalPrice,
+                netProfit: catNetProfit,
+                netProfitMargin: catNetProfitMargin,
+                contribuicao: catContribuicao,
+                contribuicaoPct: catContribuicaoPct,
+              };
+            });
+
+          type PanelData = {
+            materialCost: number;
+            laborCost: number;
+            costOfGoods: number;
+            taxValue: number;
+            commissionValue: number;
+            discountValue: number;
+            cardValue: number;
+            fixedCostValue: number;
+            fixedCostPercent: number;
+            referralCommissionValue: number;
+            totalPrice: number;
+            netProfit: number;
+            netProfitMargin: number;
+            contribuicao: number;
+            contribuicaoPct: number;
+          };
+
+          const renderPanel = (title: string, data: PanelData, withDetailLinks: boolean) => (
+            <div
+              key={title}
+              className="flex-1 min-w-[280px] border-l-4 border-yellow-400 bg-yellow-50 p-5 rounded-r-lg shadow-sm"
+            >
+              <h4 className="text-md font-semibold text-yellow-800 mb-4">{title}</h4>
+
+              <div className="space-y-1 text-sm">
                 <div className="flex justify-between text-gray-700">
                   <span className="flex items-center gap-2">
                     Custo matéria-prima:
-                    {aggregatedMaterialBreakdown.length > 0 && (
+                    {withDetailLinks && aggregatedMaterialBreakdown.length > 0 && (
                       <button
                         type="button"
                         onClick={() => setShowMaterialDetail(true)}
@@ -2950,13 +3289,13 @@ const handleSavePDF = async () => {
                       </button>
                     )}
                   </span>
-                  <span className="font-medium">R$ {fmt(totalMaterialCost)}</span>
+                  <span className="font-medium">R$ {fmt(data.materialCost)}</span>
                 </div>
-                {totalLaborCost > 0 && (
+                {data.laborCost > 0 && (
                   <div className="flex justify-between text-gray-700">
                     <span className="flex items-center gap-2">
                       Mão de obra:
-                      {aggregatedLaborBreakdown.length > 0 && (
+                      {withDetailLinks && aggregatedLaborBreakdown.length > 0 && (
                         <button
                           type="button"
                           onClick={() => setShowLaborDetail(true)}
@@ -2966,92 +3305,101 @@ const handleSavePDF = async () => {
                         </button>
                       )}
                     </span>
-                    <span className="font-medium">R$ {fmt(totalLaborCost)}</span>
+                    <span className="font-medium">R$ {fmt(data.laborCost)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-gray-800 font-semibold border-t border-yellow-300 pt-1 mt-1">
                   <span>CMV total:</span>
-                  <span>R$ {fmt(totalCostOfGoods)}</span>
+                  <span>R$ {fmt(data.costOfGoods)}</span>
                 </div>
 
-                {/* Custos percentuais */}
                 <div className="pt-1 space-y-1">
-                  {taxRate > 0 && (
+                  {data.taxValue > 0 && (
                     <div className="flex justify-between text-gray-700">
-                      <span>Impostos ({taxRate}%):</span>
-                      <span className="font-medium">R$ {fmt(taxValue)}</span>
+                      <span>Impostos:</span>
+                      <span className="font-medium">R$ {fmt(data.taxValue)}</span>
                     </div>
                   )}
-                  {commissionRate > 0 && (
+                  {data.commissionValue > 0 && (
                     <div className="flex justify-between text-gray-700">
-                      <span>Comissão vendedora ({commissionRate}%):</span>
-                      <span className="font-medium">R$ {fmt(commissionValue)}</span>
+                      <span>Comissão vendedora:</span>
+                      <span className="font-medium">R$ {fmt(data.commissionValue)}</span>
                     </div>
                   )}
-                  {discountValue > 0 && (
+                  {data.discountValue > 0 && (
                     <div className="flex justify-between text-green-700">
-                      <span>Desconto{discountMode === "percent" ? ` (${discountPercent}%)` : ""}:</span>
-                      <span className="font-medium">- R$ {fmt(discountValue)}</span>
+                      <span>Desconto:</span>
+                      <span className="font-medium">- R$ {fmt(data.discountValue)}</span>
                     </div>
                   )}
-                  {cardRate > 0 && (
+                  {data.cardValue > 0 && (
                     <div className="flex justify-between text-red-600">
-                      <span>
-                        Taxa de cartão ({discountMode === "percent" && discountPercent > 0
-                          ? `${cardRate}% − ${discountPercent}% = ${effectiveCardRate.toFixed(2)}%`
-                          : `${cardRate}%`}):
-                      </span>
-                      <span className="font-medium">R$ {fmt(cardValue)}</span>
+                      <span>Taxa de cartão:</span>
+                      <span className="font-medium">R$ {fmt(data.cardValue)}</span>
                     </div>
                   )}
-                  {fixedCostEstimatePercent > 0 && (
+                  {data.fixedCostValue > 0 && (
                     <div className="flex justify-between text-gray-700">
-                      <span>Custos fixos ({fixedCostEstimatePercent.toFixed(2)}%):</span>
-                      <span className="font-medium">R$ {fmt(fixedCostValue)}</span>
+                      <span>Custos fixos ({data.fixedCostPercent.toFixed(2)}%):</span>
+                      <span className="font-medium">R$ {fmt(data.fixedCostValue)}</span>
                     </div>
                   )}
-                  {referralCommissionRate > 0 && (
+                  {data.referralCommissionValue > 0 && (
                     <div className="flex justify-between text-gray-700">
-                      <span>Comissão de indicação ({referralCommissionRate}%):</span>
-                      <span className="font-medium">R$ {fmt(referralCommissionValue)}</span>
-                    </div>
-                  )}
-                  {freight > 0 && (
-                    <div className="flex justify-between text-gray-700">
-                      <span>Frete:</span>
-                      <span className="font-medium">R$ {fmt(freight)}</span>
-                    </div>
-                  )}
-                  {installation > 0 && (
-                    <div className="flex justify-between text-gray-700">
-                      <span>Instalação:</span>
-                      <span className="font-medium">R$ {fmt(installation)}</span>
+                      <span>Comissão de indicação:</span>
+                      <span className="font-medium">R$ {fmt(data.referralCommissionValue)}</span>
                     </div>
                   )}
                 </div>
 
-                {/* Preço total */}
                 <div className="flex justify-between text-blue-700 bg-blue-50 rounded px-2 py-1 font-bold border border-blue-200 mt-2">
-                  <span>Preço total do orçamento:</span>
-                  <span>R$ {fmt(totalPrice)}</span>
+                  <span>Preço total:</span>
+                  <span>R$ {fmt(data.totalPrice)}</span>
                 </div>
 
-                {/* Lucro líquido */}
-                <div className={`flex justify-between font-bold border-t border-yellow-300 pt-2 mt-2 ${netProfit >= 0 ? "text-green-700" : "text-red-600"}`}>
+                <div className={`flex justify-between font-bold border-t border-yellow-300 pt-2 mt-2 ${data.netProfit >= 0 ? "text-green-700" : "text-red-600"}`}>
                   <span>Lucro líquido estimado:</span>
-                  <span>R$ {fmt(netProfit)}</span>
+                  <span>R$ {fmt(data.netProfit)}</span>
                 </div>
-                <div className={`flex justify-between text-sm font-semibold ${netProfit >= 0 ? "text-green-700" : "text-red-600"}`}>
+                <div className={`flex justify-between text-sm font-semibold ${data.netProfit >= 0 ? "text-green-700" : "text-red-600"}`}>
                   <span>Margem de lucro:</span>
-                  <span>{netProfitMargin.toFixed(2)}%</span>
+                  <span>{data.netProfitMargin.toFixed(2)}%</span>
                 </div>
 
-                {/* Margem de contribuição */}
                 <div className="flex justify-between text-gray-800 font-semibold pt-1">
                   <span>Margem de contribuição:</span>
-                  <span>R$ {fmt(contribuicao)} <span className="text-xs font-normal text-gray-500">({contribuicaoPct.toFixed(2)}%)</span></span>
+                  <span>R$ {fmt(data.contribuicao)} <span className="text-xs font-normal text-gray-500">({data.contribuicaoPct.toFixed(2)}%)</span></span>
                 </div>
               </div>
+            </div>
+          );
+
+          return (
+            <div className="mt-6 flex flex-wrap gap-4 items-start">
+              {renderPanel(
+                "Total do Orçamento (Admin)",
+                {
+                  materialCost: totalMaterialCost,
+                  laborCost: totalLaborCost,
+                  costOfGoods: totalCostOfGoods,
+                  taxValue,
+                  commissionValue,
+                  discountValue,
+                  cardValue,
+                  fixedCostValue,
+                  fixedCostPercent: fixedCostEstimatePercent,
+                  referralCommissionValue,
+                  totalPrice,
+                  netProfit,
+                  netProfitMargin,
+                  contribuicao,
+                  contribuicaoPct,
+                },
+                true
+              )}
+
+              {categoryBreakdowns.length > 1 &&
+                categoryBreakdowns.map((cat) => renderPanel(cat.label, cat, false))}
             </div>
           );
         })()}
