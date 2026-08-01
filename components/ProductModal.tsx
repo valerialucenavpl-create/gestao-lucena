@@ -567,7 +567,11 @@ const ProductModal: React.FC<ProductModalProps> = ({
       const [settingsRes, fixedRes, empRes] = await Promise.all([
         supabase.from("billing_settings").select("monthly_revenue_target, work_days, hours_per_day").order("updated_at", { ascending: false }).limit(1),
         supabase.from("fixed_expenses").select("value"),
-        supabase.from("employees").select("total_monthly_cost, department, monthly_hours, role"),
+        // v_custo_pessoal: view com o custo de pessoal agregado por setor+função.
+        // Substitui a leitura direta de "employees" (restrita a Admin/Financeiro
+        // pelo RLS). Cada linha representa VÁRIAS pessoas — por isso trazemos
+        // "headcount", usado abaixo para calcular a média por pessoa.
+        supabase.from("v_custo_pessoal").select("total_monthly_cost, department, monthly_hours, role, headcount"),
       ]);
       if (!active) return;
 
@@ -598,7 +602,24 @@ const ProductModal: React.FC<ProductModalProps> = ({
           roles.includes(normalizeText(e.role || ""))
         );
         if (employeesInRoles.length === 0) return 0;
-        const avgMonthlyCost = employeesInRoles.reduce((s: number, e: any) => s + Number(e.total_monthly_cost || 0), 0) / employeesInRoles.length;
+
+        // Cada linha da view "v_custo_pessoal" agrupa várias pessoas da mesma
+        // função. Dividir pelo número de LINHAS daria uma média errada — tem
+        // que dividir pelo número de PESSOAS (headcount). O fallback "|| 1"
+        // mantém o cálculo correto caso a origem volte a ser 1 linha = 1 pessoa.
+        const totalPessoas = employeesInRoles.reduce(
+          (s: number, e: any) => s + (Number(e.headcount) || 1),
+          0
+        );
+        if (totalPessoas === 0) return 0;
+
+        const custoTotal = employeesInRoles.reduce(
+          (s: number, e: any) => s + Number(e.total_monthly_cost || 0),
+          0
+        );
+        const avgMonthlyCost = custoTotal / totalPessoas;
+
+        // monthly_hours na view já é a MÉDIA de horas por pessoa daquela função.
         const hoursRef = Number(employeesInRoles[0].monthly_hours || monthlyProductiveHours || 176);
         return Number((avgMonthlyCost / hoursRef).toFixed(2));
       };
