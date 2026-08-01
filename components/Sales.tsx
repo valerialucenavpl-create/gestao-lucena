@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { CashFlowEntry, Client, Quote, Sale } from "../types";
 import { deleteSale } from "../services/salesServices";
+import { updateQuote } from "../services/quotesServices";
 import {
   formatMoneyInputBR,
   parseMoneyInputBR,
@@ -274,10 +275,25 @@ const getComputedStatus = (sale: Sale): Exclude<FastStatus, "Todos"> => {
   };
 
   const handleDelete = async (saleId: string) => {
-    const ok = window.confirm("Deseja realmente excluir esta venda da lista?");
+    const ok = window.confirm("Deseja realmente excluir esta venda? O orçamento de origem será marcado como Recusado, e a conta a receber pendente correspondente será cancelada automaticamente.");
     if (!ok) return;
 
     setMenuOpenId(null);
+
+    // Marca o orçamento de origem como Recusado — é o que faz a exclusão
+    // valer de verdade no banco (não só sumir da tela) e o que cancela
+    // automaticamente a conta a receber pendente (gatilho já existente).
+    const sale = localSales.find((s: any) => String(s.id) === saleId);
+    const quoteId = sale ? getSaleQuoteId(sale) : "";
+    const quote = quoteId ? getQuote(quoteId) : undefined;
+
+    if (quote && quote.status === "Aprovado") {
+      const result = await updateQuote(quoteId, { status: "Recusado" });
+      if (!result.ok) {
+        alert(`Não foi possível excluir: ${(result.error as any)?.message ?? "ver console"}`);
+        return;
+      }
+    }
 
     const isVirtual = saleId.startsWith("quote-");
 
