@@ -35,8 +35,8 @@ const DeliverySectorDetail: React.FC<DeliverySectorDetailProps> = ({ sector, set
       setLoading(true);
 
       const [quotesRes, clientsRes, productsRes] = await Promise.all([
-        supabase.from("quotes").select("*").order("date", { ascending: false }),
-        supabase.from("clients").select("*"),
+        supabase.from("quotes").select("*").is("deleted_at", null).order("date", { ascending: false }),
+        supabase.from("clients").select("*").is("deleted_at", null),
         supabase.from("products").select("*"),
       ]);
 

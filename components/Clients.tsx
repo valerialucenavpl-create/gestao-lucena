@@ -116,7 +116,7 @@ const Clients: React.FC = () => {
     setLoading(true);
 
     const { data, tableName, error } = await runWithTableFallback<Client[]>(async (candidate) => {
-      return await supabase.from(candidate).select("*");
+      return await supabase.from(candidate).select("*").is("deleted_at", null);
     });
 
     if (error) {
@@ -204,8 +204,14 @@ const Clients: React.FC = () => {
   const handleDelete = async (id: string) => {
     if (!window.confirm("Deseja excluir este cliente?")) return;
 
+    // Exclusão reversível — marca deleted_at, não apaga a linha. Só Admin
+    // consegue (trava no banco); outros papéis recebem erro aqui.
+    const { data: authData } = await supabase.auth.getUser();
     const { error } = await runWithTableFallback((tableName) =>
-      supabase.from(tableName).delete().eq("id", id)
+      supabase
+        .from(tableName)
+        .update({ deleted_at: new Date().toISOString(), deleted_by: authData.user?.id ?? null })
+        .eq("id", id)
     );
     if (error) {
       console.error(error);

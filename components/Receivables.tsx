@@ -104,7 +104,7 @@ const Receivables: React.FC = () => {
 
       // Use the proven getCashFlow service (handles column mapping and auth correctly)
       const [quotesRes, cashResult] = await Promise.all([
-        supabase.from("quotes").select("*").eq("status", "Aprovado"),
+        supabase.from("quotes").select("*").eq("status", "Aprovado").is("deleted_at", null),
         getCashFlow(),
       ]);
 

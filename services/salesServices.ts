@@ -16,6 +16,7 @@ export async function getSales() {
   const { data, error } = await supabase
     .from("sales")
     .select("*")
+    .is("deleted_at", null)
     .order("date", { ascending: false }); // <-- era saleDate
 
   if (error) {
@@ -75,10 +76,15 @@ export async function updateSale(id: number, fields: Partial<SaleRow>) {
 }
 
 // -------------------------------------------------------
-// DELETE SALE
+// DELETE SALE (exclusão reversível — marca deleted_at, não apaga a linha)
 // -------------------------------------------------------
 export async function deleteSale(id: number) {
-  const { error } = await supabase.from("sales").delete().eq("id", id);
+  const { data: authData } = await supabase.auth.getUser();
+
+  const { error } = await supabase
+    .from("sales")
+    .update({ deleted_at: new Date().toISOString(), deleted_by: authData.user?.id ?? null })
+    .eq("id", id);
 
   if (error) {
     console.error("Erro ao deletar venda:", error);

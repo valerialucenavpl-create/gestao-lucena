@@ -74,6 +74,7 @@ export const getCashFlow = async () => {
       const { data, error } = await supabase
         .from(TABLE)
         .select("*")
+        .is("deleted_at", null)
         .order("date", { ascending: false })
         .order("created_at", { ascending: false })
         .order("id", { ascending: false })
@@ -136,29 +137,25 @@ export const createCashFlowEntry = async (
   }
 };
 
+// Exclusão reversível: marca deleted_at/deleted_by em vez de apagar a linha.
+// A leitura (getCashFlow) já filtra "deleted_at is null", então o lançamento
+// some da tela normalmente, mas fica recuperável — nada de dado financeiro
+// se perde de vez por engano.
 export const deleteCashFlowEntry = async (id: string) => {
   try {
     const { data: authData, error: authErr } = await supabase.auth.getUser();
     if (authErr || !authData.user) return { ok: false, error: authErr };
 
-    // extra segurança: só apaga do próprio user
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from(TABLE)
-      .delete()
-      .eq("id", id);
+      .update({ deleted_at: new Date().toISOString(), deleted_by: authData.user.id })
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
 
     if (error) return { ok: false, error };
 
-    // validação pós-delete
-    const { data: stillExists, error: checkError } = await supabase
-      .from(TABLE)
-      .select("id")
-      .eq("id", id)
-      .maybeSingle();
-
-    if (checkError) return { ok: false, error: checkError };
-
-    if (stillExists) {
+    if (!data) {
       return {
         ok: false,
         error: new Error(

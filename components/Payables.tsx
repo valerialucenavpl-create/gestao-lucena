@@ -91,6 +91,7 @@ const Payables: React.FC = () => {
     const { data } = await supabase
       .from("payables")
       .select("*")
+      .is("deleted_at", null)
       .order("due_date", { ascending: true });
     if (data) setPayables(data.map(normalizeRow));
     if (showLoader) setLoading(false);
@@ -105,7 +106,16 @@ const Payables: React.FC = () => {
     if (!window.confirm("Excluir esta conta a pagar?")) return;
     const { data: authData } = await supabase.auth.getUser();
     if (!authData.user) return;
-    await supabase.from("payables").delete().eq("id", id);
+    // Exclusão reversível — marca deleted_at, não apaga a linha.
+    // Só Admin consegue (trava no banco); outros papéis recebem erro aqui.
+    const { error } = await supabase
+      .from("payables")
+      .update({ deleted_at: new Date().toISOString(), deleted_by: authData.user.id })
+      .eq("id", id);
+    if (error) {
+      alert(`Não foi possível excluir: ${error.message}`);
+      return;
+    }
     setPayables((prev) => prev.filter((p) => p.id !== id));
   };
 

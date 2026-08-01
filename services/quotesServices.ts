@@ -8,6 +8,7 @@ export async function getQuotes() {
   const { data, error } = await supabase
     .from("quotes")
     .select("*")
+    .is("deleted_at", null)
     .order("date", { ascending: false });
 
   if (error) {
@@ -47,10 +48,16 @@ export async function updateQuote(id: string, fields: Partial<Quote>) {
 }
 
 // ---------------------------
-// DELETE QUOTE
+// DELETE QUOTE (exclusão reversível — marca deleted_at, não apaga a linha)
 // ---------------------------
 export async function deleteQuote(id: string) {
-  const { error } = await supabase.from("quotes").delete().eq("id", id);
+  const { data: authData } = await supabase.auth.getUser();
+
+  const { error } = await supabase
+    .from("quotes")
+    .update({ deleted_at: new Date().toISOString(), deleted_by: authData.user?.id ?? null })
+    .eq("id", id);
+
   if (error) {
     console.error("Erro ao excluir orçamento:", error);
     return { ok: false, error };

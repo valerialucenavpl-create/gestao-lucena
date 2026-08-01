@@ -177,19 +177,21 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
           supabase
             .from("sales")
             .select("*")
+            .is("deleted_at", null)
             .order("created_at", { ascending: false }),
           supabase
             .from("quotes")
             .select("*")
+            .is("deleted_at", null)
             .order("date", { ascending: false }),
           // Só usamos nome/categoria pra montar "Entregas por setor" — o
           // Dashboard não mostra foto de produto. Buscar "*" trazia a foto em
           // base64 de cada produto (60+ MB no total) e deixava o painel
           // demorando muito pra carregar por causa só desse payload.
           supabase.from("products").select("id,name,productCategory"),
-          supabase.from("clients").select("*"),
+          supabase.from("clients").select("*").is("deleted_at", null),
           supabase.from("employees").select("id,name,birth_date"),
-          supabase.from("payables").select("*").order("due_date", { ascending: true }),
+          supabase.from("payables").select("*").is("deleted_at", null).order("due_date", { ascending: true }),
         ]);
 
       const safeSellers = Array.isArray(sellersRes.data) ? (sellersRes.data as SellerRow[]) : [];
@@ -266,6 +268,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
           const { data } = await supabase
             .from("payables")
             .select("*")
+            .is("deleted_at", null)
             .order("due_date", { ascending: true });
           if (data) setPayables(data);
         }
