@@ -301,6 +301,17 @@ export async function generateQuotePDF(
     return { ...item, displayedPrice: item.price + extraPerUnit };
   });
 
+  const headCols = options.hidePrice ? ["Descrição", "Un.", "Qtd."] : ["Descrição", "Preço Unit.", "Un.", "Qtd.", "Total"];
+  const colWidths = options.hidePrice ? [144, 18, 18] : [90, 30, 16, 14, 30];
+  const colX: number[] = [];
+  {
+    let acc = margin;
+    for (const w of colWidths) {
+      colX.push(acc);
+      acc += w;
+    }
+  }
+
   interface Row {
     name: string;
     specLines: string[];
@@ -311,8 +322,14 @@ export async function generateQuotePDF(
     height: number;
   }
 
+  const padX = 4;
+  // Largura real disponível pro texto da descrição — sem isso, uma linha
+  // longa (medidas + tipo de vidro + cor tudo junto) desenhava por cima
+  // das colunas de preço/qtd/total em vez de quebrar.
+  const descTextW = colWidths[0] - padX - 3;
+
   const rows: Row[] = dissolvedItems.map((item) => {
-    const specLines: string[] = [];
+    const rawSpecs: string[] = [];
     if (!options.hideMeasures && (item.width > 0 || item.height > 0)) {
       const wDisp = item.width >= 1000
         ? `${(item.width / 1000).toFixed(2).replace(".", ",")}m`
@@ -320,18 +337,25 @@ export async function generateQuotePDF(
       const hDisp = item.height >= 1000
         ? `${(item.height / 1000).toFixed(2).replace(".", ",")}m`
         : `${item.height}mm`;
-      specLines.push(`Medidas: ${hDisp} × ${wDisp}`);
+      rawSpecs.push(`Medidas: ${hDisp} × ${wDisp}`);
     }
     if (!options.hideDetailedDescription && item.description) {
       const cleanDesc = item.description
         .split(" | ")
         .filter((part) => !part.toLowerCase().startsWith("acréscimo por serviço"))
         .join(" | ");
-      if (cleanDesc) specLines.push(cleanDesc);
+      if (cleanDesc) rawSpecs.push(cleanDesc);
     }
     if (item.selectedColor && item.selectedColor !== "Padrão") {
-      specLines.push(`Cor: ${item.selectedColor}`);
+      rawSpecs.push(`Cor: ${item.selectedColor}`);
     }
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    const specLines: string[] = rawSpecs.flatMap(
+      (s) => doc.splitTextToSize(s, descTextW) as string[]
+    );
+
     const padV = 3;
     const nameH = 5;
     const specH = 3.7;
@@ -346,17 +370,6 @@ export async function generateQuotePDF(
       height,
     };
   });
-
-  const headCols = options.hidePrice ? ["Descrição", "Un.", "Qtd."] : ["Descrição", "Preço Unit.", "Un.", "Qtd.", "Total"];
-  const colWidths = options.hidePrice ? [144, 18, 18] : [90, 30, 16, 14, 30];
-  const colX: number[] = [];
-  {
-    let acc = margin;
-    for (const w of colWidths) {
-      colX.push(acc);
-      acc += w;
-    }
-  }
 
   const headerH = 9;
   const tableRadius = 2.5;
@@ -426,7 +439,6 @@ export async function generateQuotePDF(
     for (let i = 0; i < count; i++) {
       const r = rows[rowIdx + i];
       const cellY = ry;
-      const padX = 4;
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(9.5);
