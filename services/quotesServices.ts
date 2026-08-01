@@ -68,14 +68,18 @@ export async function updateQuote(id: string, fields: Partial<Quote>) {
 export async function deleteQuote(id: string) {
   const { data: authData } = await supabase.auth.getUser();
 
-  const { error } = await supabase
+  // Um UPDATE barrado pela RLS não retorna erro — só não afeta nenhuma
+  // linha. Por isso confirmamos com .select() que a linha voltou.
+  const { data, error } = await supabase
     .from("quotes")
     .update({ deleted_at: new Date().toISOString(), deleted_by: authData.user?.id ?? null })
-    .eq("id", id);
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
 
-  if (error) {
+  if (error || !data) {
     console.error("Erro ao excluir orçamento:", error);
-    return { ok: false, error };
+    return { ok: false, error: error ?? new Error("Nenhuma linha foi alterada (verifique permissão).") };
   }
   return { ok: true };
 }

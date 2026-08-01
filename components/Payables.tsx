@@ -108,12 +108,17 @@ const Payables: React.FC = () => {
     if (!authData.user) return;
     // Exclusão reversível — marca deleted_at, não apaga a linha.
     // Só Admin consegue (trava no banco); outros papéis recebem erro aqui.
-    const { error } = await supabase
+    // Importante: um UPDATE que a RLS barra não retorna erro nenhum, só
+    // não afeta nenhuma linha — por isso confirmamos com .select() que a
+    // linha realmente voltou, em vez de confiar só na ausência de erro.
+    const { data, error } = await supabase
       .from("payables")
       .update({ deleted_at: new Date().toISOString(), deleted_by: authData.user.id })
-      .eq("id", id);
-    if (error) {
-      alert(`Não foi possível excluir: ${error.message}`);
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+    if (error || !data) {
+      alert(`Não foi possível excluir: ${error?.message ?? "nenhuma linha foi alterada (verifique permissão)"}`);
       return;
     }
     setPayables((prev) => prev.filter((p) => p.id !== id));

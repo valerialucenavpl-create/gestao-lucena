@@ -81,14 +81,18 @@ export async function updateSale(id: number, fields: Partial<SaleRow>) {
 export async function deleteSale(id: number) {
   const { data: authData } = await supabase.auth.getUser();
 
-  const { error } = await supabase
+  // Um UPDATE barrado pela RLS não retorna erro — só não afeta nenhuma
+  // linha. Por isso confirmamos com .select() que a linha voltou.
+  const { data, error } = await supabase
     .from("sales")
     .update({ deleted_at: new Date().toISOString(), deleted_by: authData.user?.id ?? null })
-    .eq("id", id);
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
 
-  if (error) {
+  if (error || !data) {
     console.error("Erro ao deletar venda:", error);
-    return { ok: false, error };
+    return { ok: false, error: error ?? new Error("Nenhuma linha foi alterada (verifique permissão).") };
   }
 
   return { ok: true };

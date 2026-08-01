@@ -206,16 +206,21 @@ const Clients: React.FC = () => {
 
     // Exclusão reversível — marca deleted_at, não apaga a linha. Só Admin
     // consegue (trava no banco); outros papéis recebem erro aqui.
+    // Importante: um UPDATE barrado pela RLS não retorna erro — só não
+    // afeta nenhuma linha — por isso confirmamos com .select() que a
+    // linha realmente voltou.
     const { data: authData } = await supabase.auth.getUser();
-    const { error } = await runWithTableFallback((tableName) =>
+    const { data, error } = await runWithTableFallback((tableName) =>
       supabase
         .from(tableName)
         .update({ deleted_at: new Date().toISOString(), deleted_by: authData.user?.id ?? null })
         .eq("id", id)
+        .select("id")
+        .maybeSingle()
     );
-    if (error) {
+    if (error || !data) {
       console.error(error);
-      alert(`Erro ao excluir cliente: ${error.message}`);
+      alert(`Erro ao excluir cliente: ${error?.message ?? "nenhuma linha foi alterada (verifique permissão)"}`);
       return;
     }
     loadClients();
