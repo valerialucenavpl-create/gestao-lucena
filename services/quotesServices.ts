@@ -81,6 +81,17 @@ export async function deleteQuote(id: string) {
     console.error("Erro ao excluir orçamento:", error);
     return { ok: false, error: error ?? new Error("Nenhuma linha foi alterada (verifique permissão).") };
   }
+
+  // Cancela também a conta a receber pendente gerada por este orçamento, se
+  // houver — o gatilho no banco só reage a mudança de status (Aprovado ->
+  // outro), não à exclusão do orçamento em si.
+  await supabase
+    .from("receivables")
+    .update({ deleted_at: new Date().toISOString(), deleted_by: authData.user?.id ?? null })
+    .eq("quote_id", id)
+    .eq("status", "pending")
+    .is("deleted_at", null);
+
   return { ok: true };
 }
 
