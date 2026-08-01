@@ -785,6 +785,7 @@ if (
       case "sales":
         return (
           <Sales
+            currentUser={currentUser}
             sales={effectiveSales}
             quotes={quotes}
             clients={clients}

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { CashFlowEntry, Client, Quote, Sale } from "../types";
+import { CashFlowEntry, Client, Quote, Sale, User } from "../types";
 import { deleteSale } from "../services/salesServices";
 import { updateQuote } from "../services/quotesServices";
 import {
@@ -29,6 +29,7 @@ function addDeletedVirtualId(id: string) {
 }
 
 interface SalesProps {
+  currentUser?: User | null;
   sales?: Sale[] | null;
   quotes?: Quote[] | null;
   clients?: Client[] | null;
@@ -140,7 +141,8 @@ function getSaleAmount(sale: any): number {
   function getSaleCustomerName(sale: any, quote?: Quote): string {
   return toSafeText(sale?.customerName) || toSafeText(quote?.customerName);
 }
-const Sales: React.FC<SalesProps> = ({ sales, quotes, cashFlow, onOpenQuote, onDeleteSale }) => {
+const Sales: React.FC<SalesProps> = ({ currentUser, sales, quotes, cashFlow, onOpenQuote, onDeleteSale }) => {
+  const isAdmin = currentUser?.role === "Admin";
   const safeSales = Array.isArray(sales) ? sales : [];
   const safeQuotes = Array.isArray(quotes) ? quotes : [];
   const safeCashFlow = Array.isArray(cashFlow) ? cashFlow : [];
@@ -275,6 +277,13 @@ const getComputedStatus = (sale: Sale): Exclude<FastStatus, "Todos"> => {
   };
 
   const handleDelete = async (saleId: string) => {
+    // Excluir venda é ação exclusiva de Admin — vendedoras podem excluir
+    // orçamentos livremente (inclusive testes), mas não vendas já aprovadas.
+    if (!isAdmin) {
+      alert("Somente o Admin pode excluir uma venda.");
+      return;
+    }
+
     const ok = window.confirm("Deseja realmente excluir esta venda? O orçamento de origem será marcado como Recusado, e a conta a receber pendente correspondente será cancelada automaticamente.");
     if (!ok) return;
 
@@ -408,13 +417,15 @@ const getComputedStatus = (sale: Sale): Exclude<FastStatus, "Todos"> => {
                             Ver detalhes
                           </button>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => handleDelete((sale as any).id)}
-                          className="w-full px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50"
-                        >
-                          Excluir
-                        </button>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => handleDelete((sale as any).id)}
+                            className="w-full px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50"
+                          >
+                            Excluir
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
