@@ -614,6 +614,7 @@ const App: React.FC = () => {
             "receivables",
             "financials",
             "employees",
+            "sellers",
             "reports",
             "assistant",
           ] as any).includes(view)
@@ -854,7 +855,7 @@ if (
         return <EmployeeForm setActiveView={setActiveView} />;
 
       case "sellers":
-        return <Sellers />;
+        return <Sellers currentUser={currentUser} />;
 
       case "reports":
         return (

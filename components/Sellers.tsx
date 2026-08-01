@@ -5,6 +5,8 @@ import {
   parseMoneyInputBR,
   sanitizeMoneyInputBR,
 } from "../utils/money";
+import { normalizeText } from "../utils/deliveryEntries";
+import { User } from "../types";
 
 type Seller = {
   id: number;
@@ -16,11 +18,59 @@ type Seller = {
   created_at?: string | null;
 };
 
+type ApprovedQuoteRow = {
+  id: string | number;
+  quote_number: number | null;
+  customer_name: string | null;
+  salesperson: string | null;
+  total_price: number | null;
+  date: string | null;
+};
+
+type CommissionRow = {
+  id: string;
+  osNumber: string;
+  customerName: string;
+  salesperson: string;
+  saleValue: number;
+  commissionRate: number;
+  commissionValue: number;
+};
+
 const inputCls =
   "w-full mt-1 p-2 border rounded bg-white text-gray-900 border-gray-300";
 const labelCls = "block text-sm font-medium text-gray-700";
 
-const Sellers: React.FC = () => {
+function money(n: number) {
+  return Number(n || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function getCurrentMonthStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthRange(monthStr: string): { start: string; end: string } {
+  const [y, m] = monthStr.split("-").map(Number);
+  const start = `${monthStr}-01`;
+  const nextMonth = new Date(y, m, 1); // mês em JS é 0-indexado, então isso já cai no dia 1 do mês seguinte
+  const end = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}-01`;
+  return { start, end };
+}
+
+function formatMonthLabel(monthStr: string): string {
+  const [y, m] = monthStr.split("-").map(Number);
+  const d = new Date(y, (m || 1) - 1, 1);
+  return d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+}
+
+interface SellersProps {
+  currentUser: User;
+}
+
+const Sellers: React.FC<SellersProps> = ({ currentUser }) => {
+  const isManager = currentUser?.role === "Admin" || currentUser?.role === "Finance";
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -149,7 +199,204 @@ const Sellers: React.FC = () => {
     }
   };
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // CONSULTA DE COMISSÕES — por mês, com busca por cliente/OS
+  // Vendedora (Sales) só vê as próprias vendas; Admin/Financeiro veem todas
+  // (ou filtram por uma vendedora específica).
+  // ─────────────────────────────────────────────────────────────────────────
+  const [commissionMonth, setCommissionMonth] = useState<string>(getCurrentMonthStr());
+  const [commissionSearch, setCommissionSearch] = useState("");
+  const [commissionSellerFilter, setCommissionSellerFilter] = useState<string>("all");
+  const [commissionQuotes, setCommissionQuotes] = useState<ApprovedQuoteRow[]>([]);
+  const [commissionLoading, setCommissionLoading] = useState(false);
+
+  useEffect(() => {
+    const loadCommissions = async () => {
+      setCommissionLoading(true);
+      const { start, end } = monthRange(commissionMonth);
+
+      const { data, error } = await supabase
+        .from("quotes")
+        .select("id,quote_number,customer_name,salesperson,total_price,date")
+        .eq("status", "Aprovado")
+        .is("deleted_at", null)
+        .gte("date", start)
+        .lt("date", end);
+
+      if (error) {
+        console.error("Erro ao carregar vendas para comissão:", error);
+        setCommissionQuotes([]);
+        setCommissionLoading(false);
+        return;
+      }
+
+      setCommissionQuotes((data as ApprovedQuoteRow[]) ?? []);
+      setCommissionLoading(false);
+    };
+
+    loadCommissions();
+  }, [commissionMonth]);
+
+  const commissionRows = useMemo<CommissionRow[]>(() => {
+    const rows: CommissionRow[] = commissionQuotes.map((q) => {
+      const salesperson = String(q.salesperson || "");
+      const matchedSeller = sellers.find(
+        (s) => normalizeText(s.name) === normalizeText(salesperson)
+      );
+      const rate = Number(matchedSeller?.commission ?? 0);
+      const saleValue = Number(q.total_price || 0);
+
+      return {
+        id: String(q.id),
+        osNumber: q.quote_number != null ? String(q.quote_number) : String(q.id).slice(-6).toUpperCase(),
+        customerName: q.customer_name || "Cliente não identificado",
+        salesperson,
+        saleValue,
+        commissionRate: rate,
+        commissionValue: saleValue * (rate / 100),
+      };
+    });
+
+    const scoped = isManager
+      ? rows
+      : rows.filter((r) => normalizeText(r.salesperson) === normalizeText(currentUser?.name || ""));
+
+    const bySeller =
+      isManager && commissionSellerFilter !== "all"
+        ? scoped.filter((r) => {
+            const seller = sellers.find((s) => String(s.id) === commissionSellerFilter);
+            return seller ? normalizeText(r.salesperson) === normalizeText(seller.name) : true;
+          })
+        : scoped;
+
+    const term = normalizeText(commissionSearch);
+    const searched = term
+      ? bySeller.filter(
+          (r) => normalizeText(r.customerName).includes(term) || normalizeText(r.osNumber).includes(term)
+        )
+      : bySeller;
+
+    return searched.sort((a, b) => b.saleValue - a.saleValue);
+  }, [commissionQuotes, sellers, isManager, commissionSellerFilter, commissionSearch, currentUser?.name]);
+
+  const commissionTotal = useMemo(
+    () => commissionRows.reduce((sum, r) => sum + r.commissionValue, 0),
+    [commissionRows]
+  );
+
+  const salesTotal = useMemo(
+    () => commissionRows.reduce((sum, r) => sum + r.saleValue, 0),
+    [commissionRows]
+  );
+
+  const renderCommissionSection = () => (
+    <div className="bg-white p-6 rounded-xl shadow space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-semibold">Consultar Comissões</h3>
+          <p className="text-sm text-gray-600 capitalize">{formatMonthLabel(commissionMonth)}</p>
+        </div>
+
+        <div className="flex flex-wrap gap-3 items-end">
+          <div>
+            <label className={labelCls}>Mês</label>
+            <input
+              type="month"
+              className={inputCls}
+              value={commissionMonth}
+              onChange={(e) => setCommissionMonth(e.target.value || getCurrentMonthStr())}
+            />
+          </div>
+
+          {isManager && (
+            <div>
+              <label className={labelCls}>Vendedora</label>
+              <select
+                className={inputCls}
+                value={commissionSellerFilter}
+                onChange={(e) => setCommissionSellerFilter(e.target.value)}
+              >
+                <option value="all">Todas as vendedoras</option>
+                {sellers.map((s) => (
+                  <option key={s.id} value={String(s.id)}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label className={labelCls}>Buscar cliente ou OS</label>
+            <input
+              type="text"
+              className={inputCls}
+              placeholder="Nome do cliente ou nº da OS"
+              value={commissionSearch}
+              onChange={(e) => setCommissionSearch(e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
+
+      {commissionLoading ? (
+        <p className="text-gray-500 text-sm">Carregando...</p>
+      ) : commissionRows.length === 0 ? (
+        <p className="text-gray-500 text-sm">Nenhuma venda aprovada encontrada para esse período.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left text-gray-700">
+            <thead className="text-xs uppercase bg-gray-50">
+              <tr>
+                <th className="px-3 py-2">OS #</th>
+                <th className="px-3 py-2">Cliente</th>
+                {isManager && <th className="px-3 py-2">Vendedora</th>}
+                <th className="px-3 py-2 text-right">Valor da Venda</th>
+                <th className="px-3 py-2 text-right">Comissão</th>
+                <th className="px-3 py-2 text-right">Valor da Comissão</th>
+              </tr>
+            </thead>
+            <tbody>
+              {commissionRows.map((r) => (
+                <tr key={r.id} className="border-b">
+                  <td className="px-3 py-2 font-mono text-xs text-primary-700 font-semibold">#{r.osNumber}</td>
+                  <td className="px-3 py-2 font-medium">{r.customerName}</td>
+                  {isManager && <td className="px-3 py-2">{r.salesperson || "—"}</td>}
+                  <td className="px-3 py-2 text-right">{money(r.saleValue)}</td>
+                  <td className="px-3 py-2 text-right">{r.commissionRate.toFixed(2)}%</td>
+                  <td className="px-3 py-2 text-right font-semibold text-green-700">{money(r.commissionValue)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="bg-gray-50 border-t-2 border-gray-200">
+              <tr>
+                <td colSpan={isManager ? 3 : 2} className="px-3 py-2 font-semibold">
+                  Total ({commissionRows.length} {commissionRows.length === 1 ? "venda" : "vendas"})
+                </td>
+                <td className="px-3 py-2 text-right font-semibold">{money(salesTotal)}</td>
+                <td />
+                <td className="px-3 py-2 text-right font-bold text-green-700">{money(commissionTotal)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+
   if (loading) return <p>Carregando vendedoras...</p>;
+
+  if (!isManager) {
+    // Vendedora: só a consulta das próprias comissões, sem acesso ao
+    // cadastro/edição de outras vendedoras.
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-bold">Minhas Comissões</h2>
+          <p className="text-sm text-gray-600">Vendas aprovadas em seu nome e a comissão correspondente.</p>
+        </div>
+        {renderCommissionSection()}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -328,6 +575,8 @@ const Sellers: React.FC = () => {
           </div>
         )}
       </div>
+
+      {renderCommissionSection()}
     </div>
   );
 };
