@@ -34,17 +34,32 @@ export async function getQuoteById(id: string) {
 }
 
 // ---------------------------
-// CREATE QUOTE (with column fallback)
+// CREATE QUOTE
 // ---------------------------
 export async function createQuote(quote: Quote) {
-  return saveQuoteWithFallback("insert", normalizeQuoteForDb(quote));
+  const payload = normalizeQuoteForDb(quote);
+  delete payload["id"];
+
+  const { data, error } = await supabase.from("quotes").insert(payload).select().single();
+  if (error) {
+    console.error("Erro ao criar orçamento:", error);
+    return { ok: false, error };
+  }
+  return { ok: true, data: normalizeQuoteFromDb(data) as Quote };
 }
 
 // ---------------------------
-// UPDATE QUOTE (with column fallback)
+// UPDATE QUOTE
 // ---------------------------
 export async function updateQuote(id: string, fields: Partial<Quote>) {
-  return saveQuoteWithFallback("update", normalizeQuoteForDb(fields as Quote), id);
+  const payload = normalizeQuoteForDb(fields as Quote);
+
+  const { data, error } = await supabase.from("quotes").update(payload).eq("id", id).select().single();
+  if (error) {
+    console.error("Erro ao atualizar orçamento:", error);
+    return { ok: false, error };
+  }
+  return { ok: true, data: normalizeQuoteFromDb(data) as Quote };
 }
 
 // ---------------------------
@@ -143,51 +158,3 @@ function normalizeQuoteFromDb(row: any): Quote {
   };
 }
 
-/** Retry insert/update removing unknown columns on each Supabase error */
-// Cache em memória apenas — limpa ao recarregar a página
-const _badColsMemory = new Set<string>();
-
-async function saveQuoteWithFallback(
-  mode: "insert" | "update",
-  payload: Record<string, unknown>,
-  id?: string
-): Promise<{ ok: boolean; data?: Quote; error?: any }> {
-  const badCols = new Set<string>(_badColsMemory);
-  let safe = { ...payload };
-
-  // Never send a client-generated id on insert — let Supabase auto-generate it
-  if (mode === "insert") delete safe["id"];
-
-  badCols.forEach((c) => delete safe[c]);
-
-  for (let attempt = 0; attempt < 30; attempt++) {
-    const result =
-      mode === "update"
-        ? await supabase.from("quotes").update(safe).eq("id", id as any).select().single()
-        : await supabase.from("quotes").insert(safe).select().single();
-
-    if (!result.error) {
-      // Atualiza cache em memória
-      badCols.forEach((c) => _badColsMemory.add(c));
-      return { ok: true, data: normalizeQuoteFromDb((result as any).data) };
-    }
-
-    const msg = String(result.error.message || "");
-    const match =
-      msg.match(/Could not find the '([^']+)' column/i) ||
-      msg.match(/column "([^"]+)" does not exist/i);
-
-    if (match?.[1]) {
-      const col = String(match[1]);
-      console.warn(`[quotesServices] Coluna "${col}" não existe no Supabase — será ignorada. Adicione-a na tabela 'quotes'.`);
-      badCols.add(col);
-      delete safe[col];
-      continue;
-    }
-
-    console.error("Erro ao criar orçamento:", result.error);
-    return { ok: false, error: result.error };
-  }
-
-  return { ok: false, error: { message: "Não foi possível salvar o orçamento após várias tentativas." } };
-}
