@@ -466,11 +466,12 @@ const Clients: React.FC = () => {
                 </div>
               ))}
 
-              {editing?.address && !form.street && !form.city && (
+              {editing?.address && !form.street && (
                 <div className="md:col-span-2 rounded-xl bg-slate-50 border border-slate-200 px-4 py-2.5 text-sm text-slate-500">
                   Endereço atual (cadastro antigo, texto único): {editing.address}
                   <br />
-                  Preencha os campos abaixo pra separar por rua/número/bairro/cidade.
+                  Rua, número e bairro ainda não foram separados — preencha os campos abaixo.
+                  {form.city && " (a cidade já foi identificada automaticamente.)"}
                 </div>
               )}
 
