@@ -447,7 +447,7 @@ const Clients: React.FC = () => {
 
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-5xl rounded-2xl border border-blue-100 bg-white p-6 shadow-xl">
+          <div className="w-full max-w-xl rounded-2xl border border-blue-100 bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
             <h3 className="mb-6 text-xl font-bold text-slate-800">{editing ? "Editar Cliente" : "Novo Cliente"}</h3>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
