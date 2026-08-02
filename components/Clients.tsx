@@ -7,6 +7,10 @@ type Client = {
   phone: string | null;
   email: string | null;
   address: string | null;
+  street?: string | null;
+  number?: string | null;
+  neighborhood?: string | null;
+  city?: string | null;
   created_at?: string | null;
 };
 
@@ -24,6 +28,10 @@ const emptyForm: Omit<Client, "id"> = {
   phone: "",
   email: "",
   address: "",
+  street: "",
+  number: "",
+  neighborhood: "",
+  city: "",
 };
 
 // A tabela só tem uma coluna de endereço (sem rua/número/bairro separados),
@@ -87,7 +95,7 @@ const Clients: React.FC = () => {
     const term = normalizeSearch(search);
     if (!term) return clients;
     return clients.filter((c) => {
-      const haystack = normalizeSearch(`${c.name} ${c.address ?? ""}`);
+      const haystack = normalizeSearch(`${c.name} ${c.address ?? ""} ${c.city ?? ""}`);
       return haystack.includes(term);
     });
   }, [clients, search]);
@@ -111,9 +119,20 @@ const Clients: React.FC = () => {
       name: form.name,
       phone: form.phone,
       email: form.email,
-      address: [form.address, notesInput.trim() ? `Obs: ${notesInput.trim()}` : ""]
-        .filter((v) => v?.trim())
-        .join(" | "),
+      street: form.street || "",
+      number: form.number || "",
+      neighborhood: form.neighborhood || "",
+      city: form.city || "",
+      // "address" continua sendo preenchido automaticamente a partir dos
+      // campos separados — outras telas (Dashboard, Entregas por Setor)
+      // ainda leem esse texto único, então mantemos os dois em sincronia.
+      address: buildAddress({
+        street: form.street || undefined,
+        number: form.number || undefined,
+        neighborhood: form.neighborhood || undefined,
+        city: form.city || undefined,
+        notes: notesInput.trim() || undefined,
+      }),
     };
 
     if (editing) {
@@ -176,6 +195,10 @@ const Clients: React.FC = () => {
       phone: c.phone || "",
       email: c.email || "",
       address: c.address || "",
+      street: c.street || "",
+      number: c.number || "",
+      neighborhood: c.neighborhood || "",
+      city: c.city || "",
     });
     setNotesInput("");
     setIsModalOpen(true);
@@ -289,19 +312,24 @@ const Clients: React.FC = () => {
             if (!name || existingNames.has(name.toLowerCase())) { skipped++; return false; }
             return true;
           })
-          .map((r) => ({
-            name:  r[nameIdx]?.trim() || "",
-            phone: phoneIdx !== -1 ? r[phoneIdx]?.trim() : "",
-            email: emailIdx !== -1 ? r[emailIdx]?.trim() : "",
-            address: buildAddress({
-              street:       streetIdx !== -1 ? r[streetIdx] : undefined,
-              number:       numberIdx !== -1 ? r[numberIdx] : undefined,
-              neighborhood: neighborhoodIdx !== -1 ? r[neighborhoodIdx] : undefined,
-              complement:   complementIdx !== -1 ? r[complementIdx] : undefined,
-              city:         cityIdx !== -1 ? r[cityIdx] : undefined,
-              notes:        notesIdx !== -1 ? r[notesIdx] : undefined,
-            }),
-          }));
+          .map((r) => {
+            const street = streetIdx !== -1 ? r[streetIdx]?.trim() : undefined;
+            const number = numberIdx !== -1 ? r[numberIdx]?.trim() : undefined;
+            const neighborhood = neighborhoodIdx !== -1 ? r[neighborhoodIdx]?.trim() : undefined;
+            const complement = complementIdx !== -1 ? r[complementIdx]?.trim() : undefined;
+            const city = cityIdx !== -1 ? r[cityIdx]?.trim() : undefined;
+            const notes = notesIdx !== -1 ? r[notesIdx]?.trim() : undefined;
+            return {
+              name:  r[nameIdx]?.trim() || "",
+              phone: phoneIdx !== -1 ? r[phoneIdx]?.trim() : "",
+              email: emailIdx !== -1 ? r[emailIdx]?.trim() : "",
+              street: street || "",
+              number: number || "",
+              neighborhood: neighborhood || "",
+              city: city || "",
+              address: buildAddress({ street, number, neighborhood, complement, city, notes }),
+            };
+          });
 
         if (toInsert.length > 0) {
           const { error } = await supabase.from("clients").insert(toInsert);
@@ -383,13 +411,14 @@ const Clients: React.FC = () => {
                 <th className="p-3 text-left font-semibold">Nome</th>
                 <th className="p-3 text-left font-semibold">Telefone</th>
                 <th className="p-3 text-left font-semibold">Endereço</th>
+                <th className="p-3 text-left font-semibold">Cidade</th>
                 <th className="p-3 text-center font-semibold">Ações</th>
               </tr>
             </thead>
             <tbody>
               {filteredClients.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="p-8 text-center text-slate-500">
+                  <td colSpan={5} className="p-8 text-center text-slate-500">
                     {clients.length === 0 ? "Nenhum cliente cadastrado." : "Nenhum cliente encontrado para essa busca."}
                   </td>
                 </tr>
@@ -399,6 +428,7 @@ const Clients: React.FC = () => {
                     <td className="p-3 font-medium text-slate-800">{c.name}</td>
                     <td className="p-3 text-slate-700">{c.phone || "-"}</td>
                     <td className="p-3 text-slate-700">{c.address || "-"}</td>
+                    <td className="p-3 text-slate-700">{c.city || "-"}</td>
                     <td className="p-3 text-center space-x-3">
                       <button onClick={() => openEdit(c)} className="text-blue-700 hover:underline">
                         Editar
@@ -436,13 +466,48 @@ const Clients: React.FC = () => {
                 </div>
               ))}
 
+              {editing?.address && !form.street && !form.city && (
+                <div className="md:col-span-2 rounded-xl bg-slate-50 border border-slate-200 px-4 py-2.5 text-sm text-slate-500">
+                  Endereço atual (cadastro antigo, texto único): {editing.address}
+                  <br />
+                  Preencha os campos abaixo pra separar por rua/número/bairro/cidade.
+                </div>
+              )}
+
               <div className="md:col-span-2">
-                <label className="mb-1.5 block text-sm font-semibold text-slate-700">Endereço</label>
+                <label className="mb-1.5 block text-sm font-semibold text-slate-700">Rua</label>
                 <input
                   className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
-                  placeholder="Rua, número, bairro, complemento"
-                  value={form.address || ""}
-                  onChange={(e) => setForm({ ...form, address: e.target.value })}
+                  placeholder="Nome da rua"
+                  value={form.street || ""}
+                  onChange={(e) => setForm({ ...form, street: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-sm font-semibold text-slate-700">Número</label>
+                <input
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
+                  value={form.number || ""}
+                  onChange={(e) => setForm({ ...form, number: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-sm font-semibold text-slate-700">Bairro</label>
+                <input
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
+                  value={form.neighborhood || ""}
+                  onChange={(e) => setForm({ ...form, neighborhood: e.target.value })}
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1.5 block text-sm font-semibold text-slate-700">Cidade</label>
+                <input
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
+                  value={form.city || ""}
+                  onChange={(e) => setForm({ ...form, city: e.target.value })}
                 />
               </div>
 
