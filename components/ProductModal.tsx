@@ -424,9 +424,16 @@ const ProductModal: React.FC<ProductModalProps> = ({
   const [desiredProfitMargin, setDesiredProfitMargin] = useState(
     Number((product as any)?.desiredProfitMargin ?? 20)
   );
+  // input type="number" não aceita vírgula (padrão BR) como separador
+  // decimal — o navegador rejeita a digitação. Por isso a margem usa o
+  // mesmo padrão texto+sanitize já usado nos campos de dinheiro (R$).
+  const [desiredProfitMarginInput, setDesiredProfitMarginInput] = useState(
+    formatMoneyInputBR(Number((product as any)?.desiredProfitMargin ?? 20))
+  );
   const [marginByColor, setMarginByColor] = useState<Record<string, number>>(
     { ...((product as any)?.marginByColor || {}) }
   );
+  const [marginByColorInput, setMarginByColorInput] = useState<Record<string, string>>({});
   const [minProfitValue, setMinProfitValue] = useState(
     Number((product as any)?.minProfitValue ?? 0)
   );
@@ -916,16 +923,26 @@ const ProductModal: React.FC<ProductModalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productColorOptions]);
 
-  const handleMarginByColorChange = (color: string, value: string) => {
+  const handleMarginByColorChange = (color: string, rawInput: string) => {
+    const sanitized = sanitizeMoneyInputBR(rawInput);
+    setMarginByColorInput((prev) => ({ ...prev, [color]: sanitized }));
     setMarginByColor((prev) => {
       const next = { ...prev };
-      if (value.trim() === "") {
+      if (sanitized.trim() === "") {
         delete next[color];
       } else {
-        next[color] = Number(value) || 0;
+        next[color] = parseMoneyInputBR(sanitized);
       }
       return next;
     });
+  };
+
+  const handleMarginByColorBlur = (color: string) => {
+    if (marginByColor[color] == null) {
+      setMarginByColorInput((prev) => ({ ...prev, [color]: "" }));
+      return;
+    }
+    setMarginByColorInput((prev) => ({ ...prev, [color]: formatMoneyInputBR(marginByColor[color]) }));
   };
 
   const laborHoursTotal = useMemo(
@@ -1930,13 +1947,16 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     <label className="text-sm text-slate-700">
                       Margem de lucro (%)
                       <input
-                        type="number"
-                        min={0}
-                        step={0.01}
-                        value={desiredProfitMargin}
-                        onChange={(event) =>
-                          setDesiredProfitMargin(Number(event.target.value) || 0)
-                        }
+                        type="text"
+                        inputMode="decimal"
+                        value={desiredProfitMarginInput}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(event) => {
+                          const raw = sanitizeMoneyInputBR(event.target.value);
+                          setDesiredProfitMarginInput(raw);
+                          setDesiredProfitMargin(parseMoneyInputBR(raw));
+                        }}
+                        onBlur={() => setDesiredProfitMarginInput(formatMoneyInputBR(desiredProfitMargin))}
                         className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
                       />
                     </label>
@@ -1986,12 +2006,13 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           <label key={color} className="text-xs text-slate-600">
                             {color}
                             <input
-                              type="number"
-                              min={0}
-                              step={0.01}
+                              type="text"
+                              inputMode="decimal"
                               placeholder={`${getPositiveNumber(desiredProfitMargin)}`}
-                              value={marginByColor[color] ?? ""}
+                              value={marginByColorInput[color] ?? (marginByColor[color] != null ? formatMoneyInputBR(marginByColor[color]) : "")}
+                              onFocus={(e) => e.target.select()}
                               onChange={(event) => handleMarginByColorChange(color, event.target.value)}
+                              onBlur={() => handleMarginByColorBlur(color)}
                               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
                             />
                           </label>
