@@ -88,6 +88,9 @@ const Products: React.FC<ProductsProps> = ({
     fixedSalePriceByColor: normalizeMarginByColor(
       (row as any)?.fixedSalePriceByColor ?? (row as any)?.fixedsalepricebycolor ?? (row as any)?.fixed_sale_price_by_color
     ),
+    pricePerSqmByColor: normalizeMarginByColor(
+      (row as any)?.pricePerSqmByColor ?? (row as any)?.pricepersqmbycolor ?? (row as any)?.price_per_sqm_by_color
+    ),
     laborCost: Number(row?.laborCost ?? (row as any)?.laborcost ?? row?.labor_cost ?? 0),
     productionHours: Number(row?.productionHours ?? (row as any)?.productionhours ?? row?.production_hours ?? 0),
     assemblyHours: Number(row?.assemblyHours ?? (row as any)?.assemblyhours ?? row?.assembly_hours ?? 0),
@@ -207,6 +210,8 @@ const Products: React.FC<ProductsProps> = ({
         "fixed_sale_price",
         "fixedSalePriceByColor",
         "fixed_sale_price_by_color",
+        "pricePerSqmByColor",
+        "price_per_sqm_by_color",
         "referenceWidthMm",
         "reference_width_mm",
         "referenceHeightMm",
@@ -269,6 +274,9 @@ const Products: React.FC<ProductsProps> = ({
       fixedSalePrice: Number(productData.fixedSalePrice || 0),
       fixedSalePriceByColor: productData.fixedSalePriceByColor && Object.keys(productData.fixedSalePriceByColor).length > 0
         ? productData.fixedSalePriceByColor
+        : null,
+      pricePerSqmByColor: productData.pricePerSqmByColor && Object.keys(productData.pricePerSqmByColor).length > 0
+        ? productData.pricePerSqmByColor
         : null,
       laborCost: Number(productData.laborCost || 0),
       productionHours: Number(productData.productionHours || 0),

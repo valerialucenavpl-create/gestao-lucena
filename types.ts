@@ -108,6 +108,7 @@ export interface Product {
   minProfitValue?: number;
   fixedSalePrice?: number;
   fixedSalePriceByColor?: Record<string, number>;
+  pricePerSqmByColor?: Record<string, number>;
   composition: ProductCompositionItem[];
   category?: string;
   productCategory?: string;

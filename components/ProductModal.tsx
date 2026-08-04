@@ -440,6 +440,14 @@ const ProductModal: React.FC<ProductModalProps> = ({
   );
   const [priceInputByColor, setPriceInputByColor] = useState<Record<string, string>>({});
   const [editingPriceColor, setEditingPriceColor] = useState<string | null>(null);
+  // Preço de venda por m², por cor — pra produtos que variam por área (ex.:
+  // chapas de mármore). Quando preenchido, tem prioridade sobre o preço
+  // final fixo: o total passa a ser esse valor multiplicado pela área da
+  // peça informada no orçamento, em vez de um valor travado.
+  const [pricePerSqmByColor, setPricePerSqmByColor] = useState<Record<string, number>>(
+    { ...((product as any)?.pricePerSqmByColor || {}) }
+  );
+  const [sqmPriceInputByColor, setSqmPriceInputByColor] = useState<Record<string, string>>({});
   const [productionHours, setProductionHours] = useState(
     Number((product as any)?.productionHours ?? 0)
   );
@@ -1038,7 +1046,13 @@ const ProductModal: React.FC<ProductModalProps> = ({
     // Preço fixo definido manualmente PARA ESSA COR substitui o cálculo por
     // margem sempre que esse produto (nessa cor) for usado num orçamento.
     const fixedPrice = getPositiveNumber(fixedSalePriceByColor[color] || 0);
-    const effectiveSalePriceUnit = fixedPrice > 0 ? fixedPrice : salePriceUnit;
+    // Preço por m²: tem prioridade sobre o fixo — multiplica pela área do
+    // vão de referência aqui na simulação (no orçamento real, multiplica
+    // pela área da peça informada).
+    const pricePerSqm = getPositiveNumber(pricePerSqmByColor[color] || 0);
+    const referenceAreaM2 = (getPositiveNumber(referenceWidthMm) / 1000) * (getPositiveNumber(referenceHeightMm) / 1000);
+    const effectiveSalePriceUnit =
+      pricePerSqm > 0 ? pricePerSqm * referenceAreaM2 : fixedPrice > 0 ? fixedPrice : salePriceUnit;
 
     const taxValue = effectiveSalePriceUnit * (taxRate / 100);
     const commissionValue = effectiveSalePriceUnit * (commissionRate / 100);
@@ -1052,7 +1066,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
     const effectiveFinalTotal = effectiveSalePriceUnit * getPositiveInteger(quantity, 1);
 
     return {
-      colorMaterialCost, fixedCostValue, salePriceUnit, fixedPrice, effectiveSalePriceUnit,
+      colorMaterialCost, fixedCostValue, salePriceUnit, fixedPrice, pricePerSqm, effectiveSalePriceUnit,
       taxValue, commissionValue, otherVariableValue, netMarginValue, netMarginRate,
       contributionValue, contributionRate, effectiveFinalTotal,
     };
@@ -1277,6 +1291,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
       marginByColor: Object.keys(marginByColor).length > 0 ? marginByColor : undefined,
       minProfitValue: getPositiveNumber(minProfitValue),
       fixedSalePriceByColor: Object.keys(fixedSalePriceByColor).length > 0 ? fixedSalePriceByColor : undefined,
+      pricePerSqmByColor: Object.keys(pricePerSqmByColor).length > 0 ? pricePerSqmByColor : undefined,
       laborCost,
       productionHours: getPositiveNumber(productionHours),
       assemblyHours: getPositiveNumber(assemblyHours),
@@ -1917,6 +1932,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                       <input
                         type="number"
                         min={0}
+                        step={0.01}
                         value={desiredProfitMargin}
                         onChange={(event) =>
                           setDesiredProfitMargin(Number(event.target.value) || 0)
@@ -1972,6 +1988,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                             <input
                               type="number"
                               min={0}
+                              step={0.01}
                               placeholder={`${getPositiveNumber(desiredProfitMargin)}`}
                               value={marginByColor[color] ?? ""}
                               onChange={(event) => handleMarginByColorChange(color, event.target.value)}
@@ -2043,7 +2060,12 @@ const ProductModal: React.FC<ProductModalProps> = ({
                         <div className="flex items-center justify-between rounded-2xl bg-blue-50 px-4 py-3 text-blue-900">
                           <span>
                             Preco sugerido por unidade
-                            {pricing.fixedPrice > 0 && (
+                            {pricing.pricePerSqm > 0 ? (
+                              <span className="block text-[11px] font-normal text-blue-700">
+                                Preço real é {formatCurrency(pricing.pricePerSqm)}/m² — no vão de referência acima
+                                isso dá {formatCurrency(pricing.effectiveSalePriceUnit)}; a margem abaixo já considera esse valor.
+                              </span>
+                            ) : pricing.fixedPrice > 0 && (
                               <span className="block text-[11px] font-normal text-blue-700">
                                 Preço real (definido manualmente) é {formatCurrency(pricing.fixedPrice)} — a margem abaixo já considera esse valor.
                               </span>
@@ -2065,7 +2087,37 @@ const ProductModal: React.FC<ProductModalProps> = ({
                         </div>
                       </div>
 
-                      <div className="mt-5 rounded-[24px] bg-slate-900 px-5 py-4 text-white">
+                      <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                        <div>
+                          <span className="text-sm font-semibold text-emerald-900">Preco por m² (opcional)</span>
+                          <p className="text-[11px] text-emerald-700">
+                            Se preenchido, o total no orcamento vira esse valor multiplicado pela area da peca —
+                            tem prioridade sobre o Preco Final fixo abaixo.
+                          </p>
+                        </div>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={sqmPriceInputByColor[color] ?? formatMoneyInputBR(pricePerSqmByColor[color] || 0)}
+                          onFocus={(e) => e.target.select()}
+                          onChange={(e) =>
+                            setSqmPriceInputByColor((prev) => ({ ...prev, [color]: sanitizeMoneyInputBR(e.target.value) }))
+                          }
+                          onBlur={() => {
+                            const val = parseMoneyInputBR(sqmPriceInputByColor[color] ?? "");
+                            setPricePerSqmByColor((prev) => {
+                              const next = { ...prev };
+                              if (val > 0) next[color] = val;
+                              else delete next[color];
+                              return next;
+                            });
+                            setSqmPriceInputByColor((prev) => ({ ...prev, [color]: formatMoneyInputBR(val) }));
+                          }}
+                          className="w-32 shrink-0 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-right text-sm font-semibold text-emerald-900"
+                        />
+                      </div>
+
+                      <div className="mt-3 rounded-[24px] bg-slate-900 px-5 py-4 text-white">
                         <div className="flex items-center justify-between">
                           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
                             Preco final{color ? ` — ${color}` : ""}
@@ -2134,7 +2186,14 @@ const ProductModal: React.FC<ProductModalProps> = ({
                             <p className="mt-1 text-sm text-slate-300">
                               Margem líquida real: {formatCurrency(pricing.netMarginValue)} ({pricing.netMarginRate.toFixed(2)}%)
                             </p>
-                            {pricing.fixedPrice > 0 && (
+                            {pricing.pricePerSqm > 0 && (
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <span className="rounded-full bg-emerald-400/20 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">
+                                  Calculado por m² ({formatCurrency(pricing.pricePerSqm)}/m²)
+                                </span>
+                              </div>
+                            )}
+                            {pricing.pricePerSqm === 0 && pricing.fixedPrice > 0 && (
                               <div className="mt-2 flex flex-wrap items-center gap-2">
                                 <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
                                   Ajustado manualmente

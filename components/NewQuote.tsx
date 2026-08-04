@@ -847,6 +847,17 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     const costWithFixed = fixedRate > 0 ? totalCostOfGoods / (1 - fixedRate) : totalCostOfGoods;
     const fixedCostUnit = costWithFixed - totalCostOfGoods;
 
+    // Preço por m² (definido manualmente por cor): pra produtos que variam
+    // por área (ex.: chapas de mármore), onde a usuária sabe o preço de
+    // venda por metro quadrado daquela cor e quer que o total multiplique
+    // pela área da peça, em vez de um valor fixo travado.
+    const pricePerSqmEntry = product.pricePerSqmByColor
+      ? Object.entries(product.pricePerSqmByColor).find(
+          ([key]) => normalizeText(key) === normalizeText(color)
+        )
+      : undefined;
+    const pricePerSqm = Number(pricePerSqmEntry?.[1] ?? 0);
+
     // Preço final fixo (definido manualmente no cadastro do produto, por
     // cor): quando configurado, substitui todo o cálculo por % + piso de
     // lucro mínimo. Útil para acessórios (ex.: roldana) onde a usuária
@@ -860,7 +871,10 @@ const NewQuote: React.FC<NewQuoteProps> = ({
       : undefined;
     const fixedSalePrice = Number(fixedPriceByColorEntry?.[1] ?? product.fixedSalePrice ?? 0);
     let unitPrice: number;
-    if (fixedSalePrice > 0) {
+    if (pricePerSqm > 0) {
+      const areaM2 = (effectiveWidth / 1000) * (effectiveHeight / 1000);
+      unitPrice = pricePerSqm * areaM2;
+    } else if (fixedSalePrice > 0) {
       unitPrice = fixedSalePrice;
     } else {
       // Passo 2: aplica variáveis + lucro sobre o custo absorvido
