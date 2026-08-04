@@ -2108,34 +2108,33 @@ const ProductModal: React.FC<ProductModalProps> = ({
                         </div>
                       </div>
 
-                      <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-                        <div>
-                          <span className="text-sm font-semibold text-emerald-900">Preco por m² (opcional)</span>
-                          <p className="text-[11px] text-emerald-700">
-                            Se preenchido, o total no orcamento vira esse valor multiplicado pela area da peca —
-                            tem prioridade sobre o Preco Final fixo abaixo.
-                          </p>
+                      <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2.5">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-sm font-semibold text-emerald-900">Preço por m² (opcional)</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={sqmPriceInputByColor[color] ?? formatMoneyInputBR(pricePerSqmByColor[color] || 0)}
+                            onFocus={(e) => e.target.select()}
+                            onChange={(e) =>
+                              setSqmPriceInputByColor((prev) => ({ ...prev, [color]: sanitizeMoneyInputBR(e.target.value) }))
+                            }
+                            onBlur={() => {
+                              const val = parseMoneyInputBR(sqmPriceInputByColor[color] ?? "");
+                              setPricePerSqmByColor((prev) => {
+                                const next = { ...prev };
+                                if (val > 0) next[color] = val;
+                                else delete next[color];
+                                return next;
+                              });
+                              setSqmPriceInputByColor((prev) => ({ ...prev, [color]: formatMoneyInputBR(val) }));
+                            }}
+                            className="w-24 shrink-0 rounded-lg border border-emerald-300 bg-white px-2 py-1.5 text-right text-sm font-semibold text-emerald-900"
+                          />
                         </div>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={sqmPriceInputByColor[color] ?? formatMoneyInputBR(pricePerSqmByColor[color] || 0)}
-                          onFocus={(e) => e.target.select()}
-                          onChange={(e) =>
-                            setSqmPriceInputByColor((prev) => ({ ...prev, [color]: sanitizeMoneyInputBR(e.target.value) }))
-                          }
-                          onBlur={() => {
-                            const val = parseMoneyInputBR(sqmPriceInputByColor[color] ?? "");
-                            setPricePerSqmByColor((prev) => {
-                              const next = { ...prev };
-                              if (val > 0) next[color] = val;
-                              else delete next[color];
-                              return next;
-                            });
-                            setSqmPriceInputByColor((prev) => ({ ...prev, [color]: formatMoneyInputBR(val) }));
-                          }}
-                          className="w-32 shrink-0 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-right text-sm font-semibold text-emerald-900"
-                        />
+                        <p className="mt-1 text-[11px] text-emerald-700">
+                          Multiplica pela área da peça no orçamento; tem prioridade sobre o Preço Final fixo abaixo.
+                        </p>
                       </div>
 
                       <div className="mt-3 rounded-[24px] bg-slate-900 px-5 py-4 text-white">
