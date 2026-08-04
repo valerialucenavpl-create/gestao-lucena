@@ -507,6 +507,11 @@ const ProductModal: React.FC<ProductModalProps> = ({
   const [referenceHeightMm, setReferenceHeightMm] = useState(
     Number((product as any)?.referenceHeightMm ?? 2000)
   );
+  // "" = usa a variante configurada em cada linha da composição (padrão
+  // atual). Quando uma cor é escolhida aqui, toda a simulação (custo,
+  // preço, margem) passa a usar essa cor em vez da variante de cada linha,
+  // pra comparar como fica o produto em outra cor sem alterar a composição.
+  const [simulationColor, setSimulationColor] = useState<string>("");
   const [widthIncrement, setWidthIncrement] = useState(
     Number((product as any)?.widthIncrement ?? 0)
   );
@@ -843,7 +848,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
       composition.map((item) => {
         const material = materialById.get(item.materialId);
         const hydratedItem = hydrateCompositionItem(item, material);
-        const unitCost = getMaterialCost(hydratedItem.materialId, hydratedItem.variantName);
+        const unitCost = getMaterialCost(hydratedItem.materialId, simulationColor || hydratedItem.variantName);
         const breakdown = material
           ? getCompositionLineBreakdown(
               hydratedItem,
@@ -861,7 +866,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
           breakdown,
         };
       }),
-    [composition, getMaterialCost, materialById, referenceHeightMm, referenceWidthMm]
+    [composition, getMaterialCost, materialById, referenceHeightMm, referenceWidthMm, simulationColor]
   );
 
   const materialCost = useMemo(
@@ -987,8 +992,14 @@ const ProductModal: React.FC<ProductModalProps> = ({
   const fixedFrac = Math.min(getPositiveNumber(fixedCostRate) / 100, 0.99);
   const costWithFixed = fixedFrac > 0 ? baseOperationalCost / (1 - fixedFrac) : baseOperationalCost;
   const fixedCostValue = costWithFixed - baseOperationalCost;
-  // Passo 2: aplica variáveis + lucro sobre o custo já absorvido
-  const variableAndProfitRate = (getPositiveNumber(desiredProfitMargin) + taxRate + commissionRate + otherVariableRate) / 100;
+  // Passo 2: aplica variáveis + lucro sobre o custo já absorvido — quando
+  // simulando uma cor específica, usa a margem daquela cor (se cadastrada),
+  // senão cai na margem geral.
+  const simulatedMargin =
+    simulationColor && marginByColor[simulationColor] != null
+      ? marginByColor[simulationColor]
+      : desiredProfitMargin;
+  const variableAndProfitRate = (getPositiveNumber(simulatedMargin) + taxRate + commissionRate + otherVariableRate) / 100;
   const salePriceUnit =
     variableAndProfitRate < 0.99
       ? costWithFixed / (1 - variableAndProfitRate)
@@ -1572,6 +1583,41 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     <p className="mt-2 text-xs text-slate-500">
                       Esses valores servem para testar a formula antes de salvar o produto.
                     </p>
+
+                    {productColorOptions.length > 0 && (
+                      <div className="mt-4 border-t border-slate-200 pt-4">
+                        <label className="text-sm text-slate-700">
+                          Simular em outra cor
+                          <select
+                            value={simulationColor}
+                            onChange={(event) => setSimulationColor(event.target.value)}
+                            className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900"
+                          >
+                            <option value="">Como configurado na composição</option>
+                            {productColorOptions.map((color) => (
+                              <option key={color} value={color}>{color}</option>
+                            ))}
+                          </select>
+                        </label>
+
+                        {simulationColor && (
+                          <label className="mt-3 block text-sm text-slate-700">
+                            Margem de lucro para {simulationColor} (%)
+                            <input
+                              type="number"
+                              min={0}
+                              placeholder={`${getPositiveNumber(desiredProfitMargin)} (margem geral)`}
+                              value={marginByColor[simulationColor] ?? ""}
+                              onChange={(event) => handleMarginByColorChange(simulationColor, event.target.value)}
+                              className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900"
+                            />
+                            <span className="mt-1 block text-xs text-slate-500">
+                              O custo, preço e margem abaixo já refletem essa cor. Deixe em branco pra usar a margem geral.
+                            </span>
+                          </label>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
                 )}
