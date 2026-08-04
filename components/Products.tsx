@@ -85,6 +85,9 @@ const Products: React.FC<ProductsProps> = ({
     fixedSalePrice: Number(
       row?.fixedSalePrice ?? (row as any)?.fixedsaleprice ?? row?.fixed_sale_price ?? 0
     ),
+    fixedSalePriceByColor: normalizeMarginByColor(
+      (row as any)?.fixedSalePriceByColor ?? (row as any)?.fixedsalepricebycolor ?? (row as any)?.fixed_sale_price_by_color
+    ),
     laborCost: Number(row?.laborCost ?? (row as any)?.laborcost ?? row?.labor_cost ?? 0),
     productionHours: Number(row?.productionHours ?? (row as any)?.productionhours ?? row?.production_hours ?? 0),
     assemblyHours: Number(row?.assemblyHours ?? (row as any)?.assemblyhours ?? row?.assembly_hours ?? 0),
@@ -202,6 +205,8 @@ const Products: React.FC<ProductsProps> = ({
         "min_profit_value",
         "fixedSalePrice",
         "fixed_sale_price",
+        "fixedSalePriceByColor",
+        "fixed_sale_price_by_color",
         "referenceWidthMm",
         "reference_width_mm",
         "referenceHeightMm",
@@ -262,6 +267,9 @@ const Products: React.FC<ProductsProps> = ({
         : null,
       minProfitValue: Number(productData.minProfitValue || 0),
       fixedSalePrice: Number(productData.fixedSalePrice || 0),
+      fixedSalePriceByColor: productData.fixedSalePriceByColor && Object.keys(productData.fixedSalePriceByColor).length > 0
+        ? productData.fixedSalePriceByColor
+        : null,
       laborCost: Number(productData.laborCost || 0),
       productionHours: Number(productData.productionHours || 0),
       assemblyHours: Number(productData.assemblyHours || 0),

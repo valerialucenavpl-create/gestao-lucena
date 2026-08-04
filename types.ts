@@ -107,6 +107,7 @@ export interface Product {
   marginByColor?: Record<string, number>;
   minProfitValue?: number;
   fixedSalePrice?: number;
+  fixedSalePriceByColor?: Record<string, number>;
   composition: ProductCompositionItem[];
   category?: string;
   productCategory?: string;

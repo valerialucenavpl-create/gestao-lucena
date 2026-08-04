@@ -847,11 +847,18 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     const costWithFixed = fixedRate > 0 ? totalCostOfGoods / (1 - fixedRate) : totalCostOfGoods;
     const fixedCostUnit = costWithFixed - totalCostOfGoods;
 
-    // Preço final fixo (definido manualmente no cadastro do produto): quando
-    // configurado, substitui todo o cálculo por % + piso de lucro mínimo.
-    // Útil para acessórios (ex.: roldana) onde a usuária quer cobrar um
-    // valor redondo em vez do resultado quebrado da margem percentual.
-    const fixedSalePrice = Number(product.fixedSalePrice || 0);
+    // Preço final fixo (definido manualmente no cadastro do produto, por
+    // cor): quando configurado, substitui todo o cálculo por % + piso de
+    // lucro mínimo. Útil para acessórios (ex.: roldana) onde a usuária
+    // quer cobrar um valor redondo em vez do resultado quebrado da margem
+    // percentual. "fixedSalePrice" (sem cor) é o campo antigo, mantido só
+    // como fallback pra produtos que ainda não foram migrados por cor.
+    const fixedPriceByColorEntry = product.fixedSalePriceByColor
+      ? Object.entries(product.fixedSalePriceByColor).find(
+          ([key]) => normalizeText(key) === normalizeText(color)
+        )
+      : undefined;
+    const fixedSalePrice = Number(fixedPriceByColorEntry?.[1] ?? product.fixedSalePrice ?? 0);
     let unitPrice: number;
     if (fixedSalePrice > 0) {
       unitPrice = fixedSalePrice;

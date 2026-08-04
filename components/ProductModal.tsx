@@ -433,13 +433,13 @@ const ProductModal: React.FC<ProductModalProps> = ({
   const [minProfitValueInput, setMinProfitValueInput] = useState(
     formatMoneyInputBR(Number((product as any)?.minProfitValue ?? 0))
   );
-  const [fixedSalePrice, setFixedSalePrice] = useState(
-    Number((product as any)?.fixedSalePrice ?? 0)
+  // Preço final travado manualmente, agora por cor — cada cor pode ter seu
+  // próprio valor fixo, em vez de um único preço pra o produto inteiro.
+  const [fixedSalePriceByColor, setFixedSalePriceByColor] = useState<Record<string, number>>(
+    { ...((product as any)?.fixedSalePriceByColor || {}) }
   );
-  const [fixedSalePriceInput, setFixedSalePriceInput] = useState(
-    formatMoneyInputBR(Number((product as any)?.fixedSalePrice ?? 0))
-  );
-  const [isEditingFinalPrice, setIsEditingFinalPrice] = useState(false);
+  const [priceInputByColor, setPriceInputByColor] = useState<Record<string, string>>({});
+  const [editingPriceColor, setEditingPriceColor] = useState<string | null>(null);
   const [productionHours, setProductionHours] = useState(
     Number((product as any)?.productionHours ?? 0)
   );
@@ -507,11 +507,6 @@ const ProductModal: React.FC<ProductModalProps> = ({
   const [referenceHeightMm, setReferenceHeightMm] = useState(
     Number((product as any)?.referenceHeightMm ?? 2000)
   );
-  // "" = usa a variante configurada em cada linha da composição (padrão
-  // atual). Quando uma cor é escolhida aqui, toda a simulação (custo,
-  // preço, margem) passa a usar essa cor em vez da variante de cada linha,
-  // pra comparar como fica o produto em outra cor sem alterar a composição.
-  const [simulationColor, setSimulationColor] = useState<string>("");
   const [widthIncrement, setWidthIncrement] = useState(
     Number((product as any)?.widthIncrement ?? 0)
   );
@@ -848,7 +843,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
       composition.map((item) => {
         const material = materialById.get(item.materialId);
         const hydratedItem = hydrateCompositionItem(item, material);
-        const unitCost = getMaterialCost(hydratedItem.materialId, simulationColor || hydratedItem.variantName);
+        const unitCost = getMaterialCost(hydratedItem.materialId, hydratedItem.variantName);
         const breakdown = material
           ? getCompositionLineBreakdown(
               hydratedItem,
@@ -866,7 +861,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
           breakdown,
         };
       }),
-    [composition, getMaterialCost, materialById, referenceHeightMm, referenceWidthMm, simulationColor]
+    [composition, getMaterialCost, materialById, referenceHeightMm, referenceWidthMm]
   );
 
   const materialCost = useMemo(
@@ -896,6 +891,22 @@ const ProductModal: React.FC<ProductModalProps> = ({
     });
     return names.sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
   }, [compositionEntries]);
+
+  // Migração: produtos antigos tinham um único "fixedSalePrice" pra todas as
+  // cores. Na primeira vez que as cores ficam disponíveis, se ainda não há
+  // nenhum valor por cor salvo, usa o preço antigo como ponto de partida
+  // pra todas as cores (a usuária ajusta cada uma depois, se precisar).
+  useEffect(() => {
+    const legacyPrice = Number((product as any)?.fixedSalePrice || 0);
+    if (legacyPrice <= 0) return;
+    if (Object.keys(fixedSalePriceByColor).length > 0) return;
+    if (productColorOptions.length === 0) return;
+
+    const seeded: Record<string, number> = {};
+    productColorOptions.forEach((color) => { seeded[color] = legacyPrice; });
+    setFixedSalePriceByColor(seeded);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productColorOptions]);
 
   const handleMarginByColorChange = (color: string, value: string) => {
     setMarginByColor((prev) => {
@@ -986,45 +997,66 @@ const ProductModal: React.FC<ProductModalProps> = ({
     [otherVariableExpenses]
   );
 
-  const baseOperationalCost = materialCost + laborCost;
-  const totalCostBeforeMarkup = baseOperationalCost;
   // Passo 1: absorve custo fixo direto na base de custo (método planilha Excel)
   const fixedFrac = Math.min(getPositiveNumber(fixedCostRate) / 100, 0.99);
-  const costWithFixed = fixedFrac > 0 ? baseOperationalCost / (1 - fixedFrac) : baseOperationalCost;
-  const fixedCostValue = costWithFixed - baseOperationalCost;
-  // Passo 2: aplica variáveis + lucro sobre o custo já absorvido — quando
-  // simulando uma cor específica, usa a margem daquela cor (se cadastrada),
-  // senão cai na margem geral.
-  const simulatedMargin =
-    simulationColor && marginByColor[simulationColor] != null
-      ? marginByColor[simulationColor]
-      : desiredProfitMargin;
-  const variableAndProfitRate = (getPositiveNumber(simulatedMargin) + taxRate + commissionRate + otherVariableRate) / 100;
-  const salePriceUnit =
-    variableAndProfitRate < 0.99
-      ? costWithFixed / (1 - variableAndProfitRate)
-      : costWithFixed;
-  // Quando há preço fixo definido manualmente, a margem/lucro exibidos abaixo
-  // passam a refletir esse valor real (o que de fato será cobrado), em vez do
-  // preço teórico calculado por %. Assim o produto continua mostrando quanto
-  // de lucro ele realmente dá, mesmo ignorando o cálculo automático.
-  const effectiveSalePriceUnit = fixedSalePrice > 0 ? fixedSalePrice : salePriceUnit;
-  const taxValue = effectiveSalePriceUnit * (taxRate / 100);
-  const commissionValue = effectiveSalePriceUnit * (commissionRate / 100);
-  const otherVariableValue = effectiveSalePriceUnit * (otherVariableRate / 100);
-  const netMarginValue =
-    effectiveSalePriceUnit -
-    totalCostBeforeMarkup -
-    taxValue -
-    commissionValue -
-    otherVariableValue -
-    fixedCostValue;
-  const netMarginRate = effectiveSalePriceUnit > 0 ? (netMarginValue / effectiveSalePriceUnit) * 100 : 0;
-  const contributionValue =
-    effectiveSalePriceUnit - materialCost - taxValue - commissionValue - otherVariableValue - fixedCostValue;
-  const contributionRate =
-    effectiveSalePriceUnit > 0 ? (contributionValue / effectiveSalePriceUnit) * 100 : 0;
-  const effectiveFinalTotal = effectiveSalePriceUnit * getPositiveInteger(quantity, 1);
+
+  // Custo de material usando a variante de UMA cor específica em vez da
+  // configurada em cada linha da composição — é o que permite mostrar um
+  // bloco de precificação completo por cor (a mão de obra continua igual
+  // pra todas, só o material muda).
+  const materialCostForColor = (color: string): number =>
+    composition.reduce((sum, item) => {
+      const material = materialById.get(item.materialId);
+      if (!material) return sum;
+      const hydratedItem = hydrateCompositionItem(item, material);
+      const unitCost = getMaterialCost(hydratedItem.materialId, color || hydratedItem.variantName);
+      const breakdown = getCompositionLineBreakdown(
+        hydratedItem,
+        material,
+        unitCost,
+        getPositiveNumber(referenceWidthMm),
+        getPositiveNumber(referenceHeightMm)
+      );
+      return sum + (breakdown?.totalCost || 0);
+    }, 0);
+
+  // Lista de cores a exibir: uma por variante de cor usada na composição, ou
+  // um único bloco "sem cor" pra produtos sem variação (ex.: acessórios).
+  const colorsToShow = productColorOptions.length > 0 ? productColorOptions : [""];
+
+  const computeColorPricing = (color: string) => {
+    const colorMaterialCost = color ? materialCostForColor(color) : materialCost;
+    const baseOperationalCost = colorMaterialCost + laborCost;
+    const costWithFixed = fixedFrac > 0 ? baseOperationalCost / (1 - fixedFrac) : baseOperationalCost;
+    const fixedCostValue = costWithFixed - baseOperationalCost;
+
+    const marginPercent = (color && marginByColor[color] != null) ? marginByColor[color] : desiredProfitMargin;
+    const variableAndProfitRate = (getPositiveNumber(marginPercent) + taxRate + commissionRate + otherVariableRate) / 100;
+    const salePriceUnit =
+      variableAndProfitRate < 0.99 ? costWithFixed / (1 - variableAndProfitRate) : costWithFixed;
+
+    // Preço fixo definido manualmente PARA ESSA COR substitui o cálculo por
+    // margem sempre que esse produto (nessa cor) for usado num orçamento.
+    const fixedPrice = getPositiveNumber(fixedSalePriceByColor[color] || 0);
+    const effectiveSalePriceUnit = fixedPrice > 0 ? fixedPrice : salePriceUnit;
+
+    const taxValue = effectiveSalePriceUnit * (taxRate / 100);
+    const commissionValue = effectiveSalePriceUnit * (commissionRate / 100);
+    const otherVariableValue = effectiveSalePriceUnit * (otherVariableRate / 100);
+    const netMarginValue =
+      effectiveSalePriceUnit - baseOperationalCost - taxValue - commissionValue - otherVariableValue - fixedCostValue;
+    const netMarginRate = effectiveSalePriceUnit > 0 ? (netMarginValue / effectiveSalePriceUnit) * 100 : 0;
+    const contributionValue =
+      effectiveSalePriceUnit - colorMaterialCost - taxValue - commissionValue - otherVariableValue - fixedCostValue;
+    const contributionRate = effectiveSalePriceUnit > 0 ? (contributionValue / effectiveSalePriceUnit) * 100 : 0;
+    const effectiveFinalTotal = effectiveSalePriceUnit * getPositiveInteger(quantity, 1);
+
+    return {
+      colorMaterialCost, fixedCostValue, salePriceUnit, fixedPrice, effectiveSalePriceUnit,
+      taxValue, commissionValue, otherVariableValue, netMarginValue, netMarginRate,
+      contributionValue, contributionRate, effectiveFinalTotal,
+    };
+  };
 
   const lineOptions = useMemo(() => {
     const uniqueLines = Array.from(
@@ -1244,7 +1276,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
       desiredProfitMargin: getPositiveNumber(desiredProfitMargin),
       marginByColor: Object.keys(marginByColor).length > 0 ? marginByColor : undefined,
       minProfitValue: getPositiveNumber(minProfitValue),
-      fixedSalePrice: getPositiveNumber(fixedSalePrice),
+      fixedSalePriceByColor: Object.keys(fixedSalePriceByColor).length > 0 ? fixedSalePriceByColor : undefined,
       laborCost,
       productionHours: getPositiveNumber(productionHours),
       assemblyHours: getPositiveNumber(assemblyHours),
@@ -1583,41 +1615,6 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     <p className="mt-2 text-xs text-slate-500">
                       Esses valores servem para testar a formula antes de salvar o produto.
                     </p>
-
-                    {productColorOptions.length > 0 && (
-                      <div className="mt-4 border-t border-slate-200 pt-4">
-                        <label className="text-sm text-slate-700">
-                          Simular em outra cor
-                          <select
-                            value={simulationColor}
-                            onChange={(event) => setSimulationColor(event.target.value)}
-                            className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900"
-                          >
-                            <option value="">Como configurado na composição</option>
-                            {productColorOptions.map((color) => (
-                              <option key={color} value={color}>{color}</option>
-                            ))}
-                          </select>
-                        </label>
-
-                        {simulationColor && (
-                          <label className="mt-3 block text-sm text-slate-700">
-                            Margem de lucro para {simulationColor} (%)
-                            <input
-                              type="number"
-                              min={0}
-                              placeholder={`${getPositiveNumber(desiredProfitMargin)} (margem geral)`}
-                              value={marginByColor[simulationColor] ?? ""}
-                              onChange={(event) => handleMarginByColorChange(simulationColor, event.target.value)}
-                              className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900"
-                            />
-                            <span className="mt-1 block text-xs text-slate-500">
-                              O custo, preço e margem abaixo já refletem essa cor. Deixe em branco pra usar a margem geral.
-                            </span>
-                          </label>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
                 )}
@@ -2004,151 +2001,169 @@ const ProductModal: React.FC<ProductModalProps> = ({
                   </div>
                 </div>
 
-                <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                  <div className="space-y-3 text-sm text-slate-700">
-                    <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-                      <span>Custo materia-prima</span>
-                      <strong>{formatCurrency(materialCost)}</strong>
-                    </div>
-                    <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-                      <span>Mao de obra ({laborHoursTotal.toFixed(2)} h)</span>
-                      <strong>{formatCurrency(laborCost)}</strong>
-                    </div>
-                    <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-                      <span>Impostos ({taxRate.toFixed(2)}%)</span>
-                      <strong>{formatCurrency(taxValue)}</strong>
-                    </div>
-                    <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-                      <span>Comissao vendedora ({commissionRate.toFixed(2)}%)</span>
-                      <strong>{formatCurrency(commissionValue)}</strong>
-                    </div>
-                    {otherVariableExpenses.map((expense) => {
-                      const rate = Number(expense.value || 0);
-                      const val = effectiveSalePriceUnit * (rate / 100);
-                      return (
-                        <div key={expense.id} className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-                          <span>{expense.name} ({rate.toFixed(2)}%)</span>
-                          <strong>{formatCurrency(val)}</strong>
-                        </div>
-                      );
-                    })}
-                    <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-                      <span>Custos fixos ({fixedCostRate.toFixed(2)}%)</span>
-                      <strong>{formatCurrency(fixedCostValue)}</strong>
-                    </div>
-                    <div className="flex items-center justify-between rounded-2xl bg-blue-50 px-4 py-3 text-blue-900">
-                      <span>
-                        Preco sugerido por unidade
-                        {fixedSalePrice > 0 && (
-                          <span className="block text-[11px] font-normal text-blue-700">
-                            Preço real (definido manualmente) é {formatCurrency(fixedSalePrice)} — a margem abaixo já considera esse valor.
-                          </span>
-                        )}
-                      </span>
-                      <strong>{formatCurrency(salePriceUnit)}</strong>
-                    </div>
-                    <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-                      <span>Margem liquida</span>
-                      <strong>
-                        {formatCurrency(netMarginValue)} ({netMarginRate.toFixed(2)}%)
-                      </strong>
-                    </div>
-                    <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-                      <span>Margem de contribuicao</span>
-                      <strong>
-                        {formatCurrency(contributionValue)} ({contributionRate.toFixed(2)}%)
-                      </strong>
-                    </div>
-                  </div>
-
-                  <div className="mt-5 rounded-[24px] bg-slate-900 px-5 py-4 text-white">
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
-                        Preco final
-                      </p>
-                      {!isEditingFinalPrice && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFixedSalePriceInput(
-                              formatMoneyInputBR(fixedSalePrice > 0 ? fixedSalePrice : salePriceUnit)
-                            );
-                            setIsEditingFinalPrice(true);
-                          }}
-                          className="text-xs font-semibold text-primary-300 underline hover:text-primary-200"
-                        >
-                          Editar
-                        </button>
+                {colorsToShow.map((color) => {
+                  const pricing = computeColorPricing(color);
+                  const isEditingThis = editingPriceColor === color;
+                  return (
+                    <div key={color || "__default__"} className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                      {color && (
+                        <p className="mb-3 text-sm font-bold uppercase tracking-wide text-primary-700">{color}</p>
                       )}
-                    </div>
-
-                    {isEditingFinalPrice ? (
-                      <div className="mt-2 space-y-2">
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          autoFocus
-                          value={fixedSalePriceInput}
-                          onFocus={(e) => e.target.select()}
-                          onChange={(e) => setFixedSalePriceInput(sanitizeMoneyInputBR(e.target.value))}
-                          className="w-full rounded-xl border border-slate-600 bg-slate-800 px-4 py-2 text-2xl font-semibold text-white"
-                        />
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setFixedSalePrice(parseMoneyInputBR(fixedSalePriceInput));
-                              setIsEditingFinalPrice(false);
-                            }}
-                            className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-semibold hover:bg-primary-500"
-                          >
-                            Salvar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setIsEditingFinalPrice(false)}
-                            className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-slate-800"
-                          >
-                            Cancelar
-                          </button>
+                      <div className="space-y-3 text-sm text-slate-700">
+                        <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                          <span>Custo materia-prima</span>
+                          <strong>{formatCurrency(pricing.colorMaterialCost)}</strong>
+                        </div>
+                        <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                          <span>Mao de obra ({laborHoursTotal.toFixed(2)} h)</span>
+                          <strong>{formatCurrency(laborCost)}</strong>
+                        </div>
+                        <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                          <span>Impostos ({taxRate.toFixed(2)}%)</span>
+                          <strong>{formatCurrency(pricing.taxValue)}</strong>
+                        </div>
+                        <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                          <span>Comissao vendedora ({commissionRate.toFixed(2)}%)</span>
+                          <strong>{formatCurrency(pricing.commissionValue)}</strong>
+                        </div>
+                        {otherVariableExpenses.map((expense) => {
+                          const rate = Number(expense.value || 0);
+                          const val = pricing.effectiveSalePriceUnit * (rate / 100);
+                          return (
+                            <div key={expense.id} className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                              <span>{expense.name} ({rate.toFixed(2)}%)</span>
+                              <strong>{formatCurrency(val)}</strong>
+                            </div>
+                          );
+                        })}
+                        <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                          <span>Custos fixos ({fixedCostRate.toFixed(2)}%)</span>
+                          <strong>{formatCurrency(pricing.fixedCostValue)}</strong>
+                        </div>
+                        <div className="flex items-center justify-between rounded-2xl bg-blue-50 px-4 py-3 text-blue-900">
+                          <span>
+                            Preco sugerido por unidade
+                            {pricing.fixedPrice > 0 && (
+                              <span className="block text-[11px] font-normal text-blue-700">
+                                Preço real (definido manualmente) é {formatCurrency(pricing.fixedPrice)} — a margem abaixo já considera esse valor.
+                              </span>
+                            )}
+                          </span>
+                          <strong>{formatCurrency(pricing.salePriceUnit)}</strong>
+                        </div>
+                        <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                          <span>Margem liquida</span>
+                          <strong>
+                            {formatCurrency(pricing.netMarginValue)} ({pricing.netMarginRate.toFixed(2)}%)
+                          </strong>
+                        </div>
+                        <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                          <span>Margem de contribuicao</span>
+                          <strong>
+                            {formatCurrency(pricing.contributionValue)} ({pricing.contributionRate.toFixed(2)}%)
+                          </strong>
                         </div>
                       </div>
-                    ) : (
-                      <>
-                        <p className="mt-2 text-3xl font-semibold">
-                          {formatCurrency(effectiveFinalTotal)}
-                        </p>
-                        <p className="mt-1 text-sm text-slate-300">
-                          Considerando {getPositiveInteger(quantity, 1)} unidade(s) vendida(s).
-                        </p>
-                        <p className="mt-1 text-sm text-slate-300">
-                          Margem líquida real: {formatCurrency(netMarginValue)} ({netMarginRate.toFixed(2)}%)
-                        </p>
-                        {fixedSalePrice > 0 && (
-                          <div className="mt-2 flex flex-wrap items-center gap-2">
-                            <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
-                              Ajustado manualmente
-                            </span>
+
+                      <div className="mt-5 rounded-[24px] bg-slate-900 px-5 py-4 text-white">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
+                            Preco final{color ? ` — ${color}` : ""}
+                          </p>
+                          {!isEditingThis && (
                             <button
                               type="button"
                               onClick={() => {
-                                setFixedSalePrice(0);
-                                setFixedSalePriceInput(formatMoneyInputBR(0));
+                                setPriceInputByColor((prev) => ({
+                                  ...prev,
+                                  [color]: formatMoneyInputBR(pricing.fixedPrice > 0 ? pricing.fixedPrice : pricing.salePriceUnit),
+                                }));
+                                setEditingPriceColor(color);
                               }}
-                              className="text-[11px] font-semibold text-slate-300 underline hover:text-white"
+                              className="text-xs font-semibold text-primary-300 underline hover:text-primary-200"
                             >
-                              Usar cálculo automático
+                              Editar
                             </button>
-                          </div>
-                        )}
-                      </>
-                    )}
+                          )}
+                        </div>
 
-                    <p className="mt-3 text-[11px] text-slate-400">
-                      Ao definir um valor aqui, ele substitui o cálculo automático por margem sempre que esse produto for usado num orçamento.
-                    </p>
-                  </div>
-                </div>
+                        {isEditingThis ? (
+                          <div className="mt-2 space-y-2">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              autoFocus
+                              value={priceInputByColor[color] ?? ""}
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) =>
+                                setPriceInputByColor((prev) => ({ ...prev, [color]: sanitizeMoneyInputBR(e.target.value) }))
+                              }
+                              className="w-full rounded-xl border border-slate-600 bg-slate-800 px-4 py-2 text-2xl font-semibold text-white"
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setFixedSalePriceByColor((prev) => ({
+                                    ...prev,
+                                    [color]: parseMoneyInputBR(priceInputByColor[color] ?? "0"),
+                                  }));
+                                  setEditingPriceColor(null);
+                                }}
+                                className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-semibold hover:bg-primary-500"
+                              >
+                                Salvar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingPriceColor(null)}
+                                className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-slate-800"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <p className="mt-2 text-3xl font-semibold">
+                              {formatCurrency(pricing.effectiveFinalTotal)}
+                            </p>
+                            <p className="mt-1 text-sm text-slate-300">
+                              Considerando {getPositiveInteger(quantity, 1)} unidade(s) vendida(s).
+                            </p>
+                            <p className="mt-1 text-sm text-slate-300">
+                              Margem líquida real: {formatCurrency(pricing.netMarginValue)} ({pricing.netMarginRate.toFixed(2)}%)
+                            </p>
+                            {pricing.fixedPrice > 0 && (
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
+                                  Ajustado manualmente
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setFixedSalePriceByColor((prev) => {
+                                      const next = { ...prev };
+                                      delete next[color];
+                                      return next;
+                                    });
+                                  }}
+                                  className="text-[11px] font-semibold text-slate-300 underline hover:text-white"
+                                >
+                                  Usar cálculo automático
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        <p className="mt-3 text-[11px] text-slate-400">
+                          Ao definir um valor aqui, ele substitui o cálculo automático por margem sempre que essa cor for usada num orçamento.
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </section>
 
