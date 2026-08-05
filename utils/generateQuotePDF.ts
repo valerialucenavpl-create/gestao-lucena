@@ -295,10 +295,18 @@ export async function generateQuotePDF(
   // ─── TABELA DE PRODUTOS ───────────────────────────────────────────────────
   const extraTotal = (quote.freight || 0) + (quote.installation || 0) + (quote.referralCommissionValue || 0);
   const subtotal = quote.subtotal || 0;
+  // item.price já é o TOTAL da linha (preço unitário × quantidade, calculado
+  // no orçamento) — não um valor por unidade. O bug anterior multiplicava
+  // por item.quantity de novo tanto aqui quanto na tabela abaixo, inflando
+  // o total exibido no PDF (ex.: 3 unidades por R$709,97 virava R$2.129,90
+  // na coluna de preço unitário, e a coluna TOTAL multiplicava isso por 3
+  // outra vez, dando R$6.389,71 em vez de R$2.129,90).
   const dissolvedItems = (quote.items || []).map((item) => {
-    const share = subtotal > 0 ? (item.price * item.quantity) / subtotal : 0;
-    const extraPerUnit = item.quantity > 0 ? (share * extraTotal) / item.quantity : 0;
-    return { ...item, displayedPrice: item.price + extraPerUnit };
+    const share = subtotal > 0 ? item.price / subtotal : 0;
+    const extraShareForLine = share * extraTotal;
+    const displayedTotal = item.price + extraShareForLine;
+    const displayedUnitPrice = item.quantity > 0 ? displayedTotal / item.quantity : displayedTotal;
+    return { ...item, displayedTotal, displayedUnitPrice };
   });
 
   const headCols = options.hidePrice ? ["Descrição", "Un.", "Qtd."] : ["Descrição", "Preço Unit.", "Un.", "Qtd.", "Total"];
@@ -363,10 +371,10 @@ export async function generateQuotePDF(
     return {
       name: item.productName || "",
       specLines,
-      price: options.hidePrice ? undefined : `R$ ${fmtBR(item.displayedPrice)}`,
+      price: options.hidePrice ? undefined : `R$ ${fmtBR(item.displayedUnitPrice)}`,
       unit: "und",
       qty: String(item.quantity),
-      total: options.hidePrice ? undefined : `R$ ${fmtBR(item.displayedPrice * item.quantity)}`,
+      total: options.hidePrice ? undefined : `R$ ${fmtBR(item.displayedTotal)}`,
       height,
     };
   });
@@ -492,7 +500,7 @@ export async function generateQuotePDF(
 
   // ─── TOTAIS ────────────────────────────────────────────────────────────
   if (!options.hidePrice) {
-    const dissolvedSubtotal = dissolvedItems.reduce((s, i) => s + i.displayedPrice * i.quantity, 0);
+    const dissolvedSubtotal = dissolvedItems.reduce((s, i) => s + i.displayedTotal, 0);
     const boxW = 85;
     const boxX = pageW - margin - boxW;
 
