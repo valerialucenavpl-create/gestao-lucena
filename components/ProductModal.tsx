@@ -2108,9 +2108,9 @@ const ProductModal: React.FC<ProductModalProps> = ({
                         </div>
                       </div>
 
-                      <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2.5">
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-sm font-semibold text-emerald-900">Preço por m² (opcional)</span>
+                      <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <span className="text-xs font-semibold text-emerald-900">Preço/m² (opcional)</span>
                           <input
                             type="text"
                             inputMode="decimal"
@@ -2129,11 +2129,12 @@ const ProductModal: React.FC<ProductModalProps> = ({
                               });
                               setSqmPriceInputByColor((prev) => ({ ...prev, [color]: formatMoneyInputBR(val) }));
                             }}
-                            className="w-24 shrink-0 rounded-lg border border-emerald-300 bg-white px-2 py-1.5 text-right text-sm font-semibold text-emerald-900"
+                            style={{ width: 80, flexShrink: 0 }}
+                            className="rounded-lg border border-emerald-300 bg-white px-2 py-1 text-right text-xs font-semibold text-emerald-900"
                           />
                         </div>
-                        <p className="mt-1 text-[11px] text-emerald-700">
-                          Multiplica pela área da peça no orçamento; tem prioridade sobre o Preço Final fixo abaixo.
+                        <p className="mt-1 text-[10px] leading-tight text-emerald-700">
+                          Multiplica pela área da peça; prioridade sobre o Preço Final fixo abaixo.
                         </p>
                       </div>
 
