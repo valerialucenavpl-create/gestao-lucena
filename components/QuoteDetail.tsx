@@ -35,6 +35,7 @@ interface QuoteDetailProps {
   onCashFlowAdded?: (entry: CashFlowEntry) => void;
   onBack: () => void;
   onGoToSales?: () => void;
+  onEditQuote?: () => void;
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -97,6 +98,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
   onUpdateQuote,
   onCashFlowAdded,
   onBack,
+  onEditQuote,
 }) => {
   const [localQuote, setLocalQuote] = useState<Quote>(() => structuredClone(quote));
   const [saving, setSaving] = useState(false);
@@ -403,6 +405,15 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
           Voltar para Orçamentos
         </button>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {onEditQuote && (
+            <button
+              onClick={onEditQuote}
+              style={{ display: "flex", alignItems: "center", gap: 6, background: "#16305F", border: "1px solid #4a68a8", borderRadius: 8, padding: "8px 16px", color: "#dde4f5", fontWeight: 600, fontSize: 14, cursor: "pointer" }}
+            >
+              <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+              Editar Orçamento
+            </button>
+          )}
           <button
             onClick={handleViewPdf}
             disabled={generatingPdf}

@@ -170,6 +170,10 @@ interface NewQuoteProps {
   companySettings: CompanySettings;
   nextQuoteNumber: number;
   onAddQuote: (quote: Quote) => Promise<void>;
+  // Quando presente, a tela abre em modo de edição: carrega os itens/dados
+  // desse orçamento já salvo, e o botão final atualiza em vez de criar novo.
+  editingQuote?: Quote | null;
+  onUpdateQuote?: (quote: Quote) => Promise<void>;
   onAddNewClient: (client: Client) => void;
   onCancel: () => void;
 }
@@ -218,6 +222,8 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   companySettings,
   nextQuoteNumber,
   onAddQuote,
+  editingQuote,
+  onUpdateQuote,
   onAddNewClient,
   onCancel,
 }) => {
@@ -321,6 +327,43 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [showPDFPreview, setShowPDFPreview] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedQuote, setSavedQuote] = useState<Quote | null>(null);
+
+  // Modo de edição: carrega os dados do orçamento já salvo assim que a tela
+  // abre. Só roda uma vez por orçamento (guarda o id já carregado) — não
+  // queremos sobrescrever o que a usuária está digitando a cada render.
+  const loadedEditingQuoteId = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (!editingQuote || loadedEditingQuoteId.current === editingQuote.id) return;
+    loadedEditingQuoteId.current = editingQuote.id;
+
+    setSelectedClientId(editingQuote.clientId || "");
+    setItems(Array.isArray(editingQuote.items) ? editingQuote.items : []);
+    setDate(String(editingQuote.date || "").slice(0, 10) || new Date().toISOString().split("T")[0]);
+    setPaymentMethod(editingQuote.paymentMethod || "Cartão");
+    setFreight(Number(editingQuote.freight || 0));
+    setFreightInput(formatMoneyInputBR(Number(editingQuote.freight || 0)));
+    setInstallation(Number(editingQuote.installation || 0));
+    setInstallationInput(formatMoneyInputBR(Number(editingQuote.installation || 0)));
+    setReferralCommissionRate(Number(editingQuote.referralCommissionRate || 0));
+    setAssemblyNotes(editingQuote.assemblyNotes || "");
+
+    // O desconto é salvo só como valor final em R$ (não guarda se foi
+    // digitado em % ou R$ originalmente) — reabre sempre em modo R$ com
+    // esse valor, preservando o efeito monetário real.
+    const savedDiscount = Number(editingQuote.discount || 0);
+    setDiscountMode("fixed");
+    setDiscount(savedDiscount);
+    setDiscountFixedInput(formatMoneyInputBR(savedDiscount));
+
+    // Prazo/data de entrega ficam embutidos como texto no início das notas
+    // de medição — extrai de volta pros campos, e limpa o texto solto.
+    const notesText = String(editingQuote.measurementNotes || "");
+    const dayMatch = notesText.match(/Prazo de entrega:\s*(\d+)/i);
+    const dateMatch = notesText.match(/Data prevista de entrega:\s*(\d{2})\/(\d{2})\/(\d{4})/i);
+    if (dayMatch?.[1]) setDeliveryLeadDays(Number(dayMatch[1]));
+    if (dateMatch) setDeliveryDate(`${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`);
+    setMeasurementNotes(stripDeliveryMetaFromNotes(notesText));
+  }, [editingQuote]);
 
   // Hide options — persisted in localStorage
   const [hidePrice, setHidePrice] = useState<boolean>(() =>
@@ -1659,8 +1702,8 @@ const buildQuoteObject = (): Quote => {
     .join("\n");
 
   return {
-    id: `q${Date.now()}`,
-    quoteNumber: nextQuoteNumber,
+    id: editingQuote?.id ?? `q${Date.now()}`,
+    quoteNumber: editingQuote?.quoteNumber ?? nextQuoteNumber,
     clientId: selectedClientId,
     customerName: selectedClient ? selectedClient.name : "Cliente Desconhecido",
     items,
@@ -1673,8 +1716,8 @@ const buildQuoteObject = (): Quote => {
     assemblyNotes,
     measurementNotes: finalMeasurementNotes,
     date,
-    status: "Pendente",
-    salesperson: currentUser.name,
+    status: editingQuote?.status ?? "Pendente",
+    salesperson: editingQuote?.salesperson ?? currentUser.name,
     costOfGoods: totalCostOfGoods,
     fixedCosts: fixedCostValue,
     machineFee: cardValue,
@@ -1691,7 +1734,11 @@ const handleConfirmAndSave = async () => {
 
   const newQuote = buildQuoteObject();
   setIsSaving(true);
-  await onAddQuote(newQuote);
+  if (editingQuote && onUpdateQuote) {
+    await onUpdateQuote(newQuote);
+  } else {
+    await onAddQuote(newQuote);
+  }
   setIsSaving(false);
   setSavedQuote(newQuote);
   setShowPDFOptions(false);
@@ -1991,9 +2038,13 @@ const handleSavePDF = async () => {
       {/* CABEÇALHO */}
       <div className="bg-white border border-gray-100 rounded-xl shadow-sm px-6 py-4 flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">Novo Orçamento</h2>
+          <h2 className="text-2xl font-bold text-gray-800">
+            {editingQuote ? `Editar Orçamento #${editingQuote.quoteNumber ?? editingQuote.id}` : "Novo Orçamento"}
+          </h2>
           <p className="text-sm text-gray-500">
-            Preencha os dados do cliente, adicione os itens e salve para gerar o orçamento.
+            {editingQuote
+              ? "Adicione ou remova itens e salve para atualizar o orçamento."
+              : "Preencha os dados do cliente, adicione os itens e salve para gerar o orçamento."}
           </p>
         </div>
         <div className="flex flex-wrap gap-2 justify-end">
@@ -2015,7 +2066,7 @@ const handleSavePDF = async () => {
               <polyline points="17 21 17 13 7 13 7 21" />
               <polyline points="7 3 7 8 15 8" />
             </Icon>
-            Salvar Orçamento
+            {editingQuote ? "Atualizar Orçamento" : "Salvar Orçamento"}
           </button>
         </div>
       </div>

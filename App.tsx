@@ -315,6 +315,9 @@ const App: React.FC = () => {
     return () => window.removeEventListener("keydown", handleEsc);
   }, [activeView]);;
   const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
+  // Quando preenchido, a tela "newQuote" abre em modo de edição desse
+  // orçamento (carrega os itens/dados existentes) em vez de criar um novo.
+  const [editingQuoteId, setEditingQuoteId] = useState<string | null>(null);
   const [sales, setSales] = useState<Sale[]>([]);
 
   const [companySettings, setCompanySettings] = useState<CompanySettings>({
@@ -662,6 +665,19 @@ const App: React.FC = () => {
       }));
   }, [sales, quotes]);
 
+  // Compartilhado entre QuoteDetail (edição de status/data) e NewQuote em
+  // modo de edição (adicionar/remover item de um orçamento já salvo).
+  const handleUpdateQuote = async (u: any) => {
+    const r = await updateQuote(u.id, u);
+    const finalQuote = (r.ok && r.data) ? r.data as Quote : u as Quote;
+    if (!r.ok) console.warn("Orçamento não atualizado no banco:", r.error?.message);
+    setQuotes((prev) => {
+      const next = prev.map((q) => (q.id === u.id ? finalQuote : q));
+      try { localStorage.setItem("local_quotes_cache", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
   // ===============================
   // RENDER VIEW (ÚNICO)
   // ===============================
@@ -725,6 +741,7 @@ if (
         const nextQuoteNumber = quotes.length > 0
           ? Math.max(...quotes.map((q) => (q as any).quoteNumber || 0)) + 1
           : 1;
+        const editingQuote = editingQuoteId ? quotes.find((q) => q.id === editingQuoteId) || null : null;
         return (
           <NewQuote
             currentUser={currentUser}
@@ -734,6 +751,7 @@ if (
             variableExpenses={variableExpenses}
             companySettings={companySettings}
             nextQuoteNumber={nextQuoteNumber}
+            editingQuote={editingQuote}
             onAddQuote={async (q: any) => {
               const r = await createQuote(q);
               const finalQuote = (r.ok && r.data) ? r.data as Quote : q as Quote;
@@ -744,8 +762,17 @@ if (
                 return next;
               });
             }}
+            onUpdateQuote={handleUpdateQuote}
             onAddNewClient={(c: any) => setClients((prev) => [c, ...prev])}
-            onCancel={() => setActiveView("quotes")}
+            onCancel={() => {
+              // Limpa o modo de edição só ao sair de fato da tela — limpar
+              // logo após salvar (com a prévia do PDF ainda aberta) fazia o
+              // título voltar pra "Novo Orçamento" e arriscava criar um
+              // orçamento duplicado se salvasse de novo por engano.
+              const wasEditing = Boolean(editingQuoteId);
+              setEditingQuoteId(null);
+              setActiveView(wasEditing ? "quoteDetail" : "quotes");
+            }}
           />
         );
       }
@@ -762,21 +789,16 @@ if (
             variableExpenses={variableExpenses}
             companySettings={companySettings}
             cashFlow={cashFlow}
-            onUpdateQuote={async (u: any) => {
-              const r = await updateQuote(u.id, u);
-              const finalQuote = (r.ok && r.data) ? r.data as Quote : u as Quote;
-              if (!r.ok) console.warn("Orçamento não atualizado no banco:", r.error?.message);
-              setQuotes((prev) => {
-                const next = prev.map((q) => (q.id === u.id ? finalQuote : q));
-                try { localStorage.setItem("local_quotes_cache", JSON.stringify(next)); } catch {}
-                return next;
-              });
-            }}
+            onUpdateQuote={handleUpdateQuote}
             onCashFlowAdded={(entry) => {
               setCashFlow((prev) => [entry, ...prev]);
             }}
             onBack={() => setActiveView("quotes")}
             onGoToSales={() => setActiveView("sales")}
+            onEditQuote={() => {
+              setEditingQuoteId(selectedQuote.id);
+              setActiveView("newQuote");
+            }}
           />
         ) : null;
       }
