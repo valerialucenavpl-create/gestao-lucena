@@ -32,6 +32,9 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           # Onde está o build gerado pelo Vite:
           local-dir: dist/
-          # Pasta da Hostinger onde os arquivos precisam ir:
-          server-dir: public_html/
+          # O usuário de FTP da Hostinger já entra direto dentro de
+          # public_html/ — colocar "public_html/" aqui de novo criava uma
+          # pasta public_html/public_html/ e os arquivos novos nunca
+          # chegavam na raiz que o site realmente publica.
+          server-dir: ./
 
