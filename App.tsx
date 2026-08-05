@@ -509,9 +509,10 @@ const App: React.FC = () => {
     getCashFlow().then((r) => r.ok && setCashFlow(r.data ?? []));
   }, [authResolved]);
 
-  // Tempo real: orçamentos e vendas atualizam sozinhos em todas as telas
-  // abertas assim que alguém cria/edita/aprova um orçamento ou registra uma
-  // venda — sem precisar recarregar a página pra ver o que outra pessoa fez.
+  // Tempo real: orçamentos, vendas e clientes atualizam sozinhos em todas as
+  // telas abertas assim que alguém cria/edita/aprova um orçamento, registra
+  // uma venda ou cadastra/edita um cliente — sem precisar recarregar a
+  // página pra ver o que outra pessoa fez.
   useEffect(() => {
     if (!authResolved) return;
 
@@ -538,10 +539,16 @@ const App: React.FC = () => {
       setSales(mapped);
     };
 
+    const reloadClients = async () => {
+      const clientsRes = await supabase.from("clients").select("*").is("deleted_at", null);
+      if (Array.isArray(clientsRes.data)) setClients(clientsRes.data as Client[]);
+    };
+
     const channel = supabase
-      .channel("realtime-quotes-sales")
+      .channel("realtime-quotes-sales-clients")
       .on("postgres_changes", { event: "*", schema: "public", table: "quotes" }, reloadQuotes)
       .on("postgres_changes", { event: "*", schema: "public", table: "sales" }, reloadSales)
+      .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, reloadClients)
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
