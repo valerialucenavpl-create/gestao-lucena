@@ -509,6 +509,44 @@ const App: React.FC = () => {
     getCashFlow().then((r) => r.ok && setCashFlow(r.data ?? []));
   }, [authResolved]);
 
+  // Tempo real: orçamentos e vendas atualizam sozinhos em todas as telas
+  // abertas assim que alguém cria/edita/aprova um orçamento ou registra uma
+  // venda — sem precisar recarregar a página pra ver o que outra pessoa fez.
+  useEffect(() => {
+    if (!authResolved) return;
+
+    const reloadQuotes = async () => {
+      const r = await getQuotes();
+      if (r.ok && Array.isArray(r.data)) {
+        setQuotes(r.data);
+        try { localStorage.setItem("local_quotes_cache", JSON.stringify(r.data)); } catch {}
+      }
+    };
+
+    const reloadSales = async () => {
+      const r = await getSales();
+      if (!r.ok) return;
+      const mapped = (r.data ?? []).map((row: any) => ({
+        id: String(row.id),
+        quoteId: String(row.quote_id ?? ""),
+        customerName: "",
+        salesperson: "",
+        saleDate: row.date ? new Date(row.date) : new Date(),
+        amount: Number(row.total ?? 0),
+        status: "Pendente",
+      })) as Sale[];
+      setSales(mapped);
+    };
+
+    const channel = supabase
+      .channel("realtime-quotes-sales")
+      .on("postgres_changes", { event: "*", schema: "public", table: "quotes" }, reloadQuotes)
+      .on("postgres_changes", { event: "*", schema: "public", table: "sales" }, reloadSales)
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [authResolved]);
+
   useEffect(() => {
     // Só busca depois que a sessão do Supabase terminou de resolver (ver
     // comentário no efeito de LOADERS acima) — evita que a consulta de
