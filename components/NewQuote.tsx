@@ -415,14 +415,6 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     "GRANITO" | "VIDROS" | "ALUMINIO" | "PORTAO" | "ACESSORIOS"
   >("GRANITO");
 
-  // GRANITO
-  const [grMaterialId, setGrMaterialId] = useState<string>("");
-  const [grVariantName, setGrVariantName] = useState<string>("");
-  const [grPieces, setGrPieces] = useState<
-    { id: string; length: number; width: number; quantity: number }[]
-  >([{ id: "1", length: 0, width: 0, quantity: 1 }]);
-  const [grDescription, setGrDescription] = useState<string>("");
-
   // ALUMÍNIO
   const [alMaterialId, setAlMaterialId] = useState<string>("");
   const [alVariantName, setAlVariantName] = useState<string>("");
@@ -449,6 +441,7 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   >([{ id: "1", length: 0, width: 0, quantity: 1 }]);
   const [mrExtraService, setMrExtraService] = useState<number>(0);
   const [mrExtraServiceInput, setMrExtraServiceInput] = useState<string>(formatMoneyInputBR(0));
+  const [mrDescription, setMrDescription] = useState<string>("");
 
   // ACESSÓRIOS / PRODUTOS PRONTOS (categoria "ACESSORIO DE MOTOR" — produtos
   // soltos, sem fórmula de medida: controles, fechaduras, cremalheiras, etc.)
@@ -1118,94 +1111,6 @@ const categories = [
     setter(newPieces);
   };
 
-  const getCalculations = (materialId: string, variantName: string, pieces: any[]) => {
-    if (!materialId) {
-      return { totalArea: 0, totalPrice: 0, totalCost: 0, productName: "", variantLabel: "" };
-    }
-
-    const material = rawMaterials.find((m) => m.id === materialId);
-    const product = products.find((p) => p.id === materialId);
-
-    let unitPrice = 0;
-    let unitCost = 0;
-    let productName = "";
-    let variantLabel = variantName;
-
-    if (material) {
-      const variants = getMaterialVariants(material);
-      const variant =
-        variants.find((v) => normalizeText(getVariantName(v)) === normalizeText(variantName)) ||
-        variants[0];
-      unitPrice = getVariantSalePrice(variant);
-      unitCost = getVariantCost(variant);
-      productName = material.name;
-      variantLabel = getVariantName(variant) || "Padrão";
-    } else if (product) {
-      const { price, cost } = calculateItemPrice(product.id, 1000, 1000, 1, "Padrão");
-      unitPrice = price;
-      unitCost = cost;
-      productName = product.name;
-      variantLabel = "Padrão";
-    }
-
-    let totalArea = 0;
-    pieces.forEach((piece) => {
-      totalArea += piece.length * piece.width * piece.quantity;
-    });
-
-    const totalPrice = totalArea * unitPrice;
-    const totalCost = totalArea * unitCost;
-
-    return { totalArea, totalPrice, totalCost, productName, variantLabel };
-  };
-
-  const handleAddPieceItem = (
-    category: string,
-    materialId: string,
-    variantName: string,
-    pieces: any[],
-    description: string,
-    reset: () => void
-  ) => {
-if (!ensureColorSelected()) return;
-
-    if (!materialId) return alert("Selecione um produto/material.");
-
-    const { totalArea, totalPrice, totalCost, productName, variantLabel } = getCalculations(
-      materialId,
-      variantName,
-      pieces
-    );
-
-    if (totalArea === 0) return alert("Adicione medidas válidas.");
-
-    const piecesDesc = pieces
-      .map((p, idx) => `Peça ${idx + 1}: ${p.quantity}x (${p.length.toFixed(2)}m x ${p.width.toFixed(2)}m)`)
-      .join("\n");
-
-    const baseDesc = `${productName} ${variantLabel !== "Padrão" ? "- " + variantLabel : ""}`;
-
-    const fullDescription = description.trim()
-      ? `${description}\n\n[Detalhamento]\n${piecesDesc}`
-      : `${baseDesc}\n\n[Detalhamento]\n${piecesDesc}`;
-
-    const newItem: QuoteItem = {
-      id: `qi-${category.toLowerCase()}-${Date.now()}`,
-      productId: materialId,
-      productName,
-      selectedColor: variantLabel,
-      description: fullDescription,
-      width: 0,
-      height: 0,
-      quantity: 1,
-      price: totalPrice,
-      cost: totalCost,
-    };
-
-    setItems((prev) => [...prev, newItem]);
-    reset();
-  };
-
   // ============================
   //          GLASS WIZARD
   // ============================
@@ -1270,9 +1175,16 @@ if (!ensureColorSelected()) return;
     const totalCost = calc.totalCost + totalExtra;
 
     const validPieces = mrPieces.filter((p) => p.length > 0 && p.width > 0 && p.quantity > 0);
-    const piecesDesc = validPieces
-      .map((p, idx) => `Peça ${idx + 1}: ${p.quantity}x (${p.length}mm x ${p.width}mm)`)
-      .join("\n");
+    const detalhamentoLines = validPieces.map(
+      (p, idx) => `Peça ${idx + 1}: ${p.quantity}x (${p.length}mm x ${p.width}mm)`
+    );
+    if (totalExtra > 0) {
+      detalhamentoLines.push(`Acréscimo por serviço: R$ ${totalExtra.toFixed(2)}`);
+    }
+    if (mrDescription.trim()) {
+      detalhamentoLines.push(mrDescription.trim());
+    }
+    const piecesDesc = detalhamentoLines.join("\n");
 
     const description = [
       `Cor: ${selectedColor || "Não informado"}`,
@@ -1302,6 +1214,7 @@ if (!ensureColorSelected()) return;
     setMrPieces([{ id: Date.now().toString(), length: 0, width: 0, quantity: 1 }]);
     setMrExtraService(0);
     setMrExtraServiceInput(formatMoneyInputBR(0));
+    setMrDescription("");
   };
 
   // Produto pronto (categoria "ACESSORIO DE MOTOR"): sem medida, preço vem
@@ -1822,215 +1735,6 @@ const handleSavePDF = async () => {
   };
 
   // ============================
-  //  COMPONENTE REUTILIZÁVEL DE PEÇAS
-  // ============================
-  const renderMultiPieceCalculator = ({
-    materialId,
-    setMaterialId,
-    variantName,
-    setVariantName,
-    pieces,
-    setPieces,
-    description,
-    setDescription,
-    onAdd,
-    categoryFilter,
-    showProductGrid = false,
-    isGridVisible = true,
-    setIsGridVisible = (_v: boolean) => {},
-  }: any) => {
-    const calculations = getCalculations(materialId, variantName, pieces);
-
-    const availableItems =
-      categoryFilter === "GRANITO"
-        ? rawMaterials.filter((m) => m.usageCategory === "Chapa/Placa")
-        : products.filter((p) =>
-            (p.category || "")
-              .normalize("NFD")
-              .replace(/[\u0300-\u036f]/g, "")
-              .toUpperCase()
-              .includes(
-                categoryFilter
-                  .normalize("NFD")
-                  .replace(/[\u0300-\u036f]/g, "")
-                  .toUpperCase()
-              )
-          );
-
-           return (
-      <div className="space-y-4">
-        {showProductGrid && !isGridVisible && (
-          <button
-            onClick={() => setIsGridVisible(true)}
-            className="mb-4 flex items-center gap-2 text-primary-600 font-medium hover:underline"
-          >
-            <Icon className="w-4 h-4">
-              <rect x="3" y="3" width="7" height="7" />
-              <rect x="14" y="3" width="7" height="7" />
-              <rect x="14" y="14" width="7" height="7" />
-              <rect x="3" y="14" width="7" height="7" />
-            </Icon>
-            Mostrar Catálogo de Produtos
-          </button>
-        )}
-
-        {(!showProductGrid || isGridVisible) && (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              <div className="md:col-span-4">
-                <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">
-                  Produto / Material
-                </label>
-                <select
-                  value={materialId}
-                  onChange={(e) => {
-                    setMaterialId(e.target.value);
-                    const mat = rawMaterials.find((m) => m.id === e.target.value);
-                    const firstVariantName = getVariantName(getMaterialVariants(mat)[0]);
-                    if (mat && firstVariantName) setVariantName(firstVariantName);
-                    if (!mat || !firstVariantName) setVariantName("Padrão");
-                  }}
-                  className="w-full h-12 px-3 border rounded-lg bg-primary-600 text-white border-primary-500 font-medium shadow-sm focus:ring-2 focus:ring-offset-1 focus:ring-primary-400 placeholder-blue-200"
-                >
-                  <option value="" className="bg-white text-gray-900">
-                    Selecione o Item
-                  </option>
-                  {availableItems.map((item: any) => (
-                    <option key={item.id} value={item.id} className="bg-white text-gray-900">
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-12 gap-2 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">
-              <div className="col-span-3">Comprimento</div>
-              <div className="col-span-3">Largura</div>
-              <div className="col-span-2">Qtd</div>
-              <div className="col-span-2">M²</div>
-              <div className="col-span-2">Valor</div>
-            </div>
-
-            {pieces.map((piece: any, index: number) => {
-              const pieceM2 = piece.length * piece.width * piece.quantity;
-              const unitPrice =
-                calculations.totalArea > 0 ? calculations.totalPrice / calculations.totalArea : 0;
-              const pieceValue = pieceM2 * unitPrice;
-
-              return (
-                <div key={piece.id} className="grid grid-cols-12 gap-2 items-center relative group">
-                  <div className="col-span-3">
-                    <input
-                      type="number"
-                      value={piece.length || ""}
-                      onChange={(e) =>
-                        updatePiece(index, "length", parseFloat(e.target.value), setPieces, pieces)
-                      }
-                      className="w-full h-10 px-3 border rounded-lg bg-primary-600 text-white border-primary-500 font-bold text-center focus:ring-2 focus:ring-offset-1 focus:ring-primary-400 placeholder-blue-200"
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div className="col-span-3">
-                    <input
-                      type="number"
-                      value={piece.width || ""}
-                      onChange={(e) =>
-                        updatePiece(index, "width", parseFloat(e.target.value), setPieces, pieces)
-                      }
-                      className="w-full h-10 px-3 border rounded-lg bg-primary-600 text-white border-primary-500 font-bold text-center focus:ring-2 focus:ring-offset-1 focus:ring-primary-400 placeholder-blue-200"
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <input
-                      type="number"
-                      value={piece.quantity}
-                      onChange={(e) =>
-                        updatePiece(index, "quantity", parseInt(e.target.value), setPieces, pieces)
-                      }
-                      className="w-full h-10 px-1 border rounded-lg bg-primary-600 text-white border-primary-500 font-bold text-center focus:ring-2 focus:ring-offset-1 focus:ring-primary-400 placeholder-blue-200"
-                      min={1}
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <div className="w-full h-10 flex items-center justify-center border rounded-lg bg-primary-600 text-white font-bold border-primary-500 shadow-inner">
-                      {pieceM2.toFixed(2)}
-                    </div>
-                  </div>
-                  <div className="col-span-2">
-                    <div className="h-10 flex items-center justify-end px-2 rounded-lg bg-primary-700 text-white border border-primary-600 font-bold text-xs sm:text-sm shadow-inner">
-                      {pieceValue.toLocaleString("pt-BR", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </div>
-                  </div>
-
-                  {pieces.length > 1 && (
-                    <button
-                      onClick={() => removePiece(index, setPieces, pieces)}
-                      className="absolute -right-8 top-2 text-red-500 hover:text-red-700 transition-colors"
-                      title="Remover medida"
-                    >
-                      <Icon className="w-5 h-5">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                      </Icon>
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-
-            <div className="flex justify-end">
-              <button
-                onClick={() => addPiece(setPieces, pieces)}
-                className="px-4 py-2 bg-primary-600 text-white text-sm font-bold rounded hover:bg-primary-700 transition-colors flex items-center gap-2 shadow-md"
-              >
-                + ADICIONAR MEDIDA
-              </button>
-            </div>
-
-            <div className="w-full">
-              <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Descrição</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full p-3 h-24 border rounded-lg bg-primary-600 text-white border-primary-500 placeholder-blue-200 focus:ring-2 focus:ring-offset-1 focus:ring-primary-400 resize-none"
-                placeholder="Descreva os detalhes do produto..."
-              />
-            </div>
-
-            <div className="flex flex-col md:flex-row justify-end items-center gap-4 pt-4 border-t border-gray-200">
-              <div className="text-right">
-                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">TOTAL GERAL</span>
-                <div className="px-4 py-2 bg-primary-900 text-white rounded-lg text-2xl font-bold shadow-md">
-                  R{" "}
-                  {calculations.totalPrice.toLocaleString("pt-BR", {
-                    minimumFractionDigits: 2,
-                  })}
-                </div>
-              </div>
-
-              <button
-                onClick={onAdd}
-                className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg shadow-md transition-transform active:scale-95 uppercase text-sm flex items-center gap-2 h-full"
-              >
-                <Icon className="w-5 h-5">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </Icon>
-                Adicionar ao Orçamento
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    );
-  };
-
-  // ============================
   //            JSX
   // ============================
   return (
@@ -2511,6 +2215,17 @@ const handleSavePDF = async () => {
               </div>
             </div>
 
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Descrição</label>
+              <textarea
+                value={mrDescription}
+                onChange={(e) => setMrDescription(e.target.value)}
+                placeholder="Observações sobre a peça (opcional)"
+                rows={3}
+                className="w-full px-3 py-2 border rounded-lg text-gray-900"
+              />
+            </div>
+
             <div className="flex items-center justify-between rounded-xl border border-primary-200 bg-white px-4 py-3">
               <span className="text-sm font-semibold text-gray-600 uppercase">Valor estimado (total)</span>
               <span className="text-xl font-bold text-primary-700">
@@ -2529,30 +2244,6 @@ const handleSavePDF = async () => {
                 Adicionar produto de mármore
               </button>
             </div>
-          </div>
-        )}
-
-        {activeCategory === "GRANITO" && (
-          <div className="mt-8">
-            <p className="text-xs font-bold text-gray-500 uppercase mb-2">
-              Ou corte uma chapa personalizada da matéria-prima
-            </p>
-            {renderMultiPieceCalculator({
-              materialId: grMaterialId,
-              setMaterialId: setGrMaterialId,
-              variantName: grVariantName,
-              setVariantName: setGrVariantName,
-              pieces: grPieces,
-              setPieces: setGrPieces,
-              description: grDescription,
-              setDescription: setGrDescription,
-              onAdd: () =>
-                handleAddPieceItem("GRANITO", grMaterialId, grVariantName, grPieces, grDescription, () => {
-                  setGrPieces([{ id: Date.now().toString(), length: 0, width: 0, quantity: 1 }]);
-                  setGrDescription("");
-                }),
-              categoryFilter: "GRANITO",
-            })}
           </div>
         )}
 
