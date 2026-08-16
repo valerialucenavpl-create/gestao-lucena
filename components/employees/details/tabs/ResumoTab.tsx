@@ -18,6 +18,10 @@ type Pagamento = {
 };
 
 type UniformeRow = { data: string; item: string | null; tipo: string };
+type FaltaRow = { data: string; tipo: string };
+type AdvertenciaRow = { data: string };
+type ValeRow = { data: string; valor: number };
+type HoraExtraRow = { data: string; valor_pago: number; quantidade_horas: number };
 
 const addMonths = (dateStr: string, months: number) => {
   const d = new Date(dateStr + "T00:00:00");
@@ -26,6 +30,17 @@ const addMonths = (dateStr: string, months: number) => {
 };
 const formatBR = (d: Date) => d.toLocaleDateString("pt-BR");
 const money = (v: number) => `R$ ${formatMoneyInputBR(v)}`;
+
+const getCurrentMonthStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+
+const formatMonthLabel = (monthStr: string) => {
+  const [y, m] = monthStr.split("-").map(Number);
+  const d = new Date(y, (m || 1) - 1, 1);
+  return d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+};
 
 type TileColor = "blue" | "purple" | "amber" | "red" | "green" | "teal" | "gray";
 
@@ -107,35 +122,27 @@ const ResumoTab: React.FC<Props> = ({ funcionarioId, admissionDate, baseSalary, 
   const [loading, setLoading] = useState(true);
   const [jornada, setJornada] = useState<Jornada | null>(null);
   const [pagamento, setPagamento] = useState<Pagamento | null>(null);
-  const [valesTotal, setValesTotal] = useState(0);
-  const [valesCount, setValesCount] = useState(0);
-  const [horasExtrasTotal, setHorasExtrasTotal] = useState(0);
-  const [horasExtrasQtd, setHorasExtrasQtd] = useState(0);
-  const [faltasJustificadas, setFaltasJustificadas] = useState(0);
-  const [faltasInjustificadas, setFaltasInjustificadas] = useState(0);
-  const [advertenciasCount, setAdvertenciasCount] = useState(0);
-  const [uniformesCount, setUniformesCount] = useState(0);
-  const [ultimoUniforme, setUltimoUniforme] = useState<UniformeRow | null>(null);
+
+  const [faltasRows, setFaltasRows] = useState<FaltaRow[]>([]);
+  const [advertenciasRows, setAdvertenciasRows] = useState<AdvertenciaRow[]>([]);
+  const [uniformesRows, setUniformesRows] = useState<UniformeRow[]>([]);
+  const [valesRows, setValesRows] = useState<ValeRow[]>([]);
+  const [horasRows, setHorasRows] = useState<HoraExtraRow[]>([]);
+
+  // Filtro de mês — por padrão mostra o total de todo o período; ao
+  // desmarcar, restringe todos os cards de lançamentos ao mês escolhido.
+  const [filterMonth, setFilterMonth] = useState<string>(getCurrentMonthStr());
+  const [showAllPeriods, setShowAllPeriods] = useState<boolean>(true);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const currentYear = new Date().getFullYear();
-      const currentMonth = new Date().toISOString().slice(0, 7);
 
       const queries: any[] = [
         supabase.from("funcionario_jornada").select("*").eq("funcionario_id", funcionarioId).maybeSingle(),
-        supabase
-          .from("faltas")
-          .select("tipo")
-          .eq("funcionario_id", funcionarioId)
-          .gte("data", `${currentYear}-01-01`)
-          .lte("data", `${currentYear}-12-31`),
-        supabase
-          .from("advertencias")
-          .select("id", { count: "exact", head: true })
-          .eq("funcionario_id", funcionarioId),
+        supabase.from("faltas").select("data, tipo").eq("funcionario_id", funcionarioId),
+        supabase.from("advertencias").select("data").eq("funcionario_id", funcionarioId),
         supabase
           .from("uniformes_epis")
           .select("data, item, tipo")
@@ -161,33 +168,14 @@ const ResumoTab: React.FC<Props> = ({ funcionarioId, admissionDate, baseSalary, 
         results as any[];
 
       setJornada(jornadaRes?.data || null);
-
-      const faltasRows = (faltasRes?.data || []) as { tipo: string }[];
-      setFaltasJustificadas(faltasRows.filter((r) => r.tipo === "Justificada").length);
-      setFaltasInjustificadas(faltasRows.filter((r) => r.tipo === "Injustificada").length);
-
-      setAdvertenciasCount(advertenciasRes?.count || 0);
-
-      const uniformesRows = (uniformesRes?.data || []) as UniformeRow[];
-      setUniformesCount(uniformesRows.length);
-      setUltimoUniforme(uniformesRows[0] || null);
+      setFaltasRows((faltasRes?.data || []) as FaltaRow[]);
+      setAdvertenciasRows((advertenciasRes?.data || []) as AdvertenciaRow[]);
+      setUniformesRows((uniformesRes?.data || []) as UniformeRow[]);
 
       if (isManager) {
         setPagamento(pagamentoRes?.data || null);
-
-        const valesRows = (valesRes?.data || []) as { valor: number; data: string }[];
-        const valesMes = valesRows.filter((r) => String(r.data).slice(0, 7) === currentMonth);
-        setValesTotal(valesMes.reduce((s, r) => s + (Number(r.valor) || 0), 0));
-        setValesCount(valesMes.length);
-
-        const horasRows = (horasRes?.data || []) as {
-          valor_pago: number;
-          quantidade_horas: number;
-          data: string;
-        }[];
-        const horasMes = horasRows.filter((r) => String(r.data).slice(0, 7) === currentMonth);
-        setHorasExtrasTotal(horasMes.reduce((s, r) => s + (Number(r.valor_pago) || 0), 0));
-        setHorasExtrasQtd(horasMes.reduce((s, r) => s + (Number(r.quantidade_horas) || 0), 0));
+        setValesRows((valesRes?.data || []) as ValeRow[]);
+        setHorasRows((horasRes?.data || []) as HoraExtraRow[]);
       }
 
       setLoading(false);
@@ -217,8 +205,51 @@ const ResumoTab: React.FC<Props> = ({ funcionarioId, admissionDate, baseSalary, 
 
   if (loading) return <p className="text-sm text-gray-400">Carregando resumo...</p>;
 
+  const scopeLabel = showAllPeriods ? "todo o período" : formatMonthLabel(filterMonth);
+  const inScope = (data: string) => showAllPeriods || String(data).slice(0, 7) === filterMonth;
+
+  const faltasScoped = faltasRows.filter((r) => inScope(r.data));
+  const faltasJustificadas = faltasScoped.filter((r) => r.tipo === "Justificada").length;
+  const faltasInjustificadas = faltasScoped.filter((r) => r.tipo === "Injustificada").length;
+  const advertenciasCount = advertenciasRows.filter((r) => inScope(r.data)).length;
+
+  const uniformesScoped = uniformesRows.filter((r) => inScope(r.data));
+  const ultimoUniforme = uniformesScoped[0] || null;
+
+  const valesScoped = valesRows.filter((r) => inScope(r.data));
+  const valesTotal = valesScoped.reduce((s, r) => s + (Number(r.valor) || 0), 0);
+
+  const horasScoped = horasRows.filter((r) => inScope(r.data));
+  const horasExtrasTotal = horasScoped.reduce((s, r) => s + (Number(r.valor_pago) || 0), 0);
+  const horasExtrasQtd = horasScoped.reduce((s, r) => s + (Number(r.quantidade_horas) || 0), 0);
+
   return (
     <div className="space-y-5">
+      {/* Filtro de mês */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Mês</label>
+          <input
+            type="month"
+            disabled={showAllPeriods}
+            value={filterMonth}
+            onChange={(e) => setFilterMonth(e.target.value || getCurrentMonthStr())}
+            className="border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white rounded-lg px-3 py-2 text-sm disabled:opacity-50 disabled:bg-gray-100 dark:disabled:bg-gray-700"
+          />
+        </div>
+        <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 pb-2.5">
+          <input
+            type="checkbox"
+            checked={showAllPeriods}
+            onChange={(e) => setShowAllPeriods(e.target.checked)}
+          />
+          Ver todo o período
+        </label>
+        <span className="text-xs text-gray-400 dark:text-gray-500 pb-2.5 capitalize">
+          Mostrando: {scopeLabel}
+        </span>
+      </div>
+
       {feriasStatus && feriasStatus.color !== "green" && (
         <div
           className={`flex items-center gap-3 rounded-lg px-4 py-3 border ${
@@ -280,7 +311,7 @@ const ResumoTab: React.FC<Props> = ({ funcionarioId, admissionDate, baseSalary, 
 
         <Tile
           color={faltasInjustificadas > 0 ? "amber" : "gray"}
-          label="Faltas (ano atual)"
+          label="Faltas"
           value={`${faltasJustificadas + faltasInjustificadas} no total`}
           subtitle={`${faltasJustificadas} justificadas · ${faltasInjustificadas} injustificadas · ${advertenciasCount} advertência${
             advertenciasCount === 1 ? "" : "s"
@@ -297,7 +328,7 @@ const ResumoTab: React.FC<Props> = ({ funcionarioId, admissionDate, baseSalary, 
         <Tile
           color="teal"
           label="Uniformes & EPIs"
-          value={`${uniformesCount} entrega${uniformesCount === 1 ? "" : "s"}`}
+          value={`${uniformesScoped.length} entrega${uniformesScoped.length === 1 ? "" : "s"}`}
           subtitle={
             ultimoUniforme
               ? `Última: ${ultimoUniforme.item || ultimoUniforme.tipo} em ${formatBR(
@@ -332,9 +363,9 @@ const ResumoTab: React.FC<Props> = ({ funcionarioId, admissionDate, baseSalary, 
             />
             <Tile
               color="amber"
-              label="Vales (mês atual)"
+              label="Vales"
               value={money(valesTotal)}
-              subtitle={`${valesCount} lançamento${valesCount === 1 ? "" : "s"}`}
+              subtitle={`${valesScoped.length} lançamento${valesScoped.length === 1 ? "" : "s"}`}
               icon={
                 <Icon className="w-5 h-5">
                   <rect x="1" y="4" width="22" height="16" rx="2" />
@@ -344,7 +375,7 @@ const ResumoTab: React.FC<Props> = ({ funcionarioId, admissionDate, baseSalary, 
             />
             <Tile
               color="purple"
-              label="Horas extras (mês atual)"
+              label="Horas extras"
               value={money(horasExtrasTotal)}
               subtitle={`${horasExtrasQtd}h lançadas`}
               icon={
