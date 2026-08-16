@@ -268,12 +268,13 @@ const RecordsEditor: React.FC<Props> = ({
                   type="button"
                   onClick={() => saveRow(row)}
                   disabled={savingId === row.id}
-                  className="text-green-600 hover:text-green-800 disabled:opacity-50"
+                  className="flex items-center gap-1 px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-md disabled:opacity-50"
                   title="Salvar"
                 >
                   <Icon className="w-4 h-4">
                     <polyline points="20 6 9 17 4 12"></polyline>
                   </Icon>
+                  {savingId === row.id ? "Salvando..." : "Salvar"}
                 </button>
                 <button
                   type="button"
