@@ -314,6 +314,9 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [freightInput, setFreightInput] = useState<string>(formatMoneyInputBR(0));
   const [installation, setInstallation] = useState<number>(0);
   const [installationInput, setInstallationInput] = useState<string>(formatMoneyInputBR(0));
+  const [installationCostItems, setInstallationCostItems] = useState<
+    { id: string; name: string; value: number; valueInput: string }[]
+  >([]);
   const [referralCommissionRate, setReferralCommissionRate] = useState<number>(0); // % (ex: 5)
   const [selectedColor, setSelectedColor] = useState<string>("");
 
@@ -344,6 +347,14 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     setFreightInput(formatMoneyInputBR(Number(editingQuote.freight || 0)));
     setInstallation(Number(editingQuote.installation || 0));
     setInstallationInput(formatMoneyInputBR(Number(editingQuote.installation || 0)));
+    setInstallationCostItems(
+      (editingQuote.installationCostItems || []).map((item) => ({
+        id: item.id,
+        name: item.name,
+        value: Number(item.value) || 0,
+        valueInput: formatMoneyInputBR(Number(item.value) || 0),
+      }))
+    );
     setReferralCommissionRate(Number(editingQuote.referralCommissionRate || 0));
     setAssemblyNotes(editingQuote.assemblyNotes || "");
 
@@ -1111,6 +1122,38 @@ const categories = [
     setter(newPieces);
   };
 
+  // Custo embutido no valor de Instalação (ex.: argamassa, cantoneiras, mão
+  // de obra) — sem isso, todo o valor de Instalação era tratado como lucro.
+  const addInstallationCostItem = () => {
+    setInstallationCostItems((prev) => [
+      ...prev,
+      { id: Date.now().toString(), name: "", value: 0, valueInput: formatMoneyInputBR(0) },
+    ]);
+  };
+
+  const removeInstallationCostItem = (id: string) => {
+    setInstallationCostItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const updateInstallationCostItemName = (id: string, name: string) => {
+    setInstallationCostItems((prev) => prev.map((item) => (item.id === id ? { ...item, name } : item)));
+  };
+
+  const updateInstallationCostItemValue = (id: string, rawValue: string) => {
+    const sanitized = sanitizeMoneyInputBR(rawValue);
+    setInstallationCostItems((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, valueInput: sanitized, value: parseMoneyInputBR(sanitized) } : item
+      )
+    );
+  };
+
+  const blurInstallationCostItemValue = (id: string) => {
+    setInstallationCostItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, valueInput: formatMoneyInputBR(item.value) } : item))
+    );
+  };
+
   // ============================
   //          GLASS WIZARD
   // ============================
@@ -1507,6 +1550,14 @@ const totalPrice = baseTotal + referralCommissionValue;
 const totalCostOfGoods =
   items.reduce((sum, item) => sum + item.cost, 0);
 
+// Custo embutido no valor de Instalação (argamassa, cantoneiras, mão de
+// obra etc.) — descontado do lucro para o valor de Instalação deixar de
+// ser tratado como 100% lucro.
+const installationCostTotal = installationCostItems.reduce(
+  (sum, item) => sum + (Number(item.value) || 0),
+  0
+);
+
 // normalizeText remove acentos antes de comparar, para não depender de o
 // nome cadastrado no Financeiro ter sido digitado com/sem acentuação
 // (ex.: "Comissao vendedoras" sem ç/~ não batia com a busca por "comissão").
@@ -1552,6 +1603,7 @@ const fixedCostEstimatePercent =
 const netProfit =
   totalPrice -
   totalCostOfGoods -
+  installationCostTotal -
   commissionValue -
   taxValue -
   cardValue -
@@ -1624,6 +1676,10 @@ const buildQuoteObject = (): Quote => {
     discount: discountValue,
     freight,
     installation,
+    installationCostItems:
+      installationCostItems.length > 0
+        ? installationCostItems.map(({ id, name, value }) => ({ id, name, value }))
+        : undefined,
     totalPrice,
     paymentMethod,
     assemblyNotes,
@@ -1970,6 +2026,74 @@ const handleSavePDF = async () => {
             />
           </div>
         </div>
+
+        {installation > 0 && (
+          <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-gray-600 uppercase">
+                Custo da instalação (opcional)
+              </span>
+              <button
+                type="button"
+                onClick={addInstallationCostItem}
+                className="text-xs font-semibold text-primary-700 hover:underline"
+              >
+                + adicionar item
+              </button>
+            </div>
+
+            {installationCostItems.length === 0 && (
+              <p className="text-xs text-gray-400">
+                Ex.: argamassa, cantoneiras, mão de obra — para não contar o valor de
+                Instalação inteiro como lucro.
+              </p>
+            )}
+
+            {installationCostItems.map((item) => (
+              <div key={item.id} className="flex items-center gap-2 mb-2">
+                <input
+                  type="text"
+                  value={item.name}
+                  onChange={(e) => updateInstallationCostItemName(item.id, e.target.value)}
+                  placeholder="Ex: Argamassa"
+                  className="flex-1 px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-gray-900 text-sm"
+                />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={item.valueInput}
+                  onChange={(e) => updateInstallationCostItemValue(item.id, e.target.value)}
+                  onBlur={() => blurInstallationCostItemValue(item.id)}
+                  className="w-28 px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-gray-900 text-sm text-right"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeInstallationCostItem(item.id)}
+                  className="text-red-500 hover:text-red-700"
+                  title="Remover"
+                >
+                  <Icon className="w-4 h-4">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </Icon>
+                </button>
+              </div>
+            ))}
+
+            {installationCostItems.length > 0 && (
+              <div className="flex justify-between text-xs font-bold text-gray-600 pt-1 border-t border-gray-200">
+                <span>Custo total da instalação:</span>
+                <span>
+                  R${" "}
+                  {installationCostTotal.toLocaleString("pt-BR", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* PRODUCT BUILDER + CATEGORIAS EM CARDS */}
@@ -2902,7 +3026,7 @@ const handleSavePDF = async () => {
 
         {currentUser.role === "Admin" && items.length > 0 && (() => {
           const variableCosts = commissionValue + taxValue + cardValue + referralCommissionValue;
-          const contribuicao = totalPrice - totalCostOfGoods - variableCosts;
+          const contribuicao = totalPrice - totalCostOfGoods - installationCostTotal - variableCosts;
           const contribuicaoPct = totalPrice > 0 ? (contribuicao / totalPrice) * 100 : 0;
 
           // Descobre a categoria de um item pelo produto do catálogo (mesma
@@ -2979,6 +3103,7 @@ const handleSavePDF = async () => {
                 materialCost,
                 laborCost,
                 costOfGoods,
+                installationCost: 0,
                 taxValue: catTaxValue,
                 commissionValue: catCommissionValue,
                 discountValue: catDiscountValue,
@@ -2998,6 +3123,7 @@ const handleSavePDF = async () => {
             materialCost: number;
             laborCost: number;
             costOfGoods: number;
+            installationCost: number;
             taxValue: number;
             commissionValue: number;
             discountValue: number;
@@ -3058,6 +3184,12 @@ const handleSavePDF = async () => {
                 </div>
 
                 <div className="pt-1 space-y-1">
+                  {data.installationCost > 0 && (
+                    <div className="flex justify-between text-gray-700">
+                      <span>Custo da instalação:</span>
+                      <span className="font-medium">R$ {fmt(data.installationCost)}</span>
+                    </div>
+                  )}
                   {data.taxValue > 0 && (
                     <div className="flex justify-between text-gray-700">
                       <span>Impostos:</span>
@@ -3126,6 +3258,7 @@ const handleSavePDF = async () => {
                   materialCost: totalMaterialCost,
                   laborCost: totalLaborCost,
                   costOfGoods: totalCostOfGoods,
+                  installationCost: installationCostTotal,
                   taxValue,
                   commissionValue,
                   discountValue,

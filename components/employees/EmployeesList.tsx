@@ -89,6 +89,13 @@ const EmployeesList: React.FC<Props> = ({ setActiveView }) => {
                   <td className="p-2 text-center space-x-3">
                     <button
                       type="button"
+                      onClick={() => setActiveView(`employee-details-${e.id}`)}
+                      className="text-primary-700 hover:underline"
+                    >
+                      Detalhar
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setActiveView(`employee-edit-${e.id}`)}
                       className="text-blue-600 hover:underline"
                     >

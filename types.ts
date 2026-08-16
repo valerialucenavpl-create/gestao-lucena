@@ -213,6 +213,12 @@ export interface QuoteItemLaborLine {
   total: number;
 }
 
+export interface QuoteInstallationCostLine {
+  id: string;
+  name: string;
+  value: number;
+}
+
 export interface QuoteItem {
   id: string;
   productId: string;
@@ -258,6 +264,7 @@ export interface Quote {
   discount: number;
   freight: number;
   installation: number;
+  installationCostItems?: QuoteInstallationCostLine[];
   totalPrice: number;
 
   paymentMethod: "A Definir" | "PIX" | "Cartão" | "Dinheiro" | "Transferência" | "Boleto";

@@ -120,6 +120,7 @@ function normalizeQuoteForDb(quote: Partial<Quote>): Record<string, unknown> {
     discount:         q.discount,
     freight:          q.freight,
     installation:     q.installation,
+    installation_cost_items: q.installationCostItems ?? q.installation_cost_items,
     total_price:      q.totalPrice    ?? q.total_price,
     payment_method:   q.paymentMethod ?? q.payment_method,
     cost_of_goods:    q.costOfGoods   ?? q.cost_of_goods,
@@ -157,6 +158,9 @@ function normalizeQuoteFromDb(row: any): Quote {
     discount:          Number(row.discount  ?? 0),
     freight:           Number(row.freight   ?? 0),
     installation:      Number(row.installation ?? 0),
+    installationCostItems: Array.isArray(row.installation_cost_items ?? row.installationCostItems)
+      ? (row.installation_cost_items ?? row.installationCostItems)
+      : [],
     totalPrice:        Number(row.total_price     ?? row.totalPrice     ?? 0),
     paymentMethod:     row.payment_method   ?? row.paymentMethod   ?? "A Definir",
     costOfGoods:       Number(row.cost_of_goods   ?? row.costOfGoods   ?? 0),

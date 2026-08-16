@@ -182,12 +182,17 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
 
     const totalMaterialCost = safeItems.reduce((s, i) => s + (i.materialCost ?? 0), 0);
     const totalLaborCost = safeItems.reduce((s, i) => s + (i.laborCost ?? 0), 0);
+    const installationCostTotal = (localQuote.installationCostItems || []).reduce(
+      (s, i) => s + (Number(i.value) || 0),
+      0
+    );
 
-    const netProfit = totalPrice - totalCostOfGoods - commissionValue - taxValue - cardValue - fixedCostValue;
+    const netProfit =
+      totalPrice - totalCostOfGoods - installationCostTotal - commissionValue - taxValue - cardValue - fixedCostValue;
     const netProfitMargin = totalPrice > 0 ? (netProfit / totalPrice) * 100 : 0;
 
     const variableCosts = commissionValue + taxValue + cardValue + referralCommissionValue;
-    const contribuicao = totalPrice - totalCostOfGoods - variableCosts;
+    const contribuicao = totalPrice - totalCostOfGoods - installationCostTotal - variableCosts;
     const contribuicaoPct = totalPrice > 0 ? (contribuicao / totalPrice) * 100 : 0;
 
     const total = {
@@ -195,6 +200,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
       materialCost: totalMaterialCost,
       laborCost: totalLaborCost,
       costOfGoods: totalCostOfGoods,
+      installationCost: installationCostTotal,
       taxValue,
       commissionValue,
       discountValue,
@@ -272,6 +278,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
           materialCost,
           laborCost,
           costOfGoods,
+          installationCost: 0,
           taxValue: catTaxValue,
           commissionValue: catCommissionValue,
           discountValue: catDiscountValue,
@@ -683,6 +690,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
               <div style={{ borderTop: "1px solid #3a5590", paddingTop: 6, marginTop: 2 }}>
                 {row("CMV total", d.costOfGoods, "#f5f6fa")}
               </div>
+              {d.installationCost > 0 && row("Custo da instalação", d.installationCost)}
               {d.taxValue > 0 && row("Impostos", d.taxValue)}
               {d.commissionValue > 0 && row("Comissão vendedora", d.commissionValue)}
               {d.discountValue > 0 && row("Desconto", -d.discountValue, "#22c55e")}

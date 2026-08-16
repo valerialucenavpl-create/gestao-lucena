@@ -22,6 +22,7 @@ import AgendaPage from "./components/agenda/AgendaPage";
 // FUNCIONÁRIOS
 import EmployeesList from "./components/employees/EmployeesList";
 import EmployeeForm from "./components/employees/EmployeesForm";
+import EmployeeDetailsPage from "./components/employees/details/EmployeeDetailsPage";
 import DeliverySectorDetail from "./components/DeliverySectorDetail";
 import { DeliverySector } from "./utils/deliveryEntries";
 
@@ -302,9 +303,10 @@ const App: React.FC = () => {
       if (tag === "input" || tag === "textarea" || tag === "select") return;
       if (document.querySelector(".fixed.inset-0")) return;
       const isEmpEdit = typeof activeView === "string" && activeView.startsWith("employee-edit-");
-      const back = ESC_BACK_MAP[activeView as string] || (isEmpEdit ? "employees" as View : null);
+      const isEmpDetails = typeof activeView === "string" && activeView.startsWith("employee-details-");
+      const back = ESC_BACK_MAP[activeView as string] || (isEmpEdit || isEmpDetails ? "employees" as View : null);
       if (!back) return;
-      if (ESC_CONFIRM_VIEWS.has(activeView as string) || isEmpEdit) {
+      if (ESC_CONFIRM_VIEWS.has(activeView as string) || isEmpEdit || isEmpDetails) {
         setEscConfirmTarget(back);
         setShowEscConfirm(true);
       } else {
@@ -738,6 +740,17 @@ if (
   const employeeId = activeView.replace("employee-edit-", "");
   return <EmployeeForm id={employeeId} setActiveView={setActiveView} />;
 }
+
+    // 🧾 detalhamento do funcionário: "employee-details-<id>"
+    if (
+      typeof activeView === "string" &&
+      activeView.startsWith("employee-details-")
+    ) {
+      const employeeId = activeView.replace("employee-details-", "");
+      return (
+        <EmployeeDetailsPage id={employeeId} currentUser={currentUser} setActiveView={setActiveView} />
+      );
+    }
 
     // 🚚 entregas pendentes por setor: "delivery-sector-<SETOR>"
     if (
