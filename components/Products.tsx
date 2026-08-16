@@ -245,6 +245,7 @@ const Products: React.FC<ProductsProps> = ({
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
 
   const handleOpenModal = (product: Product | null = null) => {
     setEditingProduct(product ? JSON.parse(JSON.stringify(product)) : null);
@@ -471,14 +472,25 @@ const Products: React.FC<ProductsProps> = ({
     [products]
   );
 
+  const categoryOptions = useMemo(() => {
+    const set = new Set<string>();
+    sortedProducts.forEach((product) => {
+      if (product.category) set.add(product.category);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+  }, [sortedProducts]);
+
   const filteredProducts = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    if (!term) return sortedProducts;
-    return sortedProducts.filter((product) =>
-      (product.name || "").toLowerCase().includes(term) ||
-      (product.category || "").toLowerCase().includes(term)
-    );
-  }, [sortedProducts, searchTerm]);
+    return sortedProducts.filter((product) => {
+      const matchesTerm =
+        !term ||
+        (product.name || "").toLowerCase().includes(term) ||
+        (product.category || "").toLowerCase().includes(term);
+      const matchesCategory = !categoryFilter || product.category === categoryFilter;
+      return matchesTerm && matchesCategory;
+    });
+  }, [sortedProducts, searchTerm, categoryFilter]);
 
   return (
     <div className="bg-white p-6 rounded-xl shadow-md">
@@ -514,20 +526,45 @@ const Products: React.FC<ProductsProps> = ({
         </div>
       </div>
 
-      <div className="relative mb-4 max-w-sm">
-        <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
-          <Icon className="w-4 h-4">
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </Icon>
-        </span>
-        <input
-          type="text"
-          value={searchTerm}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
-          placeholder="Buscar por nome ou categoria..."
-          className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-        />
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="relative max-w-sm flex-1 min-w-[220px]">
+          <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
+            <Icon className="w-4 h-4">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </Icon>
+          </span>
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
+            placeholder="Buscar por nome ou categoria..."
+            className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          />
+        </div>
+
+        <select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
+        >
+          <option value="">Todas as categorias</option>
+          {categoryOptions.map((cat) => (
+            <option key={cat} value={cat}>
+              {cat}
+            </option>
+          ))}
+        </select>
+
+        {categoryFilter && (
+          <button
+            type="button"
+            onClick={() => setCategoryFilter('')}
+            className="text-xs font-semibold text-primary-700 hover:underline"
+          >
+            Limpar filtro
+          </button>
+        )}
       </div>
 
       <div className="overflow-x-auto">
@@ -602,7 +639,7 @@ const Products: React.FC<ProductsProps> = ({
               </tr>
             ))}
 
-            {filteredProducts.length === 0 && searchTerm.trim() !== '' && (
+            {filteredProducts.length === 0 && (searchTerm.trim() !== '' || categoryFilter !== '') && (
               <tr>
                 <td colSpan={5} className="px-6 py-6 text-center text-gray-400">
                   Nenhum produto encontrado.
