@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../../services/supabase";
+import ResumoTab from "./tabs/ResumoTab";
 import JornadaTab from "./tabs/JornadaTab";
 import PagamentoTab from "./tabs/PagamentoTab";
 import FeriasTab from "./tabs/FeriasTab";
@@ -20,7 +21,7 @@ type EmployeeSummary = {
   admission_date: string | null;
 };
 
-type TabKey = "jornada" | "pagamento" | "ferias" | "faltas" | "uniformes";
+type TabKey = "resumo" | "jornada" | "pagamento" | "ferias" | "faltas" | "uniformes";
 
 const initials = (name: string | null) =>
   (name || "?")
@@ -34,7 +35,7 @@ const EmployeeDetailsPage: React.FC<Props> = ({ id, currentUser, setActiveView }
   const funcionarioId = Number(id);
   const [employee, setEmployee] = useState<EmployeeSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabKey>("jornada");
+  const [activeTab, setActiveTab] = useState<TabKey>("resumo");
 
   const isManager = currentUser.role === "Admin" || currentUser.role === "Finance";
 
@@ -55,6 +56,7 @@ const EmployeeDetailsPage: React.FC<Props> = ({ id, currentUser, setActiveView }
   const tabs = useMemo(
     () =>
       [
+        { key: "resumo" as const, label: "Resumo" },
         { key: "jornada" as const, label: "Jornada" },
         isManager ? ({ key: "pagamento" as const, label: "Pagamento" }) : null,
         { key: "ferias" as const, label: "Férias" },
@@ -132,6 +134,14 @@ const EmployeeDetailsPage: React.FC<Props> = ({ id, currentUser, setActiveView }
           ))}
         </div>
 
+        {activeTab === "resumo" && (
+          <ResumoTab
+            funcionarioId={funcionarioId}
+            admissionDate={employee.admission_date}
+            baseSalary={Number(employee.base_salary) || 0}
+            isManager={isManager}
+          />
+        )}
         {activeTab === "jornada" && <JornadaTab funcionarioId={funcionarioId} />}
         {activeTab === "pagamento" && isManager && (
           <PagamentoTab funcionarioId={funcionarioId} baseSalary={Number(employee.base_salary) || 0} />
