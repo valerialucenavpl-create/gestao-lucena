@@ -2112,7 +2112,7 @@ const handleSavePDF = async () => {
                 <select
                   value={freightCityId}
                   onChange={(e) => setFreightCityId(e.target.value)}
-                  className="flex-1 h-10 px-2 border rounded-md text-sm text-gray-900"
+                  className="flex-1 min-w-0 h-10 px-2 border rounded-md text-sm text-gray-900"
                 >
                   <option value="">Local cadastrado...</option>
                   {freightRates.map((r) => (
@@ -2124,7 +2124,7 @@ const handleSavePDF = async () => {
                 <select
                   value={freightVehicle}
                   onChange={(e) => setFreightVehicle(e.target.value as "Carro" | "Moto")}
-                  className="w-24 h-10 px-2 border rounded-md text-sm text-gray-900"
+                  className="w-[72px] shrink-0 h-10 px-1 border rounded-md text-sm text-gray-900"
                 >
                   <option value="Carro">Carro</option>
                   <option value="Moto">Moto</option>
@@ -2150,7 +2150,7 @@ const handleSavePDF = async () => {
                     setFreight(saleValue);
                     setFreightInput(formatMoneyInputBR(saleValue));
                   }}
-                  className="px-3 h-10 bg-primary-600 text-white text-xs font-bold rounded-md hover:bg-primary-700 disabled:opacity-50"
+                  className="px-3 h-10 shrink-0 bg-primary-600 text-white text-xs font-bold rounded-md hover:bg-primary-700 disabled:opacity-50"
                 >
                   Aplicar
                 </button>
