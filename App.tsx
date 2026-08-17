@@ -15,6 +15,7 @@ import Login from "./components/Login";
 import CashFlowForm from "./components/CashFlowForm";
 import Products from "./components/Products";
 import Sellers from "./components/Sellers";
+import Montagens from "./components/Montagens";
 import Payables from "./components/Payables";
 import Receivables from "./components/Receivables";
 import AgendaPage from "./components/agenda/AgendaPage";
@@ -62,6 +63,7 @@ import {
   ProductCompositionItem,
   VariableExpense,
   CashFlowEntry,
+  Montagem,
 } from "./types";
 
 const USERS_TABLE = "users";
@@ -265,6 +267,7 @@ const App: React.FC = () => {
   const [clients, setClients] = useState<Client[]>([]);
   const [rawMaterials, setRawMaterials] = useState<InventoryItem[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [montagens, setMontagens] = useState<Montagem[]>([]);
   const [variableExpenses, setVariableExpenses] = useState<VariableExpense[]>([]);
   const [cashFlow, setCashFlow] = useState<CashFlowEntry[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -624,6 +627,18 @@ const App: React.FC = () => {
         console.error("Erro ao carregar produtos após tentativas:", p.error);
       }
 
+      const montagensRes = await supabase.from("montagens").select("*").order("name", { ascending: true });
+      if (Array.isArray(montagensRes.data)) {
+        setMontagens(
+          montagensRes.data.map((row: any) => ({
+            id: String(row.id),
+            name: row.name || "",
+            price: Number(row.price || 0),
+            insumos: Array.isArray(row.insumos) ? row.insumos : [],
+          }))
+        );
+      }
+
       const v = await supabase.from(VARIABLE_EXPENSES_TABLE).select("*");
       if (Array.isArray(v.data)) {
         const normalized = v.data.map((e: any) => ({
@@ -806,6 +821,7 @@ if (
             clients={clients}
             rawMaterials={rawMaterials}
             products={products}
+            montagens={montagens}
             variableExpenses={variableExpenses}
             companySettings={companySettings}
             nextQuoteNumber={nextQuoteNumber}
@@ -937,6 +953,9 @@ if (
 
       case "sellers":
         return <Sellers currentUser={currentUser} />;
+
+      case "montagens":
+        return <Montagens montagens={montagens} setMontagens={setMontagens} currentUser={currentUser} />;
 
       case "reports":
         return (

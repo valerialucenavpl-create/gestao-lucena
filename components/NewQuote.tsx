@@ -11,6 +11,9 @@ import {
   QuoteItem,
   QuoteItemMaterialLine,
   QuoteItemLaborLine,
+  Montagem,
+  QuoteItemMontagem,
+  QuoteItemAssemblyLine,
 } from "../types";
 import { generateQuotePDF, PDFOptions, cityFromAddress } from "../utils/generateQuotePDF";
 import { Icon } from "./icons/Icon";
@@ -166,6 +169,7 @@ interface NewQuoteProps {
   clients: Client[];
   rawMaterials: InventoryItem[];
   products: Product[];
+  montagens: Montagem[];
   variableExpenses: VariableExpense[];
   companySettings: CompanySettings;
   nextQuoteNumber: number;
@@ -218,6 +222,7 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   clients,
   rawMaterials: rawMaterialsProp,
   products,
+  montagens,
   variableExpenses,
   companySettings,
   nextQuoteNumber,
@@ -295,6 +300,7 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   }, [rawMaterialsProp, dbRawMaterials]);
   const [showMaterialDetail, setShowMaterialDetail] = useState(false);
   const [showLaborDetail, setShowLaborDetail] = useState(false);
+  const [showAssemblyDetail, setShowAssemblyDetail] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState<string>("");
   const [clientSearch, setClientSearch] = useState<string>("");
   const [clientDropdownOpen, setClientDropdownOpen] = useState<boolean>(false);
@@ -453,6 +459,8 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [mrExtraService, setMrExtraService] = useState<number>(0);
   const [mrExtraServiceInput, setMrExtraServiceInput] = useState<string>(formatMoneyInputBR(0));
   const [mrDescription, setMrDescription] = useState<string>("");
+  const [mrSelectedMontagemId, setMrSelectedMontagemId] = useState<string>("");
+  const [mrMontagens, setMrMontagens] = useState<QuoteItemMontagem[]>([]);
 
   // ACESSÓRIOS / PRODUTOS PRONTOS (categoria "ACESSORIO DE MOTOR" — produtos
   // soltos, sem fórmula de medida: controles, fechaduras, cremalheiras, etc.)
@@ -1026,11 +1034,13 @@ const NewQuote: React.FC<NewQuoteProps> = ({
 
   // Valor estimado em tempo real, conforme o usuário digita as medidas —
   // sem isso, só dava pra saber o preço depois de clicar em "Adicionar".
+  const mrMontagemTotal = mrMontagens.reduce((s, m) => s + (Number(m.price) || 0), 0);
+
   const mrLivePrice = useMemo(() => {
     const calc = getMarmoreCalculations();
     if (!calc) return null;
-    return calc.totalPrice + (Number(mrExtraService) || 0);
-  }, [mrSelectedProductId, mrPieces, selectedColor, mrExtraService, products, rawMaterials]);
+    return calc.totalPrice + (Number(mrExtraService) || 0) + mrMontagemTotal;
+  }, [mrSelectedProductId, mrPieces, selectedColor, mrExtraService, products, rawMaterials, mrMontagemTotal]);
 
   // ============================
 const categories = [
@@ -1154,6 +1164,23 @@ const categories = [
     );
   };
 
+  // Montagem (Mármore): valor fixo somado ao preço da peça, sem o nome
+  // aparecer pro cliente — só o insumo (custo) fica visível pro Admin.
+  const addMrMontagem = () => {
+    if (!mrSelectedMontagemId) return;
+    const montagem = montagens.find((m) => m.id === mrSelectedMontagemId);
+    if (!montagem) return;
+    setMrMontagens((prev) => [
+      ...prev,
+      { id: `mrm-${Date.now()}`, montagemId: montagem.id, name: montagem.name, price: montagem.price },
+    ]);
+    setMrSelectedMontagemId("");
+  };
+
+  const removeMrMontagem = (id: string) => {
+    setMrMontagens((prev) => prev.filter((m) => m.id !== id));
+  };
+
   // ============================
   //          GLASS WIZARD
   // ============================
@@ -1214,8 +1241,19 @@ const categories = [
     if (!calc) return alert("Adicione medidas válidas.");
 
     const totalExtra = Number(mrExtraService) || 0;
-    const finalPrice = calc.totalPrice + totalExtra;
-    const totalCost = calc.totalCost + totalExtra;
+    const montagemPriceTotal = mrMontagens.reduce((s, m) => s + (Number(m.price) || 0), 0);
+    const assemblyBreakdown: QuoteItemAssemblyLine[] = mrMontagens.flatMap((m) => {
+      const montagem = montagens.find((mm) => mm.id === m.montagemId);
+      return (montagem?.insumos || []).map((insumo) => ({
+        montagemName: m.name,
+        insumoName: insumo.name,
+        value: Number(insumo.value) || 0,
+      }));
+    });
+    const assemblyCost = assemblyBreakdown.reduce((s, l) => s + l.value, 0);
+
+    const finalPrice = calc.totalPrice + totalExtra + montagemPriceTotal;
+    const totalCost = calc.totalCost + totalExtra + assemblyCost;
 
     const validPieces = mrPieces.filter((p) => p.length > 0 && p.width > 0 && p.quantity > 0);
     const detalhamentoLines = validPieces.map(
@@ -1251,6 +1289,9 @@ const categories = [
       fixedCostValue: calc.totalFixedCostValue,
       materialBreakdown: calc.materialBreakdown,
       laborBreakdown: calc.laborBreakdown,
+      montagens: mrMontagens.length > 0 ? mrMontagens : undefined,
+      assemblyCost: assemblyCost > 0 ? assemblyCost : undefined,
+      assemblyBreakdown: assemblyBreakdown.length > 0 ? assemblyBreakdown : undefined,
     };
 
     setItems((prev) => [...prev, newItem]);
@@ -1258,6 +1299,8 @@ const categories = [
     setMrExtraService(0);
     setMrExtraServiceInput(formatMoneyInputBR(0));
     setMrDescription("");
+    setMrMontagens([]);
+    setMrSelectedMontagemId("");
   };
 
   // Produto pronto (categoria "ACESSORIO DE MOTOR"): sem medida, preço vem
@@ -1515,6 +1558,23 @@ const categories = [
     });
     return Array.from(map.values());
   }, [items]);
+
+  const aggregatedAssemblyBreakdown = useMemo(() => {
+    const map = new Map<string, QuoteItemAssemblyLine>();
+    items.forEach((item) => {
+      (item.assemblyBreakdown || []).forEach((line) => {
+        const key = `${line.montagemName}|${line.insumoName}`;
+        const existing = map.get(key);
+        if (existing) {
+          existing.value += line.value;
+        } else {
+          map.set(key, { ...line });
+        }
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => b.value - a.value);
+  }, [items]);
+
   const totalFixedCostValue = items.reduce(
     (sum, item) =>
       sum + (item.fixedCostValue ?? item.price * (globalFixedCostRate / 100)),
@@ -1549,6 +1609,11 @@ const totalPrice = baseTotal + referralCommissionValue;
 
 const totalCostOfGoods =
   items.reduce((sum, item) => sum + item.cost, 0);
+
+// Custo dos insumos de montagem (cantoneira, argamassa etc.) já embutido
+// em item.cost acima — aqui é só pra exibir a linha separada no
+// detalhamento do Admin, sem descontar de novo.
+const totalAssemblyCost = items.reduce((sum, item) => sum + (item.assemblyCost || 0), 0);
 
 // Custo embutido no valor de Instalação (argamassa, cantoneiras, mão de
 // obra etc.) — descontado do lucro para o valor de Instalação deixar de
@@ -2340,6 +2405,71 @@ const handleSavePDF = async () => {
             </div>
 
             <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">4. Montagem</label>
+              <div className="flex gap-2">
+                <select
+                  value={mrSelectedMontagemId}
+                  onChange={(e) => setMrSelectedMontagemId(e.target.value)}
+                  className="flex-1 h-11 px-3 border rounded-lg text-gray-900"
+                >
+                  <option value="">Selecione uma montagem (opcional)</option>
+                  {montagens.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name} — R$ {m.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={addMrMontagem}
+                  disabled={!mrSelectedMontagemId}
+                  className="px-4 h-11 bg-primary-600 text-white text-sm font-bold rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
+                >
+                  + Adicionar
+                </button>
+              </div>
+
+              {mrMontagens.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {mrMontagens.map((m) => (
+                    <div
+                      key={m.id}
+                      className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                    >
+                      <span className="text-gray-700">{m.name}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="font-semibold text-gray-900">
+                          R$ {m.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeMrMontagem(m.id)}
+                          className="text-red-500 hover:text-red-700"
+                          title="Remover"
+                        >
+                          <Icon className="w-4 h-4">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                          </Icon>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex justify-between text-xs font-bold text-gray-500 pt-1">
+                    <span>Total montagem (soma no valor da peça):</span>
+                    <span>
+                      R${" "}
+                      {mrMontagemTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              )}
+              <p className="text-[11px] text-gray-400 mt-1">
+                O valor da montagem entra dentro do valor da peça — o cliente não vê esse nome.
+              </p>
+            </div>
+
+            <div>
               <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Descrição</label>
               <textarea
                 value={mrDescription}
@@ -3077,6 +3207,7 @@ const handleSavePDF = async () => {
               const materialCost = catItems.reduce((s, i) => s + (i.materialCost ?? 0), 0);
               const laborCost = catItems.reduce((s, i) => s + (i.laborCost ?? 0), 0);
               const costOfGoods = catItems.reduce((s, i) => s + i.cost, 0);
+              const assemblyCost = catItems.reduce((s, i) => s + (i.assemblyCost ?? 0), 0);
               const fixedCostValue = catItems.reduce(
                 (s, i) => s + (i.fixedCostValue ?? i.price * (globalFixedCostRate / 100)),
                 0
@@ -3104,6 +3235,7 @@ const handleSavePDF = async () => {
                 laborCost,
                 costOfGoods,
                 installationCost: 0,
+                assemblyCost,
                 taxValue: catTaxValue,
                 commissionValue: catCommissionValue,
                 discountValue: catDiscountValue,
@@ -3124,6 +3256,7 @@ const handleSavePDF = async () => {
             laborCost: number;
             costOfGoods: number;
             installationCost: number;
+            assemblyCost: number;
             taxValue: number;
             commissionValue: number;
             discountValue: number;
@@ -3176,6 +3309,23 @@ const handleSavePDF = async () => {
                       )}
                     </span>
                     <span className="font-medium">R$ {fmt(data.laborCost)}</span>
+                  </div>
+                )}
+                {data.assemblyCost > 0 && (
+                  <div className="flex justify-between text-gray-700">
+                    <span className="flex items-center gap-2">
+                      Custo de montagem:
+                      {withDetailLinks && aggregatedAssemblyBreakdown.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAssemblyDetail(true)}
+                          className="text-xs text-primary-700 underline hover:text-primary-900"
+                        >
+                          ver detalhamento
+                        </button>
+                      )}
+                    </span>
+                    <span className="font-medium">R$ {fmt(data.assemblyCost)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-gray-800 font-semibold border-t border-yellow-300 pt-1 mt-1">
@@ -3259,6 +3409,7 @@ const handleSavePDF = async () => {
                   laborCost: totalLaborCost,
                   costOfGoods: totalCostOfGoods,
                   installationCost: installationCostTotal,
+                  assemblyCost: totalAssemblyCost,
                   taxValue,
                   commissionValue,
                   discountValue,
@@ -3828,6 +3979,55 @@ const handleSavePDF = async () => {
                   <td colSpan={4} className="px-3 py-2 text-right font-semibold text-gray-700">Total:</td>
                   <td className="px-3 py-2 text-right font-bold text-gray-900">
                     R$ {totalLaborCost.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {showAssemblyDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-xl max-h-[80vh] overflow-y-auto rounded-2xl border border-blue-100 bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-800">Detalhamento da montagem</h3>
+              <button
+                type="button"
+                onClick={() => setShowAssemblyDetail(false)}
+                className="rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                Fechar
+              </button>
+            </div>
+            <p className="mb-3 text-xs text-slate-500">
+              Insumos internos das montagens escolhidas neste orçamento — o cliente não vê isso.
+            </p>
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-xs uppercase text-gray-600">
+                <tr>
+                  <th className="px-3 py-2 text-left">Montagem</th>
+                  <th className="px-3 py-2 text-left">Insumo</th>
+                  <th className="px-3 py-2 text-right">Valor</th>
+                </tr>
+              </thead>
+              <tbody>
+                {aggregatedAssemblyBreakdown.map((line, idx) => (
+                  <tr key={`${line.montagemName}-${line.insumoName}-${idx}`} className="border-t">
+                    <td className="px-3 py-2 text-gray-600">{line.montagemName}</td>
+                    <td className="px-3 py-2 font-medium text-gray-800">{line.insumoName}</td>
+                    <td className="px-3 py-2 text-right font-semibold text-gray-800">
+                      R$ {line.value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-slate-300">
+                  <td colSpan={2} className="px-3 py-2 text-right font-semibold text-gray-700">Total:</td>
+                  <td className="px-3 py-2 text-right font-bold text-gray-900">
+                    R${" "}
+                    {totalAssemblyCost.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
               </tfoot>

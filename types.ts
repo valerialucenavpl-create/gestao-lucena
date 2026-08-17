@@ -18,7 +18,8 @@ export type View =
   | "assistant"
   | "reports"
   | "settings"
-  | "sellers";
+  | "sellers"
+  | "montagens";
 
 
 // ---------------------------------------------
@@ -219,6 +220,36 @@ export interface QuoteInstallationCostLine {
   value: number;
 }
 
+export interface MontagemInsumo {
+  id: string;
+  name: string;
+  value: number;
+}
+
+export interface Montagem {
+  id: string;
+  name: string;
+  price: number;
+  insumos?: MontagemInsumo[];
+}
+
+// Montagem escolhida dentro de um item de orçamento — guarda o preço no
+// momento da escolha (independe de o catálogo de montagens mudar depois).
+export interface QuoteItemMontagem {
+  id: string;
+  montagemId: string;
+  name: string;
+  price: number;
+}
+
+// Insumo de montagem já "explodido" dentro de um item, com o nome da
+// montagem de origem — usado só no detalhamento financeiro (Admin).
+export interface QuoteItemAssemblyLine {
+  montagemName: string;
+  insumoName: string;
+  value: number;
+}
+
 export interface QuoteItem {
   id: string;
   productId: string;
@@ -235,6 +266,9 @@ export interface QuoteItem {
   fixedCostValue?: number;
   materialBreakdown?: QuoteItemMaterialLine[];
   laborBreakdown?: QuoteItemLaborLine[];
+  montagens?: QuoteItemMontagem[];
+  assemblyCost?: number;
+  assemblyBreakdown?: QuoteItemAssemblyLine[];
 }
 // ---------------------------------------------
 // Orçamentos

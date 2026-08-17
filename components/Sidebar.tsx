@@ -17,6 +17,7 @@ import {
   UserCheck,
   Lock,
   Calendar,
+  Wrench,
 } from "lucide-react";
 
 import { User, View } from "../types";
@@ -31,8 +32,8 @@ type Props = {
 
 // Views that each role CANNOT access (padlock shown, click shows toast)
 const BLOCKED_VIEWS: Partial<Record<User["role"], Set<string>>> = {
-  Sales:   new Set(["cashflow", "payables", "receivables", "financials", "employees", "reports"]),
-  Finance: new Set(["products", "inventory", "sellers", "settings"]),
+  Sales:   new Set(["cashflow", "payables", "receivables", "financials", "employees", "reports", "montagens"]),
+  Finance: new Set(["products", "inventory", "sellers", "settings", "montagens"]),
 };
 
 const Sidebar: React.FC<Props> = ({
@@ -136,6 +137,7 @@ const Sidebar: React.FC<Props> = ({
         <Item view="agenda"     label="Agenda"           Icon={Calendar} />
         <Item view="products"   label="Produtos"         Icon={Box} />
         <Item view="inventory"  label="Matéria Prima"    Icon={Layers} />
+        <Item view="montagens"  label="Montagens"        Icon={Wrench} />
         <Item view="cashflow"    label="Caixa"             Icon={Wallet} />
         <Item view="payables"   label="Contas a Pagar"   Icon={CreditCard} />
         <Item view="receivables" label="Contas a Receber" Icon={TrendingUp} />

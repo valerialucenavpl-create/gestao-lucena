@@ -182,6 +182,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
 
     const totalMaterialCost = safeItems.reduce((s, i) => s + (i.materialCost ?? 0), 0);
     const totalLaborCost = safeItems.reduce((s, i) => s + (i.laborCost ?? 0), 0);
+    const totalAssemblyCost = safeItems.reduce((s, i) => s + (i.assemblyCost ?? 0), 0);
     const installationCostTotal = (localQuote.installationCostItems || []).reduce(
       (s, i) => s + (Number(i.value) || 0),
       0
@@ -201,6 +202,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
       laborCost: totalLaborCost,
       costOfGoods: totalCostOfGoods,
       installationCost: installationCostTotal,
+      assemblyCost: totalAssemblyCost,
       taxValue,
       commissionValue,
       discountValue,
@@ -256,6 +258,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
         const materialCost = catItems.reduce((s, i) => s + (i.materialCost ?? 0), 0);
         const laborCost = catItems.reduce((s, i) => s + (i.laborCost ?? 0), 0);
         const costOfGoods = catItems.reduce((s, i) => s + i.cost, 0);
+        const assemblyCost = catItems.reduce((s, i) => s + (i.assemblyCost ?? 0), 0);
         const catFixedCostValue = catItems.reduce((s, i) => s + (i.fixedCostValue ?? 0), 0);
 
         const catTotalPrice = share * totalPrice;
@@ -279,6 +282,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
           laborCost,
           costOfGoods,
           installationCost: 0,
+          assemblyCost,
           taxValue: catTaxValue,
           commissionValue: catCommissionValue,
           discountValue: catDiscountValue,
@@ -691,6 +695,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
                 {row("CMV total", d.costOfGoods, "#f5f6fa")}
               </div>
               {d.installationCost > 0 && row("Custo da instalação", d.installationCost)}
+              {d.assemblyCost > 0 && row("Custo de montagem", d.assemblyCost)}
               {d.taxValue > 0 && row("Impostos", d.taxValue)}
               {d.commissionValue > 0 && row("Comissão vendedora", d.commissionValue)}
               {d.discountValue > 0 && row("Desconto", -d.discountValue, "#22c55e")}
