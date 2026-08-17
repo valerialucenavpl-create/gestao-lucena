@@ -588,67 +588,93 @@ const App: React.FC = () => {
     const fetchProductsWithRetry = () =>
       fetchAllWithRetry<ProductRow>(() => supabase.from(PRODUCTS_TABLE).select("*"));
 
+    // As 5 buscas abaixo são independentes entre si (nenhuma usa o
+    // resultado da outra), mas antes rodavam uma atrás da outra com
+    // "await" em sequência — cada retry de inventory/products esperava
+    // a busca anterior terminar antes de sequer começar, o que deixava a
+    // tela de Novo Orçamento demorando bem mais que o necessário pra
+    // mostrar os produtos (chegava a piscar "nenhum produto encontrado").
+    // Rodando em paralelo com Promise.all, o tempo total vira o da busca
+    // mais lenta, não a soma de todas.
     const loadSystemData = async () => {
       try {
-      const clientsRes = await supabase.from("clients").select("*").is("deleted_at", null);
-      setClients(Array.isArray(clientsRes.data) ? (clientsRes.data as Client[]) : []);
+        const loadClients = async () => {
+          const clientsRes = await supabase.from("clients").select("*").is("deleted_at", null);
+          setClients(Array.isArray(clientsRes.data) ? (clientsRes.data as Client[]) : []);
+        };
 
-      const iWithVariants = await fetchAllWithRetry<MaterialVariantRow>(() =>
-        supabase.from(INVENTORY_TABLE).select("*, inventory_variants(*)")
-      );
+        const loadInventory = async () => {
+          const iWithVariants = await fetchAllWithRetry<MaterialVariantRow>(() =>
+            supabase.from(INVENTORY_TABLE).select("*, inventory_variants(*)")
+          );
 
-      let inventoryRows: MaterialVariantRow[] = Array.isArray(iWithVariants.data)
-        ? (iWithVariants.data as MaterialVariantRow[])
-        : [];
+          let inventoryRows: MaterialVariantRow[] = Array.isArray(iWithVariants.data)
+            ? (iWithVariants.data as MaterialVariantRow[])
+            : [];
 
-      if (iWithVariants.error) {
-        console.error("Falha ao carregar inventory com variantes:", iWithVariants.error);
-        const iFallback = await fetchAllWithRetry<MaterialVariantRow>(() =>
-          supabase.from(INVENTORY_TABLE).select("*")
-        );
-        inventoryRows = Array.isArray(iFallback.data)
-          ? (iFallback.data as MaterialVariantRow[])
-          : [];
-      }
+          if (iWithVariants.error) {
+            console.error("Falha ao carregar inventory com variantes:", iWithVariants.error);
+            const iFallback = await fetchAllWithRetry<MaterialVariantRow>(() =>
+              supabase.from(INVENTORY_TABLE).select("*")
+            );
+            inventoryRows = Array.isArray(iFallback.data)
+              ? (iFallback.data as MaterialVariantRow[])
+              : [];
+          }
 
-      let inventoryRowsWithPhotos: Record<string, unknown>[] = inventoryRows as Record<string, unknown>[];
-      try {
-        inventoryRowsWithPhotos = await enrichMaterialRowsWithPhotoUrls(inventoryRows as Record<string, unknown>[]);
-      } catch (e) {
-        console.warn("enrichMaterialRowsWithPhotoUrls falhou, usando dados sem fotos:", e);
-      }
+          let inventoryRowsWithPhotos: Record<string, unknown>[] = inventoryRows as Record<string, unknown>[];
+          try {
+            inventoryRowsWithPhotos = await enrichMaterialRowsWithPhotoUrls(inventoryRows as Record<string, unknown>[]);
+          } catch (e) {
+            console.warn("enrichMaterialRowsWithPhotoUrls falhou, usando dados sem fotos:", e);
+          }
 
-      setRawMaterials(normalizeRawMaterials(inventoryRowsWithPhotos));
+          setRawMaterials(normalizeRawMaterials(inventoryRowsWithPhotos));
+        };
 
-      const p = await fetchProductsWithRetry();
-      if (p.data) {
-        setProducts(normalizeProducts(p.data));
-      } else if (p.error) {
-        console.error("Erro ao carregar produtos após tentativas:", p.error);
-      }
+        const loadProducts = async () => {
+          const p = await fetchProductsWithRetry();
+          if (p.data) {
+            setProducts(normalizeProducts(p.data));
+          } else if (p.error) {
+            console.error("Erro ao carregar produtos após tentativas:", p.error);
+          }
+        };
 
-      const montagensRes = await supabase.from("montagens").select("*").order("name", { ascending: true });
-      if (Array.isArray(montagensRes.data)) {
-        setMontagens(
-          montagensRes.data.map((row: any) => ({
-            id: String(row.id),
-            name: row.name || "",
-            price: Number(row.price || 0),
-            insumos: Array.isArray(row.insumos) ? row.insumos : [],
-          }))
-        );
-      }
+        const loadMontagens = async () => {
+          const montagensRes = await supabase.from("montagens").select("*").order("name", { ascending: true });
+          if (Array.isArray(montagensRes.data)) {
+            setMontagens(
+              montagensRes.data.map((row: any) => ({
+                id: String(row.id),
+                name: row.name || "",
+                price: Number(row.price || 0),
+                insumos: Array.isArray(row.insumos) ? row.insumos : [],
+              }))
+            );
+          }
+        };
 
-      const v = await supabase.from(VARIABLE_EXPENSES_TABLE).select("*");
-      if (Array.isArray(v.data)) {
-        const normalized = v.data.map((e: any) => ({
-          ...e,
-          type: (String(e.type || "").toLowerCase().includes("percent") || e.type === "Percentual")
-            ? "percent"
-            : "fixed",
-        }));
-        setVariableExpenses(normalized as VariableExpense[]);
-      }
+        const loadVariableExpenses = async () => {
+          const v = await supabase.from(VARIABLE_EXPENSES_TABLE).select("*");
+          if (Array.isArray(v.data)) {
+            const normalized = v.data.map((e: any) => ({
+              ...e,
+              type: (String(e.type || "").toLowerCase().includes("percent") || e.type === "Percentual")
+                ? "percent"
+                : "fixed",
+            }));
+            setVariableExpenses(normalized as VariableExpense[]);
+          }
+        };
+
+        await Promise.all([
+          loadClients(),
+          loadInventory(),
+          loadProducts(),
+          loadMontagens(),
+          loadVariableExpenses(),
+        ]);
       } catch (err) {
         console.error("Erro ao carregar dados do sistema:", err);
       }
