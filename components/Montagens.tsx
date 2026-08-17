@@ -25,6 +25,26 @@ const getMaterialVariants = (material?: InventoryItem | null): any[] => {
 };
 const getVariantCost = (variant?: any) => Number(variant?.cost ?? variant?.cost_price ?? 0);
 
+const normalizeMaterialVariant = (variant: Record<string, unknown>) => {
+  const name = String(
+    (variant as any)?.name ?? (variant as any)?.color_name ?? (variant as any)?.variant_name ?? (variant as any)?.color ?? ""
+  ).trim();
+  if (!name) return null;
+  const cost = Number(
+    (variant as any)?.cost ?? (variant as any)?.cost_price ?? (variant as any)?.price ?? (variant as any)?.value ?? 0
+  );
+  const salePrice = Number(
+    (variant as any)?.salePrice ??
+      (variant as any)?.sale_price ??
+      (variant as any)?.price ??
+      (variant as any)?.cost ??
+      (variant as any)?.cost_price ??
+      (variant as any)?.value ??
+      0
+  );
+  return { name, cost, salePrice };
+};
+
 type InsumoRowState = {
   id: string;
   materialId: string;
@@ -73,11 +93,64 @@ const normalizeRow = (row: any): Montagem => ({
   labor: Array.isArray(row.labor) ? row.labor : [],
 });
 
-const Montagens: React.FC<Props> = ({ montagens, setMontagens, currentUser, rawMaterials, variableExpenses }) => {
+const Montagens: React.FC<Props> = ({
+  montagens,
+  setMontagens,
+  currentUser,
+  rawMaterials: rawMaterialsProp,
+  variableExpenses,
+}) => {
   const isAdmin = currentUser?.role === "Admin";
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // A lista de Matéria Prima carregada no App.tsx é buscada só uma vez, no
+  // início da sessão — se a usuária cadastrar um material novo e vier direto
+  // pra cá, ele fica de fora até recarregar a página. Busca uma versão
+  // fresca aqui também (mesmo padrão já usado em NewQuote.tsx).
+  const [dbRawMaterials, setDbRawMaterials] = useState<InventoryItem[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { data, error } = await supabase.from("inventory").select("*, inventory_variants(*)");
+      if (error || !Array.isArray(data) || !active) return;
+
+      const normalized = data
+        .map((row: any) => {
+          const variantSource = Array.isArray(row?.inventory_variants) ? row.inventory_variants : [];
+          const colorVariants = variantSource
+            .map((variant: any) => normalizeMaterialVariant(variant))
+            .filter((v): v is { name: string; cost: number; salePrice: number } => Boolean(v));
+
+          return {
+            ...row,
+            id: String(row?.id ?? ""),
+            name: String(row?.name ?? row?.material_name ?? "").trim(),
+            unit: String(row?.unit ?? "un"),
+            colorVariants,
+          } as InventoryItem;
+        })
+        .filter((item) => Boolean(item.id) && Boolean(item.name));
+
+      if (active) setDbRawMaterials(normalized);
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const rawMaterials = useMemo(() => {
+    const byId = new Map<string, InventoryItem>();
+    rawMaterialsProp.forEach((item) => byId.set(String(item.id), item));
+    dbRawMaterials.forEach((item) => {
+      const id = String(item.id);
+      const existing = byId.get(id);
+      byId.set(id, existing ? { ...existing, ...item } : item);
+    });
+    return Array.from(byId.values());
+  }, [rawMaterialsProp, dbRawMaterials]);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
