@@ -57,9 +57,16 @@ const EmployeesList: React.FC<Props> = ({ setActiveView }) => {
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return employees;
-    return employees.filter(
-      (e) => (e.name || "").toLowerCase().includes(term) || (e.role || "").toLowerCase().includes(term)
+    const base = !term
+      ? employees
+      : employees.filter(
+          (e) => (e.name || "").toLowerCase().includes(term) || (e.role || "").toLowerCase().includes(term)
+        );
+    // Ordena aqui também (não só no banco) — nomes com espaço a mais no
+    // início/fim ou variações de acentuação bagunçavam o ORDER BY do
+    // Supabase; localeCompare em pt-BR garante A-Z de verdade na tela.
+    return [...base].sort((a, b) =>
+      (a.name || "").trim().localeCompare((b.name || "").trim(), "pt-BR", { sensitivity: "base" })
     );
   }, [employees, search]);
 
