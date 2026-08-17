@@ -2108,11 +2108,11 @@ const handleSavePDF = async () => {
             <label className="block text-sm font-medium text-gray-700">Frete (R$)</label>
 
             {freightRates.length > 0 && (
-              <div className="flex gap-2 mb-2">
+              <div className="space-y-1 mb-2">
                 <select
                   value={freightCityId}
                   onChange={(e) => setFreightCityId(e.target.value)}
-                  className="flex-1 min-w-0 h-10 px-2 border rounded-md text-sm text-gray-900"
+                  className="w-full h-10 px-2 border rounded-md text-sm text-gray-900"
                 >
                   <option value="">Local cadastrado...</option>
                   {freightRates.map((r) => (
@@ -2121,39 +2121,41 @@ const handleSavePDF = async () => {
                     </option>
                   ))}
                 </select>
-                <select
-                  value={freightVehicle}
-                  onChange={(e) => setFreightVehicle(e.target.value as "Carro" | "Moto")}
-                  className="w-[72px] shrink-0 h-10 px-1 border rounded-md text-sm text-gray-900"
-                >
-                  <option value="Carro">Carro</option>
-                  <option value="Moto">Moto</option>
-                </select>
-                <button
-                  type="button"
-                  disabled={!freightCityId}
-                  onClick={() => {
-                    const rate = freightRates.find((r) => r.id === freightCityId);
-                    if (!rate) return;
-                    const commissionRate =
-                      variableExpenses.find((e) => normalizeText(e.name).includes(normalizeText("comissão")))?.value || 0;
-                    const taxRate =
-                      variableExpenses.find(
-                        (e) =>
-                          normalizeText(e.name).includes(normalizeText("imposto")) ||
-                          normalizeText(e.name).includes(normalizeText("simples"))
-                      )?.value || 0;
-                    const dvvFrac = (commissionRate + taxRate) / 100;
-                    const kmRate = freightVehicle === "Moto" ? freightConfig.kmRateMoto : freightConfig.kmRateCar;
-                    const base = rate.km * kmRate * (1 + freightConfig.markup / 100);
-                    const saleValue = dvvFrac >= 1 ? base : base / (1 - dvvFrac);
-                    setFreight(saleValue);
-                    setFreightInput(formatMoneyInputBR(saleValue));
-                  }}
-                  className="px-3 h-10 shrink-0 bg-primary-600 text-white text-xs font-bold rounded-md hover:bg-primary-700 disabled:opacity-50"
-                >
-                  Aplicar
-                </button>
+                <div className="flex gap-2">
+                  <select
+                    value={freightVehicle}
+                    onChange={(e) => setFreightVehicle(e.target.value as "Carro" | "Moto")}
+                    className="flex-1 h-10 px-2 border rounded-md text-sm text-gray-900"
+                  >
+                    <option value="Carro">Carro</option>
+                    <option value="Moto">Moto</option>
+                  </select>
+                  <button
+                    type="button"
+                    disabled={!freightCityId}
+                    onClick={() => {
+                      const rate = freightRates.find((r) => r.id === freightCityId);
+                      if (!rate) return;
+                      const commissionRate =
+                        variableExpenses.find((e) => normalizeText(e.name).includes(normalizeText("comissão")))?.value || 0;
+                      const taxRate =
+                        variableExpenses.find(
+                          (e) =>
+                            normalizeText(e.name).includes(normalizeText("imposto")) ||
+                            normalizeText(e.name).includes(normalizeText("simples"))
+                        )?.value || 0;
+                      const dvvFrac = (commissionRate + taxRate) / 100;
+                      const kmRate = freightVehicle === "Moto" ? freightConfig.kmRateMoto : freightConfig.kmRateCar;
+                      const base = rate.km * kmRate * (1 + freightConfig.markup / 100);
+                      const saleValue = dvvFrac >= 1 ? base : base / (1 - dvvFrac);
+                      setFreight(saleValue);
+                      setFreightInput(formatMoneyInputBR(saleValue));
+                    }}
+                    className="px-4 h-10 shrink-0 bg-primary-600 text-white text-xs font-bold rounded-md hover:bg-primary-700 disabled:opacity-50"
+                  >
+                    Aplicar
+                  </button>
+                </div>
               </div>
             )}
 
