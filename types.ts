@@ -222,8 +222,20 @@ export interface QuoteInstallationCostLine {
 
 export interface MontagemInsumo {
   id: string;
+  materialId?: string;
   name: string;
+  quantity?: number;
+  unitValue?: number;
   value: number;
+}
+
+export interface MontagemLaborLine {
+  id: string;
+  role: string;
+  count: number;
+  hours: number;
+  rate: number;
+  total: number;
 }
 
 export interface Montagem {
@@ -231,6 +243,7 @@ export interface Montagem {
   name: string;
   price: number;
   insumos?: MontagemInsumo[];
+  labor?: MontagemLaborLine[];
 }
 
 // Montagem escolhida dentro de um item de orçamento — guarda o preço no

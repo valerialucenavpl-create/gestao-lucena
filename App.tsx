@@ -955,7 +955,15 @@ if (
         return <Sellers currentUser={currentUser} />;
 
       case "montagens":
-        return <Montagens montagens={montagens} setMontagens={setMontagens} currentUser={currentUser} />;
+        return (
+          <Montagens
+            montagens={montagens}
+            setMontagens={setMontagens}
+            currentUser={currentUser}
+            rawMaterials={rawMaterials}
+            variableExpenses={variableExpenses}
+          />
+        );
 
       case "reports":
         return (

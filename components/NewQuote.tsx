@@ -1244,11 +1244,17 @@ const categories = [
     const montagemPriceTotal = mrMontagens.reduce((s, m) => s + (Number(m.price) || 0), 0);
     const assemblyBreakdown: QuoteItemAssemblyLine[] = mrMontagens.flatMap((m) => {
       const montagem = montagens.find((mm) => mm.id === m.montagemId);
-      return (montagem?.insumos || []).map((insumo) => ({
+      const insumoLines = (montagem?.insumos || []).map((insumo) => ({
         montagemName: m.name,
         insumoName: insumo.name,
         value: Number(insumo.value) || 0,
       }));
+      const laborLines = (montagem?.labor || []).map((labor) => ({
+        montagemName: m.name,
+        insumoName: `Mão de obra (${labor.role})`,
+        value: Number(labor.total) || 0,
+      }));
+      return [...insumoLines, ...laborLines];
     });
     const assemblyCost = assemblyBreakdown.reduce((s, l) => s + l.value, 0);
 
