@@ -293,7 +293,12 @@ export async function generateQuotePDF(
   y += clientCardH + 8;
 
   // ─── TABELA DE PRODUTOS ───────────────────────────────────────────────────
-  const extraTotal = (quote.freight || 0) + (quote.installation || 0) + (quote.referralCommissionValue || 0);
+  // Frete diluído é opcional (quote.dissolveFreight, padrão true pra
+  // orçamentos antigos); instalação e comissão de indicação continuam
+  // sempre diluídas, como já era.
+  const freightDissolved = (quote as any).dissolveFreight !== false;
+  const dissolvedFreightValue = freightDissolved ? (quote.freight || 0) : 0;
+  const extraTotal = dissolvedFreightValue + (quote.installation || 0) + (quote.referralCommissionValue || 0);
   const subtotal = quote.subtotal || 0;
   // item.price já é o TOTAL da linha (preço unitário × quantidade, calculado
   // no orçamento) — não um valor por unidade. O bug anterior multiplicava
@@ -513,6 +518,14 @@ export async function generateQuotePDF(
     setTxt(doc, INK);
     doc.text(`R$ ${fmtBR(dissolvedSubtotal)}`, pageW - margin, y + 4, { align: "right" });
     y += 7;
+
+    if (!freightDissolved && (quote.freight || 0) > 0) {
+      setTxt(doc, MUTED);
+      doc.text("Frete", boxX, y + 4);
+      setTxt(doc, INK);
+      doc.text(`R$ ${fmtBR(quote.freight || 0)}`, pageW - margin, y + 4, { align: "right" });
+      y += 7;
+    }
 
     if ((quote.discount || 0) > 0) {
       setTxt(doc, MUTED);

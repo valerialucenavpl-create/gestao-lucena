@@ -310,6 +310,9 @@ export interface Quote {
   subtotal: number;
   discount: number;
   freight: number;
+  // Se true (padrão), o frete some diluído dentro do valor de cada produto
+  // na tela e no PDF; se false, aparece como linha separada pro cliente.
+  dissolveFreight?: boolean;
   installation: number;
   installationCostItems?: QuoteInstallationCostLine[];
   totalPrice: number;

@@ -119,6 +119,7 @@ function normalizeQuoteForDb(quote: Partial<Quote>): Record<string, unknown> {
     subtotal:         q.subtotal,
     discount:         q.discount,
     freight:          q.freight,
+    dissolve_freight: q.dissolveFreight ?? q.dissolve_freight,
     installation:     q.installation,
     installation_cost_items: q.installationCostItems ?? q.installation_cost_items,
     total_price:      q.totalPrice    ?? q.total_price,
@@ -157,6 +158,7 @@ function normalizeQuoteFromDb(row: any): Quote {
     subtotal:          Number(row.subtotal  ?? 0),
     discount:          Number(row.discount  ?? 0),
     freight:           Number(row.freight   ?? 0),
+    dissolveFreight:   (row.dissolve_freight ?? row.dissolveFreight) !== false,
     installation:      Number(row.installation ?? 0),
     installationCostItems: Array.isArray(row.installation_cost_items ?? row.installationCostItems)
       ? (row.installation_cost_items ?? row.installationCostItems)

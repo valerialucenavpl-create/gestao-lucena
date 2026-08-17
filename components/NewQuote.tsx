@@ -318,6 +318,10 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [discountFixedInput, setDiscountFixedInput] = useState<string>(formatMoneyInputBR(0));
   const [freight, setFreight] = useState<number>(0);
   const [freightInput, setFreightInput] = useState<string>(formatMoneyInputBR(0));
+  // Se true, o frete é diluído (rateado) dentro do valor de cada produto —
+  // tanto na prévia da tela quanto no PDF. Se false, o frete aparece como
+  // linha separada e os produtos mostram o valor "puro", sem frete embutido.
+  const [dissolveFreight, setDissolveFreight] = useState<boolean>(true);
   const [installation, setInstallation] = useState<number>(0);
   const [installationInput, setInstallationInput] = useState<string>(formatMoneyInputBR(0));
   const [installationCostItems, setInstallationCostItems] = useState<
@@ -351,6 +355,7 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     setPaymentMethod(editingQuote.paymentMethod || "Cartão");
     setFreight(Number(editingQuote.freight || 0));
     setFreightInput(formatMoneyInputBR(Number(editingQuote.freight || 0)));
+    setDissolveFreight(editingQuote.dissolveFreight !== false);
     setInstallation(Number(editingQuote.installation || 0));
     setInstallationInput(formatMoneyInputBR(Number(editingQuote.installation || 0)));
     setInstallationCostItems(
@@ -1528,6 +1533,16 @@ const categories = [
   };
 
   const subtotal = items.reduce((sum, item) => sum + item.price, 0);
+
+  // Preço do item já com a fatia proporcional do frete embutida — mesma
+  // conta usada no PDF (utils/generateQuotePDF.ts), só que também na tela
+  // antes de salvar, pra usuária ver como vai ficar sem precisar imprimir.
+  const getDisplayedItemPrice = (item: QuoteItem) => {
+    if (!dissolveFreight || freight <= 0 || subtotal <= 0) return item.price;
+    const share = item.price / subtotal;
+    return item.price + share * freight;
+  };
+
   const totalMaterialCost = items.reduce((sum, item) => sum + (item.materialCost ?? 0), 0);
   const totalLaborCost = items.reduce((sum, item) => sum + (item.laborCost ?? 0), 0);
 
@@ -1746,6 +1761,7 @@ const buildQuoteObject = (): Quote => {
     subtotal,
     discount: discountValue,
     freight,
+    dissolveFreight,
     installation,
     installationCostItems:
       installationCostItems.length > 0
@@ -2066,6 +2082,16 @@ const handleSavePDF = async () => {
               onBlur={() => setFreightInput(formatMoneyInputBR(freight))}
               className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-gray-900"
             />
+            {freight > 0 && (
+              <label className="mt-2 flex items-center gap-2 text-xs text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={dissolveFreight}
+                  onChange={(e) => setDissolveFreight(e.target.checked)}
+                />
+                Diluir o frete no valor dos produtos (o cliente não vê o frete separado)
+              </label>
+            )}
           </div>
 
           <div>
@@ -2926,7 +2952,12 @@ const handleSavePDF = async () => {
                   <th className="px-3 py-2 text-center">Alt. (mm)</th>
                   <th className="px-3 py-2 text-center">Larg. (mm)</th>
                   <th className="px-3 py-2 text-center">Qtd</th>
-                  <th className="px-3 py-2 text-right">Valor</th>
+                  <th className="px-3 py-2 text-right">
+                    Valor
+                    {dissolveFreight && freight > 0 && (
+                      <span className="block normal-case font-normal text-[10px] text-gray-400">com frete</span>
+                    )}
+                  </th>
                   <th className="px-3 py-2 text-center">Ações</th>
                 </tr>
               </thead>
@@ -2969,7 +3000,7 @@ const handleSavePDF = async () => {
                         />
                       </td>
                       <td className="px-3 py-2 text-right font-semibold text-gray-800">
-                        R$ {item.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        R$ {getDisplayedItemPrice(item).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td className="px-3 py-2 text-center">
                         <button
@@ -2989,7 +3020,7 @@ const handleSavePDF = async () => {
                       <td className="px-3 py-2 text-center text-gray-600">{item.width || "—"}</td>
                       <td className="px-3 py-2 text-center text-gray-600">{item.quantity}</td>
                       <td className="px-3 py-2 text-right font-semibold text-gray-800">
-                        R$ {item.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        R$ {getDisplayedItemPrice(item).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td className="px-3 py-2 text-center space-x-1">
                         <button
