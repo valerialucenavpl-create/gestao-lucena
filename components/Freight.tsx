@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../services/supabase";
 import { Icon } from "./icons/Icon";
 import { FreightConfig, FreightRate, User, VariableExpense } from "../types";
@@ -20,13 +20,44 @@ const normalizeRow = (row: any): FreightRate => ({
   km: Number(row.km || 0),
 });
 
-const Freight: React.FC<Props> = ({ freightRates, setFreightRates, freightConfig, currentUser, variableExpenses }) => {
+const Freight: React.FC<Props> = ({ freightRates, setFreightRates, freightConfig: freightConfigProp, currentUser, variableExpenses }) => {
   const isAdmin = currentUser?.role === "Admin";
 
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [city, setCity] = useState("");
   const [kmInput, setKmInput] = useState("");
+
+  // A configuração carregada no App.tsx só é buscada uma vez no início da
+  // sessão — se a usuária salvar o valor/km em Financeiro e vier direto
+  // pra cá, essa tela ainda mostrava o valor antigo (zerado) até recarregar
+  // a página. Busca uma versão fresca aqui também (mesmo padrão já usado
+  // em Montagens.tsx pra matéria-prima).
+  const [freshConfig, setFreshConfig] = useState<FreightConfig | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { data } = await supabase
+        .from("freight_config")
+        .select("*")
+        .order("updated_at", { ascending: false })
+        .limit(1);
+      const row = data?.[0];
+      if (row && active) {
+        setFreshConfig({
+          kmRateCar: Number(row.km_rate_car || 0),
+          kmRateMoto: Number(row.km_rate_moto || 0),
+          markup: Number(row.markup || 0),
+        });
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const freightConfig = freshConfig || freightConfigProp;
 
   const km = Number(kmInput) || 0;
 

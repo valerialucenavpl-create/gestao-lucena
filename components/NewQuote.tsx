@@ -228,7 +228,7 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   products,
   montagens,
   freightRates,
-  freightConfig,
+  freightConfig: freightConfigProp,
   variableExpenses,
   companySettings,
   nextQuoteNumber,
@@ -247,6 +247,34 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   // por barra, cores) ficavam "presas" até o usuário recarregar a página,
   // calculando o orçamento com dados desatualizados.
   const [dbRawMaterials, setDbRawMaterials] = useState<InventoryItem[]>([]);
+
+  // A configuração de frete carregada no App.tsx só é buscada uma vez no
+  // início da sessão — se o valor/km foi salvo em Financeiro nessa mesma
+  // sessão, o botão "Aplicar" ainda calculava com o valor antigo (zerado)
+  // até recarregar a página. Busca uma versão fresca aqui também.
+  const [dbFreightConfig, setDbFreightConfig] = useState<FreightConfig | null>(null);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { data } = await supabase
+        .from("freight_config")
+        .select("*")
+        .order("updated_at", { ascending: false })
+        .limit(1);
+      const row = data?.[0];
+      if (row && active) {
+        setDbFreightConfig({
+          kmRateCar: Number(row.km_rate_car || 0),
+          kmRateMoto: Number(row.km_rate_moto || 0),
+          markup: Number(row.markup || 0),
+        });
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+  const freightConfig = dbFreightConfig || freightConfigProp;
 
   useEffect(() => {
     let active = true;
