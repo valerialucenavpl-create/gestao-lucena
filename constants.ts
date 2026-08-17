@@ -108,8 +108,6 @@ export const PROFILE_COLORS = [
 export const HARDWARE_COLORS = [
     { id: 'branco', name: 'Branco', hex: '#ffffff' },
     { id: 'preto', name: 'Preto', hex: '#000000' },
-    { id: 'cromado', name: 'Cromado', hex: '#e2e8f0' },
-    { id: 'bronze', name: 'Bronze', hex: '#d97706' },
 ];
 
 export const HANDLES: { id: string; name: string; image: string; cost: number }[] = [];
