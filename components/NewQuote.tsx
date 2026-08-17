@@ -358,6 +358,7 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [dissolveFreight, setDissolveFreight] = useState<boolean>(true);
   const [freightCityId, setFreightCityId] = useState<string>("");
   const [freightVehicle, setFreightVehicle] = useState<"Carro" | "Moto">("Carro");
+  const [showAdicionaisSaved, setShowAdicionaisSaved] = useState(false);
   const [installation, setInstallation] = useState<number>(0);
   const [installationInput, setInstallationInput] = useState<string>(formatMoneyInputBR(0));
   const [installationCostItems, setInstallationCostItems] = useState<
@@ -2211,6 +2212,27 @@ const handleSavePDF = async () => {
               placeholder="Ex: 5"
             />
           </div>
+        </div>
+
+        <div className="flex items-center gap-3 mt-3">
+          <button
+            type="button"
+            onClick={() => {
+              setShowAdicionaisSaved(true);
+              setTimeout(() => setShowAdicionaisSaved(false), 2500);
+            }}
+            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-bold rounded-lg flex items-center gap-2"
+          >
+            <Icon className="w-4 h-4">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </Icon>
+            Salvar Frete / Instalação / Comissão
+          </button>
+          {showAdicionaisSaved && (
+            <span className="text-sm text-green-700 font-semibold">
+              Salvo — já vai junto com os produtos no orçamento.
+            </span>
+          )}
         </div>
 
         {installation > 0 && (
