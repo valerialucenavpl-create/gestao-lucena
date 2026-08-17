@@ -75,7 +75,7 @@ const Sidebar: React.FC<Props> = ({
     return (
       <button
         onClick={() => handleNav(view)}
-        style={{ fontSize: "12px", padding: "6px 10px", gap: "7px" }}
+        style={{ fontSize: "13px", padding: "6px 10px", gap: "8px" }}
         className={`flex items-center w-full rounded-lg font-medium transition
           ${
             isActive
@@ -85,12 +85,12 @@ const Sidebar: React.FC<Props> = ({
               : "text-blue-100 hover:bg-blue-700/40"
           }`}
       >
-        <Icon size={14} className="shrink-0" />
+        <Icon size={15} className="shrink-0" />
         {isSidebarOpen && (
           <span className="flex-1 text-left">{label}</span>
         )}
         {isSidebarOpen && locked && (
-          <Lock size={10} className="shrink-0 opacity-70" />
+          <Lock size={11} className="shrink-0 opacity-70" />
         )}
       </button>
     );
@@ -152,14 +152,14 @@ const Sidebar: React.FC<Props> = ({
       <div className="border-t border-blue-700" style={{ padding: "5px 6px" }}>
         <button
           onClick={() => setActiveView("assistant")}
-          style={{ fontSize: "12px", padding: "6px 10px", gap: "7px" }}
+          style={{ fontSize: "13px", padding: "6px 10px", gap: "8px" }}
           className={`flex items-center w-full rounded-lg font-medium transition ${
             activeView === "assistant"
               ? "bg-blue-600 text-white"
               : "text-blue-100 hover:bg-blue-700/40"
           }`}
         >
-          <Bot size={14} />
+          <Bot size={15} />
           {isSidebarOpen && <span>Assistente IA</span>}
         </button>
       </div>
