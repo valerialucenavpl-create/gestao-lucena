@@ -75,7 +75,7 @@ const Sidebar: React.FC<Props> = ({
     return (
       <button
         onClick={() => handleNav(view)}
-        style={{ fontSize: "13px", padding: "8px 12px", gap: "8px" }}
+        style={{ fontSize: "12px", padding: "6px 10px", gap: "7px" }}
         className={`flex items-center w-full rounded-lg font-medium transition
           ${
             isActive
@@ -85,12 +85,12 @@ const Sidebar: React.FC<Props> = ({
               : "text-blue-100 hover:bg-blue-700/40"
           }`}
       >
-        <Icon size={16} className="shrink-0" />
+        <Icon size={14} className="shrink-0" />
         {isSidebarOpen && (
           <span className="flex-1 text-left">{label}</span>
         )}
         {isSidebarOpen && locked && (
-          <Lock size={11} className="shrink-0 opacity-70" />
+          <Lock size={10} className="shrink-0 opacity-70" />
         )}
       </button>
     );
@@ -105,10 +105,10 @@ const Sidebar: React.FC<Props> = ({
       {/* TOPO */}
       <div
         className="flex items-center justify-between border-b border-blue-700"
-        style={{ padding: "12px 14px" }}
+        style={{ padding: "10px 14px" }}
       >
         {isSidebarOpen && (
-          <span className="font-bold" style={{ fontSize: "15px" }}>
+          <span className="font-bold" style={{ fontSize: "14px" }}>
             Gestão PRO
           </span>
         )}
@@ -124,10 +124,10 @@ const Sidebar: React.FC<Props> = ({
       <nav
         className="flex-1 overflow-y-auto"
         style={{
-          padding: "6px 6px",
+          padding: "5px 6px",
           display: "flex",
           flexDirection: "column",
-          gap: "2px",
+          gap: "1px",
         }}
       >
         <Item view="dashboard"  label="Dashboard"       Icon={LayoutDashboard} />
@@ -149,17 +149,17 @@ const Sidebar: React.FC<Props> = ({
       </nav>
 
       {/* ASSISTENTE IA */}
-      <div className="border-t border-blue-700" style={{ padding: "6px 6px" }}>
+      <div className="border-t border-blue-700" style={{ padding: "5px 6px" }}>
         <button
           onClick={() => setActiveView("assistant")}
-          style={{ fontSize: "13px", padding: "8px 12px", gap: "8px" }}
+          style={{ fontSize: "12px", padding: "6px 10px", gap: "7px" }}
           className={`flex items-center w-full rounded-lg font-medium transition ${
             activeView === "assistant"
               ? "bg-blue-600 text-white"
               : "text-blue-100 hover:bg-blue-700/40"
           }`}
         >
-          <Bot size={16} />
+          <Bot size={14} />
           {isSidebarOpen && <span>Assistente IA</span>}
         </button>
       </div>
