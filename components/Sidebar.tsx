@@ -18,6 +18,7 @@ import {
   Lock,
   Calendar,
   Wrench,
+  Truck,
 } from "lucide-react";
 
 import { User, View } from "../types";
@@ -138,6 +139,7 @@ const Sidebar: React.FC<Props> = ({
         <Item view="products"   label="Produtos"         Icon={Box} />
         <Item view="inventory"  label="Matéria Prima"    Icon={Layers} />
         <Item view="montagens"  label="Montagens"        Icon={Wrench} />
+        <Item view="frete"      label="Frete"            Icon={Truck} />
         <Item view="cashflow"    label="Caixa"             Icon={Wallet} />
         <Item view="payables"   label="Contas a Pagar"   Icon={CreditCard} />
         <Item view="receivables" label="Contas a Receber" Icon={TrendingUp} />

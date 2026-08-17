@@ -16,6 +16,7 @@ import CashFlowForm from "./components/CashFlowForm";
 import Products from "./components/Products";
 import Sellers from "./components/Sellers";
 import Montagens from "./components/Montagens";
+import Freight from "./components/Freight";
 import Payables from "./components/Payables";
 import Receivables from "./components/Receivables";
 import AgendaPage from "./components/agenda/AgendaPage";
@@ -64,6 +65,8 @@ import {
   VariableExpense,
   CashFlowEntry,
   Montagem,
+  FreightRate,
+  FreightConfig,
 } from "./types";
 
 const USERS_TABLE = "users";
@@ -268,6 +271,8 @@ const App: React.FC = () => {
   const [rawMaterials, setRawMaterials] = useState<InventoryItem[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [montagens, setMontagens] = useState<Montagem[]>([]);
+  const [freightRates, setFreightRates] = useState<FreightRate[]>([]);
+  const [freightConfig, setFreightConfig] = useState<FreightConfig>({ kmRateCar: 0, kmRateMoto: 0, markup: 0 });
   const [variableExpenses, setVariableExpenses] = useState<VariableExpense[]>([]);
   const [cashFlow, setCashFlow] = useState<CashFlowEntry[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -655,6 +660,35 @@ const App: React.FC = () => {
           }
         };
 
+        const loadFreightRates = async () => {
+          const freightRes = await supabase.from("freight_rates").select("*").order("city", { ascending: true });
+          if (Array.isArray(freightRes.data)) {
+            setFreightRates(
+              freightRes.data.map((row: any) => ({
+                id: String(row.id),
+                city: row.city || "",
+                km: Number(row.km || 0),
+              }))
+            );
+          }
+        };
+
+        const loadFreightConfig = async () => {
+          const cfgRes = await supabase
+            .from("freight_config")
+            .select("*")
+            .order("updated_at", { ascending: false })
+            .limit(1);
+          const row = cfgRes.data?.[0];
+          if (row) {
+            setFreightConfig({
+              kmRateCar: Number(row.km_rate_car || 0),
+              kmRateMoto: Number(row.km_rate_moto || 0),
+              markup: Number(row.markup || 0),
+            });
+          }
+        };
+
         const loadVariableExpenses = async () => {
           const v = await supabase.from(VARIABLE_EXPENSES_TABLE).select("*");
           if (Array.isArray(v.data)) {
@@ -673,6 +707,8 @@ const App: React.FC = () => {
           loadInventory(),
           loadProducts(),
           loadMontagens(),
+          loadFreightRates(),
+          loadFreightConfig(),
           loadVariableExpenses(),
         ]);
       } catch (err) {
@@ -707,6 +743,7 @@ const App: React.FC = () => {
             "employees",
             "sellers",
             "reports",
+            "frete",
             "assistant",
           ] as any).includes(view)
         );
@@ -725,6 +762,7 @@ const App: React.FC = () => {
             "products",
             "inventory",
             "sellers",
+            "frete",
             "settings",
             "assistant",
           ] as any).includes(view)
@@ -848,6 +886,8 @@ if (
             rawMaterials={rawMaterials}
             products={products}
             montagens={montagens}
+            freightRates={freightRates}
+            freightConfig={freightConfig}
             variableExpenses={variableExpenses}
             companySettings={companySettings}
             nextQuoteNumber={nextQuoteNumber}
@@ -987,6 +1027,17 @@ if (
             setMontagens={setMontagens}
             currentUser={currentUser}
             rawMaterials={rawMaterials}
+            variableExpenses={variableExpenses}
+          />
+        );
+
+      case "frete":
+        return (
+          <Freight
+            freightRates={freightRates}
+            setFreightRates={setFreightRates}
+            freightConfig={freightConfig}
+            currentUser={currentUser}
             variableExpenses={variableExpenses}
           />
         );

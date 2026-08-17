@@ -6,8 +6,9 @@ import FixedExpensesCards from "./FixedExpensesCards";
 import VariableExpensesCards from "./VariableExpensesCards";
 import MarkupFaturamentoTab from "./MarkupFaturamentoTab"; // ✅ NOVO
 import PartnersTab from "./PartnersTab";
+import FreightConfigTab from "./FreightConfigTab";
 
-type TabKey = "summary" | "fixed" | "variable" | "markup" | "partners";
+type TabKey = "summary" | "fixed" | "variable" | "markup" | "partners" | "freight_config";
 
 interface FinancialProps {
   onVariableExpensesChange?: (expenses: { id: number; name: string; type: string; value: number }[]) => void;
@@ -21,6 +22,7 @@ const Financial: React.FC<FinancialProps> = ({ onVariableExpensesChange }) => {
       { key: "variable" as const, label: "Despesas Variáveis" },
       { key: "partners" as const, label: "Sócios (Pró-labore)" },
       { key: "markup" as const, label: "MARKUP / FATURAMENTO" }, // ✅ NOVO
+      { key: "freight_config" as const, label: "Frete (Configuração)" },
     ],
     []
   );
@@ -53,6 +55,7 @@ const Financial: React.FC<FinancialProps> = ({ onVariableExpensesChange }) => {
       {activeTab === "variable" && <VariableExpensesCards onExpensesChange={onVariableExpensesChange as any} />}
       {activeTab === "partners" && <PartnersTab />}
       {activeTab === "markup" && <MarkupFaturamentoTab />} {/* ✅ NOVO */}
+      {activeTab === "freight_config" && <FreightConfigTab />}
     </div>
   );
 };

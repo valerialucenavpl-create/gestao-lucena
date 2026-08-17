@@ -19,7 +19,8 @@ export type View =
   | "reports"
   | "settings"
   | "sellers"
-  | "montagens";
+  | "montagens"
+  | "frete";
 
 
 // ---------------------------------------------
@@ -244,6 +245,18 @@ export interface Montagem {
   price: number;
   insumos?: MontagemInsumo[];
   labor?: MontagemLaborLine[];
+}
+
+export interface FreightRate {
+  id: string;
+  city: string;
+  km: number;
+}
+
+export interface FreightConfig {
+  kmRateCar: number;
+  kmRateMoto: number;
+  markup: number;
 }
 
 // Montagem escolhida dentro de um item de orçamento — guarda o preço no
