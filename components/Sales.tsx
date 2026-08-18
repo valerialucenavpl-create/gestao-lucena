@@ -384,7 +384,11 @@ const getComputedStatus = (sale: Sale): Exclude<FastStatus, "Todos"> => {
           </div>
         ) : (
           filteredSales.map((sale) => (
-            <div key={(sale as any).id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+            <div
+              key={(sale as any).id}
+              className="relative rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+              style={{ zIndex: menuOpenId === (sale as any).id ? 20 : undefined }}
+            >
               <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div
                   className={onOpenQuote && resolveQuoteUUID(sale, safeQuotes) ? "cursor-pointer" : ""}
@@ -426,7 +430,7 @@ const getComputedStatus = (sale: Sale): Exclude<FastStatus, "Todos"> => {
                     </button>
 
                     {menuOpenId === (sale as any).id && (
-                      <div className="absolute right-0 z-10 mt-2 w-44 rounded-lg border border-gray-200 bg-white shadow-lg">
+                      <div className="absolute right-0 z-30 mt-2 w-44 rounded-lg border border-gray-200 bg-white shadow-lg">
                         {onOpenQuote && resolveQuoteUUID(sale, safeQuotes) && (
                           <button
                             type="button"
