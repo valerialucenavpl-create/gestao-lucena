@@ -1,5 +1,5 @@
 // components/QuoteDetail.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Quote,
   QuoteItem,
@@ -118,7 +118,22 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
   const [payReference, setPayReference] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
 
+  // Rastreia qual orçamento estava sendo visto antes, pra saber se um
+  // "quote" novo chegou por causa de navegação (troca de orçamento — sempre
+  // recarrega) ou de uma atualização em tempo real do MESMO orçamento
+  // (só recarrega se não tiver edição local pendente, senão apagaria o que
+  // a usuária ainda não salvou).
+  const prevQuoteIdRef = useRef<string | null>(null);
+
   useEffect(() => {
+    const isNewQuote = prevQuoteIdRef.current !== quote.id;
+    prevQuoteIdRef.current = quote.id;
+
+    if (!isNewQuote) {
+      const hasUnsavedChanges = JSON.stringify(localQuote) !== JSON.stringify(quote);
+      if (hasUnsavedChanges) return;
+    }
+
     const cloned = structuredClone(quote) as Quote;
 
     // Auto-preenche deliveryDate a partir das notas do orçamento se ainda não estiver definida
@@ -143,7 +158,8 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
     }
 
     setLocalQuote(cloned);
-  }, [quote.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quote]);
 
   const isDirty = JSON.stringify(localQuote) !== JSON.stringify(quote);
 

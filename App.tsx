@@ -554,11 +554,20 @@ const App: React.FC = () => {
       if (Array.isArray(clientsRes.data)) setClients(clientsRes.data as Client[]);
     };
 
+    // Cashflow entra aqui também: a tela de detalhe de um orçamento mostra
+    // "Recebido/Pendente" a partir do cashflow — sem isso, registrar um
+    // pagamento em outra aba não refletia na tela do orçamento já aberta.
+    const reloadCashFlow = async () => {
+      const r = await getCashFlow();
+      if (r.ok) setCashFlow(r.data ?? []);
+    };
+
     const channel = supabase
       .channel("realtime-quotes-sales-clients")
       .on("postgres_changes", { event: "*", schema: "public", table: "quotes" }, reloadQuotes)
       .on("postgres_changes", { event: "*", schema: "public", table: "sales" }, reloadSales)
       .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, reloadClients)
+      .on("postgres_changes", { event: "*", schema: "public", table: "cashflow" }, reloadCashFlow)
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
