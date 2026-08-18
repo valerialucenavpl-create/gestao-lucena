@@ -12,6 +12,13 @@ const Quotes: React.FC<QuotesProps> = ({ quotes, setActiveView, onDeleteQuote })
   // garante sempre array
   const safeQuotes = useMemo(() => (Array.isArray(quotes) ? quotes : []), [quotes]);
 
+  // Orçamento aprovado já virou venda (some pra tela de Vendas) — não faz
+  // mais sentido continuar aparecendo aqui como se ainda fosse orçamento.
+  const visibleQuotes = useMemo(
+    () => safeQuotes.filter((q) => q.status !== "Aprovado"),
+    [safeQuotes]
+  );
+
   return (
     <div className="bg-white p-6 rounded-xl shadow-md">
       <div className="flex justify-between items-center mb-6">
@@ -43,7 +50,7 @@ const Quotes: React.FC<QuotesProps> = ({ quotes, setActiveView, onDeleteQuote })
           </thead>
 
           <tbody>
-            {safeQuotes.map((q) => (
+            {visibleQuotes.map((q) => (
               <tr key={q.id} className="border-b hover:bg-gray-50">
                 <td className="px-4 py-3 font-medium">N° {q.quoteNumber ?? "—"}</td>
                 <td className="px-4 py-3">{q.customerName}</td>
@@ -75,7 +82,7 @@ const Quotes: React.FC<QuotesProps> = ({ quotes, setActiveView, onDeleteQuote })
               </tr>
             ))}
 
-            {safeQuotes.length === 0 && (
+            {visibleQuotes.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-4 py-10 text-center text-gray-400">
                   Nenhum orçamento cadastrado.
