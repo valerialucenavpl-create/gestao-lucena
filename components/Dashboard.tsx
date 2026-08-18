@@ -339,8 +339,13 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
   const salesThisMonth = useMemo(() => {
     return (Array.isArray(sales) ? sales : []).filter((s: any) => {
       if (!s?.saleDate) return false;
+      // Datas de orçamento/venda são salvas como meia-noite UTC (dia
+      // "puro", sem hora) — ler com getMonth()/getFullYear() (hora local)
+      // volta um dia em fusos atrás de UTC (Brasil inteiro), fazendo uma
+      // venda do dia 1 "escorregar" pro mês anterior. getUTC* lê o dia
+      // exatamente como foi salvo, sem esse deslocamento.
       const d = new Date(s.saleDate);
-      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+      return d.getUTCMonth() === currentMonth && d.getUTCFullYear() === currentYear;
     });
   }, [sales, currentMonth, currentYear]);
 
@@ -363,7 +368,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
     return (Array.isArray(sales) ? sales : []).filter((s: any) => {
       if (!s?.saleDate) return false;
       const d = new Date(s.saleDate);
-      return d.getMonth() === previousMonth && d.getFullYear() === previousYear;
+      return d.getUTCMonth() === previousMonth && d.getUTCFullYear() === previousYear;
     });
   }, [sales, previousMonth, previousYear]);
 
