@@ -162,9 +162,9 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
   }, []);
 
   // ------------------ carregar tudo do Supabase ------------------
-  useEffect(() => {
-    const loadAll = async () => {
-      setLoading(true);
+  const loadAll = useCallback(
+    async (showLoader = true) => {
+      if (showLoader) setLoading(true);
 
       // Todas as queries em paralelo — reduz 6-12s para ~2s
       const [sellersRes, salesRes, quotesRes, productsRes, clientsRes, employeesRes, payablesRes] =
@@ -210,24 +210,22 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
         } catch {}
       }
 
-      // Sales: se Supabase vazio, constrói a partir das quotes aprovadas
-      let finalSales = safeSalesRaw;
-      if (finalSales.length === 0) {
-        let savedStatuses: Record<string, string> = {};
-        try {
-          const raw = localStorage.getItem("local_sales_statuses");
-          if (raw) savedStatuses = JSON.parse(raw);
-        } catch {}
-        finalSales = safeQuotes
-          .filter((q: any) => q.status === "Aprovado")
-          .map((q: any) => ({
-            id: `quote-${q.id}`,
-            amount: Number(q.totalPrice || q.total_price || 0),
-            saleDate: q.date || null,
-            sellerId: null,
-            salesperson: q.salesperson || "",
-          }));
-      }
+      // Sales: mescla as vendas reais com "vendas virtuais" derivadas dos
+      // orçamentos aprovados que ainda não têm uma linha em sales — antes
+      // era tudo ou nada (só olhava as vendas aprovadas quando a tabela
+      // sales estava 100% vazia), então assim que existia qualquer venda
+      // real, orçamentos recém-aprovados paravam de aparecer no Dashboard.
+      const realSaleQuoteIds = new Set(safeSalesRaw.map((s: any) => String(s.quote_id)));
+      const virtualSales = safeQuotes
+        .filter((q: any) => q.status === "Aprovado" && !realSaleQuoteIds.has(String(q.id)))
+        .map((q: any) => ({
+          id: `quote-${q.id}`,
+          amount: Number(q.totalPrice || q.total_price || 0),
+          saleDate: q.date || null,
+          sellerId: null,
+          salesperson: q.salesperson || "",
+        }));
+      const finalSales = [...safeSalesRaw, ...virtualSales];
 
       setSellers(safeSellers);
       setSales(finalSales.map(normalizeSale));
@@ -235,11 +233,29 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
       setProductsCatalog(safeProducts);
       setClients(safeClients);
       setEmployees(safeEmployees);
-      setLoading(false);
-    };
+      if (showLoader) setLoading(false);
+    },
+    []
+  );
 
+  useEffect(() => {
     loadAll();
-  }, []);
+  }, [loadAll]);
+
+  // Tempo real: orçamento aprovado ou venda lançada aparece no Dashboard na
+  // hora, sem precisar dar F5 (mesmo padrão já usado abaixo pra aniversário
+  // de funcionário e contas a pagar).
+  useEffect(() => {
+    const channel = supabase
+      .channel("dashboard-quotes-sales")
+      .on("postgres_changes", { event: "*", schema: "public", table: "quotes" }, () => loadAll(false))
+      .on("postgres_changes", { event: "*", schema: "public", table: "sales" }, () => loadAll(false))
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadAll]);
 
   useEffect(() => {
     const channel = supabase

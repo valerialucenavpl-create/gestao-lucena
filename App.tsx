@@ -773,13 +773,16 @@ const App: React.FC = () => {
     };
   }, [role]);
 
-  // Se a tabela "sales" estiver vazia, monta vendas "virtuais" a partir
-  // dos orçamentos com status "Aprovado" (mesmo fallback usado no Dashboard).
+  // Mescla as vendas reais com "vendas virtuais" derivadas dos orçamentos
+  // aprovados que ainda não têm uma linha em sales — antes era tudo ou
+  // nada (só olhava os orçamentos aprovados quando sales estava 100%
+  // vazia), então assim que existia qualquer venda real, orçamentos
+  // recém-aprovados paravam de aparecer aqui.
   const effectiveSales = useMemo<Sale[]>(() => {
-    if (sales.length > 0) return sales;
+    const realSaleQuoteIds = new Set(sales.map((s) => s.quoteId));
 
-    return quotes
-      .filter((q) => q.status === "Aprovado")
+    const virtualSales = quotes
+      .filter((q) => q.status === "Aprovado" && !realSaleQuoteIds.has(q.id))
       .map((q) => ({
         id: `quote-${q.id}`,
         quoteId: q.id,
@@ -789,6 +792,8 @@ const App: React.FC = () => {
         amount: Number(q.totalPrice || 0),
         status: "" as any,
       }));
+
+    return [...sales, ...virtualSales];
   }, [sales, quotes]);
 
   // Compartilhado entre QuoteDetail (edição de status/data) e NewQuote em
