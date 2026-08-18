@@ -141,6 +141,10 @@ function getSaleAmount(sale: any): number {
   function getSaleCustomerName(sale: any, quote?: Quote): string {
   return toSafeText(sale?.customerName) || toSafeText(quote?.customerName);
 }
+
+function getSaleSalesperson(sale: any, quote?: Quote): string {
+  return toSafeText(sale?.salesperson) || toSafeText(quote?.salesperson);
+}
 const Sales: React.FC<SalesProps> = ({ currentUser, sales, quotes, cashFlow, onOpenQuote, onDeleteSale }) => {
   const isAdmin = currentUser?.role === "Admin";
   const safeSales = Array.isArray(sales) ? sales : [];
@@ -391,6 +395,9 @@ const getComputedStatus = (sale: Sale): Exclude<FastStatus, "Todos"> => {
                   <h4 className="text-lg font-bold text-gray-800 hover:text-primary-700 transition-colors">
                     {getSaleCustomerName(sale, getQuote(resolveQuoteUUID(sale, safeQuotes))) || "Cliente não identificado"}
                   </h4>
+                  <p className="text-xs text-gray-400">
+                    Vendedora: {getSaleSalesperson(sale, getQuote(resolveQuoteUUID(sale, safeQuotes))) || "—"}
+                  </p>
                 </div>
 
                 <div className="flex items-center gap-3">
