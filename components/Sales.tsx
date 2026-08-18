@@ -289,12 +289,26 @@ const getComputedStatus = (sale: Sale): Exclude<FastStatus, "Todos"> => {
 
     setMenuOpenId(null);
 
+    const isVirtual = saleId.startsWith("quote-");
+
     // Marca o orçamento de origem como Recusado — é o que faz a exclusão
     // valer de verdade no banco (não só sumir da tela) e o que cancela
     // automaticamente a conta a receber pendente (gatilho já existente).
+    // Usa resolveQuoteUUID (mais robusto que getSaleQuoteId sozinho — cobre
+    // quote_id numérico e fallback por nome do cliente) porque uma venda
+    // "virtual" que não conseguisse achar o orçamento ficava invisível na
+    // tela (removida daqui) mas continuava Aprovada no banco pra sempre.
     const sale = localSales.find((s: any) => String(s.id) === saleId);
-    const quoteId = sale ? getSaleQuoteId(sale) : "";
+    const quoteId = sale ? resolveQuoteUUID(sale, safeQuotes) : "";
     const quote = quoteId ? getQuote(quoteId) : undefined;
+
+    if (isVirtual && !quote) {
+      alert(
+        "Não foi possível encontrar o orçamento de origem dessa venda pra marcar como Recusado. " +
+          "Nada foi alterado — abra o orçamento correspondente em Orçamentos e recuse por lá."
+      );
+      return;
+    }
 
     if (quote && quote.status === "Aprovado") {
       const result = await updateQuote(quoteId, { status: "Recusado" });
@@ -303,8 +317,6 @@ const getComputedStatus = (sale: Sale): Exclude<FastStatus, "Todos"> => {
         return;
       }
     }
-
-    const isVirtual = saleId.startsWith("quote-");
 
     if (isVirtual) {
       // Virtual sale (generated from quote) — persist deletion in localStorage
