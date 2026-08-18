@@ -236,15 +236,20 @@ export const buildDeliveryEntriesBySector = (
     if (quoteItems.length === 0) return;
 
     const saleDateISO = formatDateToISO(parseDateFlexible(quote?.date) || new Date());
-    const metadata = extractDeliveryMetadata(quote?.measurementNotes);
+    const metadata = extractDeliveryMetadata(quote?.measurementNotes ?? quote?.measurement_notes);
     const deliveryDateISO =
       metadata.deliveryDate ||
       calculateDeliveryDate(saleDateISO, Number(metadata.deliveryLeadDays ?? 20));
 
-    const quoteClient = clientsMap[String(quote?.clientId)];
+    // Quem chama essa função às vezes passa a linha crua do Supabase
+    // (snake_case) em vez do Quote normalizado (camelCase) — sem os
+    // fallbacks abaixo, customerName/internalStatus/clientId vinham sempre
+    // undefined, fazendo todo pedido cair em "Cliente não informado" e
+    // nunca sair da lista de pendentes mesmo já marcado como Entregue.
+    const quoteClient = clientsMap[String(quote?.clientId ?? quote?.client_id)];
     const clientAddress = getClientAddressLabel(quoteClient);
     const clientPhone = String(quoteClient?.phone || "").trim();
-    const internalStatus = String(quote?.internalStatus || "Pedido");
+    const internalStatus = String(quote?.internalStatus ?? quote?.internal_status ?? "Pedido");
     const isPending = internalStatus !== "Entregue";
     const totalPrice = Number(quote?.totalPrice || quote?.total_price || 0);
 
@@ -265,7 +270,7 @@ export const buildDeliveryEntriesBySector = (
         sector,
         saleDate: saleDateISO,
         deliveryDate: deliveryDateISO,
-        clientName: String(quote?.customerName || "Cliente não informado"),
+        clientName: String(quote?.customerName || quote?.customer_name || "Cliente não informado"),
         clientAddress,
         clientPhone,
         productLabel: Array.from(labels).join(", "),
