@@ -114,15 +114,18 @@ function resolveQuoteUUID(sale: any, quotes: Quote[]): string {
   // falhava aqui, mesmo quando era exatamente o mesmo orçamento)
   const directId = toSafeText(sale?.quoteId);
   if (directId) {
+    // devolve o id no formato ORIGINAL do orçamento (não força texto) —
+    // o resto do app (ex.: App.tsx ao abrir o orçamento) compara esse id
+    // com "===" contra quotes.id, que pode ser number (bigint) ou string
     const byId = quotes.find((q) => toSafeText(q.id) === directId);
-    if (byId) return toSafeText(byId.id);
+    if (byId) return byId.id;
   }
 
   // 2. quote_id numérico → tenta bater com quoteNumber
   const qNum = sale?.quote_id;
   if (qNum != null) {
     const byNum = quotes.find((q) => Number(q.quoteNumber) === Number(qNum));
-    if (byNum) return toSafeText(byNum.id);
+    if (byNum) return byNum.id;
   }
 
   // 3. fallback: bate pelo nome do cliente — usa toSafeText (com trim) dos
@@ -131,7 +134,7 @@ function resolveQuoteUUID(sale: any, quotes: Quote[]): string {
   const customer = toSafeText(sale?.customerName ?? sale?.customer_name).toLowerCase();
   if (customer) {
     const byName = quotes.find((q) => toSafeText(q.customerName).toLowerCase() === customer);
-    if (byName) return toSafeText(byName.id);
+    if (byName) return byName.id;
   }
 
   return "";
