@@ -109,22 +109,29 @@ function getSaleQuoteId(sale: any): string {
 
 /** Encontra o UUID real do orçamento, mesmo quando o sale vem do banco com quote_id numérico */
 function resolveQuoteUUID(sale: any, quotes: Quote[]): string {
-  // 1. quoteId direto (UUID gerado pelo front)
+  // 1. quoteId direto — comparado como texto (id de venda virtual vem como
+  // number vindo do banco, e comparação estrita number !== string sempre
+  // falhava aqui, mesmo quando era exatamente o mesmo orçamento)
   const directId = toSafeText(sale?.quoteId);
-  if (directId && quotes.find((q) => q.id === directId)) return directId;
+  if (directId) {
+    const byId = quotes.find((q) => toSafeText(q.id) === directId);
+    if (byId) return toSafeText(byId.id);
+  }
 
   // 2. quote_id numérico → tenta bater com quoteNumber
   const qNum = sale?.quote_id;
   if (qNum != null) {
     const byNum = quotes.find((q) => Number(q.quoteNumber) === Number(qNum));
-    if (byNum) return byNum.id;
+    if (byNum) return toSafeText(byNum.id);
   }
 
-  // 3. fallback: bate pelo nome do cliente
+  // 3. fallback: bate pelo nome do cliente — usa toSafeText (com trim) dos
+  // dois lados, senão um espaço a mais digitado no cadastro do orçamento
+  // já quebra a comparação
   const customer = toSafeText(sale?.customerName ?? sale?.customer_name).toLowerCase();
   if (customer) {
-    const byName = quotes.find((q) => (q.customerName || "").toLowerCase() === customer);
-    if (byName) return byName.id;
+    const byName = quotes.find((q) => toSafeText(q.customerName).toLowerCase() === customer);
+    if (byName) return toSafeText(byName.id);
   }
 
   return "";
