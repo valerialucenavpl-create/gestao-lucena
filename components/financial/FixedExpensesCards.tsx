@@ -31,37 +31,29 @@ const FixedExpensesCards: React.FC = () => {
   const load = async () => {
     setLoading(true);
 
-    // 🔹 despesas fixas manuais
-    const { data: fixedData } = await supabase
-      .from("fixed_expenses")
-      .select("*")
-      .order("id", { ascending: false });
+    // As 3 buscas abaixo não dependem uma da outra — rodar em paralelo em
+    // vez de uma atrás da outra corta o tempo de carregamento pela metade
+    // ou mais (mesmo ajuste já feito no carregamento geral do sistema).
+    const [fixedRes, employeesRes, partnersRes] = await Promise.all([
+      supabase.from("fixed_expenses").select("*").order("id", { ascending: false }),
+      supabase.from("employees").select("total_monthly_cost"),
+      supabase.from("partners").select("pro_labore"),
+    ]);
 
-    setItems((fixedData as FixedExpense[]) ?? []);
+    setItems((fixedRes.data as FixedExpense[]) ?? []);
 
-    // 🔹 soma do custo total dos funcionários
-    const { data: employees } = await supabase
-      .from("employees")
-      .select("total_monthly_cost");
-
-    const totalEmployees = (employees ?? []).reduce(
-      (sum, e) => sum + Number(e.total_monthly_cost || 0),
+    const totalEmployees = (employeesRes.data ?? []).reduce(
+      (sum, e: any) => sum + Number(e.total_monthly_cost || 0),
       0
     );
-
     setEmployeesTotal(totalEmployees);
 
-    // 🔹 soma do pró-labore bruto dos sócios
-    const { data: partners } = await supabase
-      .from("partners")
-      .select("pro_labore");
-
-    const totalPartners = (partners ?? []).reduce(
+    const totalPartners = (partnersRes.data ?? []).reduce(
       (sum, p: any) => sum + Number(p.pro_labore || 0),
       0
     );
-
     setPartnersTotal(totalPartners);
+
     setLoading(false);
   };
 

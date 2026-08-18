@@ -39,14 +39,17 @@ const MarkupFaturamentoTab: React.FC = () => {
     const load = async () => {
       setLoading(true);
 
-      // 1) carrega config (1 linha)
-      const { data: settings } = await supabase
-        .from("billing_settings")
-        .select("*")
-        .order("updated_at", { ascending: false })
-        .limit(1);
+      // As 4 buscas abaixo são independentes — rodar em paralelo em vez de
+      // uma atrás da outra corta bastante o tempo de carregamento dessa aba
+      // (mesmo ajuste já feito no carregamento geral do sistema).
+      const [settingsRes, empRes, partnersRes, fixRes] = await Promise.all([
+        supabase.from("billing_settings").select("*").order("updated_at", { ascending: false }).limit(1),
+        supabase.from("employees").select("total_monthly_cost, department"),
+        supabase.from("partners").select("pro_labore"),
+        supabase.from("fixed_expenses").select("value"),
+      ]);
 
-      const s = (settings?.[0] as BillingSettings) || null;
+      const s = (settingsRes.data?.[0] as BillingSettings) || null;
       if (s) {
         setRowId(s.id);
         if (s.monthly_revenue_target != null)
@@ -57,24 +60,21 @@ const MarkupFaturamentoTab: React.FC = () => {
         if (s.min_profit_percent != null) setMinProfitPercent(String(s.min_profit_percent));
       }
 
-      // 2) soma funcionários ADM + Vendas (produção é cobrada via MO por produto)
-      const emp = await supabase.from("employees").select("total_monthly_cost, department");
-      const empTotal = (emp.data ?? [])
+      // soma funcionários ADM + Vendas (produção é cobrada via MO por produto)
+      const empTotal = (empRes.data ?? [])
         .filter((e: any) => e.department !== "Produção")
         .reduce((sum: number, e: any) => sum + Number(e.total_monthly_cost || 0), 0);
       setEmployeesTotal(empTotal);
 
-      // 2.1) soma pró-labore bruto dos sócios
-      const partners = await supabase.from("partners").select("pro_labore");
-      const partnersSum = (partners.data ?? []).reduce(
+      // soma pró-labore bruto dos sócios
+      const partnersSum = (partnersRes.data ?? []).reduce(
         (sum: number, p: any) => sum + Number(p.pro_labore || 0),
         0
       );
       setPartnersTotal(partnersSum);
 
-      // 3) soma despesas fixas manuais
-      const fix = await supabase.from("fixed_expenses").select("value");
-      const fixTotal = (fix.data ?? []).reduce(
+      // soma despesas fixas manuais
+      const fixTotal = (fixRes.data ?? []).reduce(
         (sum: number, f: any) => sum + Number(f.value || 0),
         0
       );
