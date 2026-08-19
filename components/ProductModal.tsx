@@ -36,6 +36,7 @@ interface ProductModalProps {
 
 const categories = [
   "VIDRO",
+  "ESTRUTURA",
   "ALUMINIO",
   "ACESSORIO VIDRO",
   "ACESSORIO DE ALUMINIO",

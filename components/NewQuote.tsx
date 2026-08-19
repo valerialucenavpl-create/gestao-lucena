@@ -540,6 +540,18 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [gwExtraServiceInput, setGwExtraServiceInput] = useState<string>(formatMoneyInputBR(0));
   const [gwQuantity, setGwQuantity] = useState<number>(1);
 
+  // ESTRUTURA DE ALUMÍNIO (subtopico dentro da aba Vidros — produtos do
+  // catálogo com categoria "ESTRUTURA", mesmo padrão de busca+medidas do
+  // vidro, mas sem tipo de vidro/textura/ferragem)
+  const [esSelectedProduct, setEsSelectedProduct] = useState<string>("");
+  const [esProductSearch, setEsProductSearch] = useState<string>("");
+  const [esWidth, setEsWidth] = useState<number>(0);
+  const [esHeight, setEsHeight] = useState<number>(0);
+  const [esColor, setEsColor] = useState<string>("");
+  const [esExtraService, setEsExtraService] = useState<number>(0);
+  const [esExtraServiceInput, setEsExtraServiceInput] = useState<string>(formatMoneyInputBR(0));
+  const [esQuantity, setEsQuantity] = useState<number>(1);
+
  // ---------------------------
   // CORES POR CATEGORIA (BOTÕES)
   // ---------------------------
@@ -592,6 +604,43 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     if (!search) return glassProducts;
     return glassProducts.filter((p) => p.name.toLowerCase().includes(search));
   }, [glassProducts, gwProductSearch]);
+
+  const estruturaProducts = useMemo(() => {
+    const norm = (v: string) =>
+      String(v || "")
+        .normalize("NFD")
+        .replace(/[̀-ͯ]/g, "")
+        .toUpperCase();
+
+    return products.filter((p) => norm(p.category || "").includes("ESTRUTURA"));
+  }, [products]);
+
+  const filteredEstruturaProducts = useMemo(() => {
+    const search = esProductSearch.trim().toLowerCase();
+    if (!search) return estruturaProducts;
+    return estruturaProducts.filter((p) => p.name.toLowerCase().includes(search));
+  }, [estruturaProducts, esProductSearch]);
+
+  // Cores disponíveis pro produto de estrutura selecionado — vem direto da
+  // composição do produto (mesma lógica usada ao editar um item já
+  // adicionado), já que essa categoria não usa o mapCategoryToUsage (que é
+  // por aba, e a estrutura fica dentro da aba Vidros).
+  const esColorOptions = useMemo(() => {
+    const product = products.find((p) => p.id === esSelectedProduct);
+    if (!product) return [];
+    return Array.from(
+      new Set(
+        product.composition.flatMap((c) => {
+          const material = rawMaterials.find((m) => m.id === c.materialId);
+          return getMaterialVariants(material).map((cv) => getVariantName(cv));
+        })
+      )
+    ).filter(Boolean) as string[];
+  }, [esSelectedProduct, products, rawMaterials]);
+
+  useEffect(() => {
+    setEsColor(esColorOptions.length > 0 ? esColorOptions[0] : "");
+  }, [esSelectedProduct, esColorOptions]);
 
   const aluminumProducts = useMemo(() => {
     return products.filter((product) => normalizeText(product.category || "").includes("ALUMINIO"));
@@ -1519,6 +1568,52 @@ const categories = [
       laborCost: baseLab,
       fixedCostValue: baseFixed,
       materialBreakdown: fullMaterialBreakdown,
+      laborBreakdown,
+    };
+
+    setItems((prev) => [...prev, newItem]);
+  };
+
+  const handleAddEstruturaItem = () => {
+    if (!esSelectedProduct) return alert("Selecione um produto.");
+    if (!esWidth || !esHeight) return alert("Informe altura e largura em milímetros.");
+    if (esColorOptions.length > 0 && !esColor) return alert("Selecione a cor.");
+
+    const selectedProduct = products.find((p) => p.id === esSelectedProduct);
+    if (!selectedProduct) return;
+
+    const { price: basePrice, cost: baseCost, materialCost: baseMat, laborCost: baseLab, fixedCostValue: baseFixed, materialBreakdown, laborBreakdown } = calculateItemPrice(
+      esSelectedProduct,
+      esWidth,
+      esHeight,
+      esQuantity,
+      esColor
+    );
+
+    const totalExtras = (Number(esExtraService) || 0) * esQuantity;
+    const finalPrice = basePrice + totalExtras;
+    const totalCost = baseCost + totalExtras;
+
+    const description = [
+      `Cor: ${esColor || "Não informado"}`,
+      `Acréscimo por serviço: R$ ${Number(esExtraService || 0).toFixed(2)}`,
+    ].join(" | ");
+
+    const newItem: QuoteItem = {
+      id: `qi-estrutura-${Date.now()}`,
+      productId: selectedProduct.id,
+      productName: selectedProduct.name,
+      selectedColor: esColor,
+      description,
+      width: esWidth,
+      height: esHeight,
+      quantity: esQuantity,
+      price: finalPrice,
+      cost: totalCost,
+      materialCost: baseMat,
+      laborCost: baseLab,
+      fixedCostValue: baseFixed,
+      materialBreakdown,
       laborBreakdown,
     };
 
@@ -3110,6 +3205,108 @@ const handleSavePDF = async () => {
               >
                 Adicionar produto de vidro
               </button>
+            </div>
+
+            <div className="pt-5 border-t border-blue-100">
+              <h4 className="text-sm font-bold text-gray-700 uppercase mb-3">Estrutura de Alumínio</h4>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Buscar Produto</label>
+                  <input
+                    type="text"
+                    value={esProductSearch}
+                    onChange={(e) => setEsProductSearch(e.target.value)}
+                    placeholder="Digite o nome do produto"
+                    className="w-full h-11 px-3 border rounded-lg text-gray-900"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Altura (mm)</label>
+                    <input type="number" value={esHeight || ""} placeholder="0000" onChange={(e) => setEsHeight(Number(e.target.value) || 0)} className="w-full h-11 px-3 border rounded-lg text-gray-900" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Largura (mm)</label>
+                    <input type="number" value={esWidth || ""} placeholder="0000" onChange={(e) => setEsWidth(Number(e.target.value) || 0)} className="w-full h-11 px-3 border rounded-lg text-gray-900" />
+                  </div>
+                </div>
+              </div>
+
+              {estruturaProducts.length === 0 ? (
+                <p className="text-xs text-gray-500 mt-3">
+                  Nenhum produto cadastrado com a categoria "Estrutura" ainda. Cadastre em Produtos.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-60 overflow-auto pr-1 mt-3">
+                  {filteredEstruturaProducts.map((product) => (
+                    <button
+                      key={product.id}
+                      type="button"
+                      onClick={() => setEsSelectedProduct(product.id)}
+                      className={`p-3 border rounded-lg text-left flex gap-3 items-center ${esSelectedProduct === product.id ? "border-primary-600 bg-primary-50" : "border-gray-200 bg-white"}`}
+                    >
+                      <div className="w-14 h-14 rounded-md bg-gray-100 overflow-hidden flex items-center justify-center shrink-0">
+                        {product.image ? (
+                          <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-[10px] text-gray-400">Sem foto</span>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">{product.name}</p>
+                        <p className="text-xs text-gray-500">{product.category || "Estrutura"}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Cor</label>
+                  <select
+                    value={esColor}
+                    onChange={(e) => setEsColor(e.target.value)}
+                    disabled={esColorOptions.length === 0}
+                    className="w-full h-11 px-3 border rounded-lg text-gray-900 disabled:bg-gray-100 disabled:text-gray-400"
+                  >
+                    {esColorOptions.length === 0 && <option value="">Sem cor cadastrada</option>}
+                    {esColorOptions.map((color) => (
+                      <option key={color} value={color}>{color}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Acréscimo (R$)</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={esExtraServiceInput}
+                    onChange={(e) => {
+                      const rawValue = sanitizeMoneyInputBR(e.target.value);
+                      setEsExtraServiceInput(rawValue);
+                      setEsExtraService(parseMoneyInputBR(rawValue));
+                    }}
+                    onBlur={() => setEsExtraServiceInput(formatMoneyInputBR(esExtraService))}
+                    className="w-full h-11 px-3 border rounded-lg text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Quantidade</label>
+                  <input type="number" min={1} value={esQuantity} onChange={(e) => setEsQuantity(Number(e.target.value) || 1)} className="w-full h-11 px-3 border rounded-lg text-gray-900" />
+                </div>
+              </div>
+
+              <div className="flex justify-end mt-3">
+                <button
+                  type="button"
+                  onClick={handleAddEstruturaItem}
+                  className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg"
+                >
+                  Adicionar estrutura de alumínio
+                </button>
+              </div>
             </div>
           </div>
         )}
