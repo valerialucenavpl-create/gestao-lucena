@@ -358,6 +358,12 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [dissolveFreight, setDissolveFreight] = useState<boolean>(true);
   const [freightCityId, setFreightCityId] = useState<string>("");
   const [freightVehicle, setFreightVehicle] = useState<"Carro" | "Moto">("Carro");
+  // Cada "Aplicar" vira um item aqui em vez de sobrescrever o frete — permite
+  // somar mais de um frete no mesmo orçamento (ex.: carro num dia + moto
+  // noutro, pra mesma cidade ou cidades diferentes).
+  const [freightItems, setFreightItems] = useState<
+    { id: string; cityName: string; vehicle: "Carro" | "Moto"; km: number; value: number }[]
+  >([]);
   const [showAdicionaisSaved, setShowAdicionaisSaved] = useState(false);
   const [installation, setInstallation] = useState<number>(0);
   const [installationInput, setInstallationInput] = useState<string>(formatMoneyInputBR(0));
@@ -392,6 +398,7 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     setPaymentMethod(editingQuote.paymentMethod || "Cartão");
     setFreight(Number(editingQuote.freight || 0));
     setFreightInput(formatMoneyInputBR(Number(editingQuote.freight || 0)));
+    setFreightItems(Array.isArray(editingQuote.freightItems) ? editingQuote.freightItems : []);
     setDissolveFreight(editingQuote.dissolveFreight !== false);
     setInstallation(Number(editingQuote.installation || 0));
     setInstallationInput(formatMoneyInputBR(Number(editingQuote.installation || 0)));
@@ -1200,6 +1207,46 @@ const categories = [
     );
   };
 
+  const applyFreightTotal = (list: typeof freightItems) => {
+    const total = list.reduce((sum, item) => sum + item.value, 0);
+    setFreight(total);
+    setFreightInput(formatMoneyInputBR(total));
+  };
+
+  const addFreightItem = () => {
+    const rate = freightRates.find((r) => r.id === freightCityId);
+    if (!rate) return;
+    const commissionRate =
+      variableExpenses.find((e) => normalizeText(e.name).includes(normalizeText("comissão")))?.value || 0;
+    const taxRate =
+      variableExpenses.find(
+        (e) =>
+          normalizeText(e.name).includes(normalizeText("imposto")) ||
+          normalizeText(e.name).includes(normalizeText("simples"))
+      )?.value || 0;
+    const dvvFrac = (commissionRate + taxRate) / 100;
+    const kmRate = freightVehicle === "Moto" ? freightConfig.kmRateMoto : freightConfig.kmRateCar;
+    const base = rate.km * kmRate * (1 + freightConfig.markup / 100);
+    const saleValue = dvvFrac >= 1 ? base : base / (1 - dvvFrac);
+
+    const newItem = {
+      id: Date.now().toString(),
+      cityName: rate.city,
+      vehicle: freightVehicle,
+      km: rate.km,
+      value: saleValue,
+    };
+    const newList = [...freightItems, newItem];
+    setFreightItems(newList);
+    applyFreightTotal(newList);
+  };
+
+  const removeFreightItem = (id: string) => {
+    const newList = freightItems.filter((item) => item.id !== id);
+    setFreightItems(newList);
+    applyFreightTotal(newList);
+  };
+
   const blurInstallationCostItemValue = (id: string) => {
     setInstallationCostItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, valueInput: formatMoneyInputBR(item.value) } : item))
@@ -1798,6 +1845,7 @@ const buildQuoteObject = (): Quote => {
     subtotal,
     discount: discountValue,
     freight,
+    freightItems: freightItems.length > 0 ? freightItems : undefined,
     dissolveFreight,
     installation,
     installationCostItems:
@@ -2134,29 +2182,46 @@ const handleSavePDF = async () => {
                   <button
                     type="button"
                     disabled={!freightCityId}
-                    onClick={() => {
-                      const rate = freightRates.find((r) => r.id === freightCityId);
-                      if (!rate) return;
-                      const commissionRate =
-                        variableExpenses.find((e) => normalizeText(e.name).includes(normalizeText("comissão")))?.value || 0;
-                      const taxRate =
-                        variableExpenses.find(
-                          (e) =>
-                            normalizeText(e.name).includes(normalizeText("imposto")) ||
-                            normalizeText(e.name).includes(normalizeText("simples"))
-                        )?.value || 0;
-                      const dvvFrac = (commissionRate + taxRate) / 100;
-                      const kmRate = freightVehicle === "Moto" ? freightConfig.kmRateMoto : freightConfig.kmRateCar;
-                      const base = rate.km * kmRate * (1 + freightConfig.markup / 100);
-                      const saleValue = dvvFrac >= 1 ? base : base / (1 - dvvFrac);
-                      setFreight(saleValue);
-                      setFreightInput(formatMoneyInputBR(saleValue));
-                    }}
+                    onClick={addFreightItem}
                     className="px-4 h-10 shrink-0 bg-primary-600 text-white text-xs font-bold rounded-md hover:bg-primary-700 disabled:opacity-50"
                   >
-                    Aplicar
+                    + Adicionar
                   </button>
                 </div>
+              </div>
+            )}
+
+            {freightItems.length > 0 && (
+              <div className="mb-2 space-y-1">
+                {freightItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-2 rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs"
+                  >
+                    <span className="text-gray-700">
+                      {item.cityName} · {item.vehicle} ({item.km} km)
+                    </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="font-semibold text-gray-800">
+                        {item.value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeFreightItem(item.id)}
+                        className="text-gray-400 hover:text-red-600"
+                        title="Remover"
+                      >
+                        <Icon className="w-3.5 h-3.5">
+                          <line x1="18" y1="6" x2="6" y2="18"></line>
+                          <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </Icon>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <p className="text-xs text-gray-500">
+                  Pode adicionar mais de um (ex.: carro num dia + moto noutro).
+                </p>
               </div>
             )}
 

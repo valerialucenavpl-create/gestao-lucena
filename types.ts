@@ -259,6 +259,16 @@ export interface FreightConfig {
   markup: number;
 }
 
+// Um "Aplicar" do frete cadastrado, guardado no orçamento — permite ter mais
+// de um (ex.: carro num dia + moto noutro dia).
+export interface FreightAppliedItem {
+  id: string;
+  cityName: string;
+  vehicle: "Carro" | "Moto";
+  km: number;
+  value: number;
+}
+
 // Montagem escolhida dentro de um item de orçamento — guarda o preço no
 // momento da escolha (independe de o catálogo de montagens mudar depois).
 export interface QuoteItemMontagem {
@@ -323,6 +333,10 @@ export interface Quote {
   subtotal: number;
   discount: number;
   freight: number;
+  // Cada "Aplicar" no seletor de frete cadastrado vira um item aqui — permite
+  // somar mais de um frete no mesmo orçamento (ex.: equipe de carro num dia +
+  // equipe de moto noutro dia, pra mesma cidade ou cidades diferentes).
+  freightItems?: FreightAppliedItem[];
   // Se true (padrão), o frete some diluído dentro do valor de cada produto
   // na tela e no PDF; se false, aparece como linha separada pro cliente.
   dissolveFreight?: boolean;
