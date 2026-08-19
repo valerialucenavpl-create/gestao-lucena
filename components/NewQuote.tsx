@@ -552,6 +552,16 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [esExtraServiceInput, setEsExtraServiceInput] = useState<string>(formatMoneyInputBR(0));
   const [esQuantity, setEsQuantity] = useState<number>(1);
 
+  // ACESSÓRIO VIDRO (subtopico dentro da aba Vidros, abaixo de Estrutura —
+  // produtos do catálogo com categoria "ACESSORIO VIDRO", sem medida, igual
+  // ao padrão de Produtos Prontos)
+  const [avSelectedProduct, setAvSelectedProduct] = useState<string>("");
+  const [avProductSearch, setAvProductSearch] = useState<string>("");
+  const [avColor, setAvColor] = useState<string>("");
+  const [avExtraService, setAvExtraService] = useState<number>(0);
+  const [avExtraServiceInput, setAvExtraServiceInput] = useState<string>(formatMoneyInputBR(0));
+  const [avQuantity, setAvQuantity] = useState<number>(1);
+
  // ---------------------------
   // CORES POR CATEGORIA (BOTÕES)
   // ---------------------------
@@ -596,7 +606,12 @@ const NewQuote: React.FC<NewQuoteProps> = ({
         .replace(/[̀-ͯ]/g, "")
         .toUpperCase();
 
-    return products.filter((p) => norm(p.category || "").includes("VIDRO"));
+    // Exclui "ACESSORIO VIDRO" e "ESTRUTURA" daqui — cada um tem seu próprio
+    // subtópico logo abaixo, senão o mesmo produto apareceria duplicado.
+    return products.filter((p) => {
+      const cat = norm(p.category || "");
+      return cat.includes("VIDRO") && !cat.includes("ACESSORIO") && !cat.includes("ESTRUTURA");
+    });
   }, [products]);
 
   const filteredGlassProducts = useMemo(() => {
@@ -641,6 +656,36 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   useEffect(() => {
     setEsColor(esColorOptions.length > 0 ? esColorOptions[0] : "");
   }, [esSelectedProduct, esColorOptions]);
+
+  const acessorioVidroProducts = useMemo(() => {
+    return products.filter((p) => {
+      const norm = normalizeText(p.category || "");
+      return norm.includes("ACESSORIO") && norm.includes("VIDRO");
+    });
+  }, [products]);
+
+  const filteredAcessorioVidroProducts = useMemo(() => {
+    const search = avProductSearch.trim().toLowerCase();
+    if (!search) return acessorioVidroProducts;
+    return acessorioVidroProducts.filter((p) => p.name.toLowerCase().includes(search));
+  }, [acessorioVidroProducts, avProductSearch]);
+
+  const avColorOptions = useMemo(() => {
+    const product = products.find((p) => p.id === avSelectedProduct);
+    if (!product) return [];
+    return Array.from(
+      new Set(
+        product.composition.flatMap((c) => {
+          const material = rawMaterials.find((m) => m.id === c.materialId);
+          return getMaterialVariants(material).map((cv) => getVariantName(cv));
+        })
+      )
+    ).filter(Boolean) as string[];
+  }, [avSelectedProduct, products, rawMaterials]);
+
+  useEffect(() => {
+    setAvColor(avColorOptions.length > 0 ? avColorOptions[0] : "");
+  }, [avSelectedProduct, avColorOptions]);
 
   const aluminumProducts = useMemo(() => {
     return products.filter((product) => normalizeText(product.category || "").includes("ALUMINIO"));
@@ -1618,6 +1663,54 @@ const categories = [
     };
 
     setItems((prev) => [...prev, newItem]);
+  };
+
+  const handleAddAcessorioVidroItem = () => {
+    if (!avSelectedProduct) return alert("Selecione um produto.");
+    if (avColorOptions.length > 0 && !avColor) return alert("Selecione a cor.");
+
+    const selectedProduct = products.find((p) => p.id === avSelectedProduct);
+    if (!selectedProduct) return;
+
+    const { price: basePrice, cost: baseCost, materialCost: baseMat, laborCost: baseLab, fixedCostValue: baseFixed, materialBreakdown, laborBreakdown } = calculateItemPrice(
+      avSelectedProduct,
+      1,
+      1,
+      avQuantity,
+      avColor
+    );
+
+    const totalExtra = Number(avExtraService) || 0;
+    const finalPrice = basePrice + totalExtra;
+    const totalCost = baseCost + totalExtra;
+
+    const description = [
+      `Cor: ${avColor || "Não informado"}`,
+      `Acréscimo por serviço: R$ ${totalExtra.toFixed(2)}`,
+    ].join(" | ");
+
+    const newItem: QuoteItem = {
+      id: `qi-acessoriovidro-${Date.now()}`,
+      productId: selectedProduct.id,
+      productName: selectedProduct.name,
+      selectedColor: avColor,
+      description,
+      width: 0,
+      height: 0,
+      quantity: avQuantity,
+      price: finalPrice,
+      cost: totalCost,
+      materialCost: baseMat,
+      laborCost: baseLab,
+      fixedCostValue: baseFixed,
+      materialBreakdown,
+      laborBreakdown,
+    };
+
+    setItems((prev) => [...prev, newItem]);
+    setAvQuantity(1);
+    setAvExtraService(0);
+    setAvExtraServiceInput(formatMoneyInputBR(0));
   };
 
   // ============================
@@ -3305,6 +3398,96 @@ const handleSavePDF = async () => {
                   className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg"
                 >
                   Adicionar estrutura de alumínio
+                </button>
+              </div>
+            </div>
+
+            <div className="pt-5 border-t border-blue-100">
+              <h4 className="text-sm font-bold text-gray-700 uppercase mb-3">Acessório Vidro</h4>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Buscar Produto</label>
+                <input
+                  type="text"
+                  value={avProductSearch}
+                  onChange={(e) => setAvProductSearch(e.target.value)}
+                  placeholder="Digite o nome do produto"
+                  className="w-full h-11 px-3 border rounded-lg text-gray-900"
+                />
+              </div>
+
+              {acessorioVidroProducts.length === 0 ? (
+                <p className="text-xs text-gray-500 mt-3">
+                  Nenhum produto cadastrado com a categoria "Acessório Vidro" ainda. Cadastre em Produtos.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-60 overflow-auto pr-1 mt-3">
+                  {filteredAcessorioVidroProducts.map((product) => (
+                    <button
+                      key={product.id}
+                      type="button"
+                      onClick={() => setAvSelectedProduct(product.id)}
+                      className={`p-3 border rounded-lg text-left flex gap-3 items-center ${avSelectedProduct === product.id ? "border-primary-600 bg-primary-50" : "border-gray-200 bg-white"}`}
+                    >
+                      <div className="w-14 h-14 rounded-md bg-gray-100 overflow-hidden flex items-center justify-center shrink-0">
+                        {product.image ? (
+                          <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-[10px] text-gray-400">Sem foto</span>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">{product.name}</p>
+                        <p className="text-xs text-gray-500">{product.category || "Acessório Vidro"}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Cor</label>
+                  <select
+                    value={avColor}
+                    onChange={(e) => setAvColor(e.target.value)}
+                    disabled={avColorOptions.length === 0}
+                    className="w-full h-11 px-3 border rounded-lg text-gray-900 disabled:bg-gray-100 disabled:text-gray-400"
+                  >
+                    {avColorOptions.length === 0 && <option value="">Sem cor cadastrada</option>}
+                    {avColorOptions.map((color) => (
+                      <option key={color} value={color}>{color}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Acréscimo (R$)</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={avExtraServiceInput}
+                    onChange={(e) => {
+                      const rawValue = sanitizeMoneyInputBR(e.target.value);
+                      setAvExtraServiceInput(rawValue);
+                      setAvExtraService(parseMoneyInputBR(rawValue));
+                    }}
+                    onBlur={() => setAvExtraServiceInput(formatMoneyInputBR(avExtraService))}
+                    className="w-full h-11 px-3 border rounded-lg text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Quantidade</label>
+                  <input type="number" min={1} value={avQuantity} onChange={(e) => setAvQuantity(Number(e.target.value) || 1)} className="w-full h-11 px-3 border rounded-lg text-gray-900" />
+                </div>
+              </div>
+
+              <div className="flex justify-end mt-3">
+                <button
+                  type="button"
+                  onClick={handleAddAcessorioVidroItem}
+                  className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg"
+                >
+                  Adicionar acessório vidro
                 </button>
               </div>
             </div>
