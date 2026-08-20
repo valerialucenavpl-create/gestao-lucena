@@ -2653,8 +2653,8 @@ const handleSavePDF = async () => {
                       )}
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-gray-800">{product.name}</p>
-                      <p className="text-xs text-gray-500">{product.category || "Mármore"}</p>
+                      <p className={`text-sm font-semibold ${mrSelectedProductId === product.id ? "text-blue-900" : "text-gray-800"}`}>{product.name}</p>
+                      <p className={`text-xs ${mrSelectedProductId === product.id ? "text-blue-700" : "text-gray-500"}`}>{product.category || "Mármore"}</p>
                     </div>
                   </button>
                 ))}
@@ -2931,8 +2931,8 @@ const handleSavePDF = async () => {
                       )}
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-gray-800">{product.name}</p>
-                      <p className="text-xs text-gray-500">{product.category || "Produto pronto"}</p>
+                      <p className={`text-sm font-semibold ${acSelectedProductId === product.id ? "text-blue-900" : "text-gray-800"}`}>{product.name}</p>
+                      <p className={`text-xs ${acSelectedProductId === product.id ? "text-blue-700" : "text-gray-500"}`}>{product.category || "Produto pronto"}</p>
                     </div>
                   </button>
                 ))}
@@ -3060,8 +3060,8 @@ const handleSavePDF = async () => {
                     )}
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-gray-800">{product.name}</p>
-                    <p className="text-xs text-gray-500">{product.category || "Alumínio"}</p>
+                    <p className={`text-sm font-semibold ${alSelectedProductId === product.id ? "text-blue-900" : "text-gray-800"}`}>{product.name}</p>
+                    <p className={`text-xs ${alSelectedProductId === product.id ? "text-blue-700" : "text-gray-500"}`}>{product.category || "Alumínio"}</p>
                   </div>
                 </button>
               ))}
@@ -3206,8 +3206,8 @@ const handleSavePDF = async () => {
                     )}
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-gray-800">{product.name}</p>
-                    <p className="text-xs text-gray-500">{product.category || "Vidros"}</p>
+                    <p className={`text-sm font-semibold ${gwSelectedProduct === product.id ? "text-blue-900" : "text-gray-800"}`}>{product.name}</p>
+                    <p className={`text-xs ${gwSelectedProduct === product.id ? "text-blue-700" : "text-gray-500"}`}>{product.category || "Vidros"}</p>
                   </div>
                 </button>
               ))}
@@ -3347,8 +3347,8 @@ const handleSavePDF = async () => {
                         )}
                       </div>
                       <div>
-                        <p className="text-sm font-semibold text-gray-800">{product.name}</p>
-                        <p className="text-xs text-gray-500">{product.category || "Estrutura"}</p>
+                        <p className={`text-sm font-semibold ${esSelectedProduct === product.id ? "text-blue-900" : "text-gray-800"}`}>{product.name}</p>
+                        <p className={`text-xs ${esSelectedProduct === product.id ? "text-blue-700" : "text-gray-500"}`}>{product.category || "Estrutura"}</p>
                       </div>
                     </button>
                   ))}
@@ -3437,8 +3437,8 @@ const handleSavePDF = async () => {
                         )}
                       </div>
                       <div>
-                        <p className="text-sm font-semibold text-gray-800">{product.name}</p>
-                        <p className="text-xs text-gray-500">{product.category || "Acessório Vidro"}</p>
+                        <p className={`text-sm font-semibold ${avSelectedProduct === product.id ? "text-blue-900" : "text-gray-800"}`}>{product.name}</p>
+                        <p className={`text-xs ${avSelectedProduct === product.id ? "text-blue-700" : "text-gray-500"}`}>{product.category || "Acessório Vidro"}</p>
                       </div>
                     </button>
                   ))}
