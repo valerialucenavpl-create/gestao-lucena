@@ -4121,7 +4121,7 @@ const handleSavePDF = async () => {
           : new Date();
         const todayPreviewStr = new Date().toLocaleDateString("pt-BR");
         return (
-        <div className="fixed inset-0 z-50 overflow-auto" style={{ background: "#e8eaf0" }}>
+        <div className="fixed inset-0 z-50 overflow-auto bg-[#e8eaf0] dark:bg-[#0b0d16]">
           {/* Action bar */}
           <div className="sticky top-0 z-10 no-print" style={{ background: "#1e2130", borderBottom: "1px solid #2d3148" }}>
             <div className="max-w-4xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
