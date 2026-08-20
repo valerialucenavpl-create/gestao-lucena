@@ -264,7 +264,21 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [authResolved, setAuthResolved] = useState(false);
   const [isSidebarOpen, setSidebarOpen] = useState(true);
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  // Lê a preferência salva — sem isso, toda vez que a página recarregava o
+  // modo escuro voltava pra claro sozinho, mesmo quem tinha ligado manualmente.
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    try {
+      return localStorage.getItem("dark_mode") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("dark_mode", String(isDarkMode));
+    } catch {}
+  }, [isDarkMode]);
 
   const [users, setUsers] = useState<User[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
