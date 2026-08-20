@@ -3,6 +3,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Quote,
   QuoteItem,
+  QuoteItemMaterialLine,
+  QuoteItemLaborLine,
   QuoteInternalStatus,
   InventoryItem,
   Product,
@@ -107,6 +109,11 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
   const [showFinances, setShowFinances] = useState(false);
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [paymentTab, setPaymentTab] = useState<"receitas" | "despesas">("receitas");
+  const [detailModal, setDetailModal] = useState<
+    | { type: "material"; title: string; lines: QuoteItemMaterialLine[] }
+    | { type: "labor"; title: string; lines: QuoteItemLaborLine[] }
+    | null
+  >(null);
 
   // Payment form
   const [payAmount, setPayAmount] = useState(0);
@@ -216,6 +223,8 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
       label: "Total do Orçamento",
       materialCost: totalMaterialCost,
       laborCost: totalLaborCost,
+      materialLines: safeItems.flatMap((i) => i.materialBreakdown || []),
+      laborLines: safeItems.flatMap((i) => i.laborBreakdown || []),
       costOfGoods: totalCostOfGoods,
       installationCost: installationCostTotal,
       assemblyCost: totalAssemblyCost,
@@ -296,6 +305,8 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
           label: CATEGORY_LABELS[key],
           materialCost,
           laborCost,
+          materialLines: catItems.flatMap((i) => i.materialBreakdown || []),
+          laborLines: catItems.flatMap((i) => i.laborBreakdown || []),
           costOfGoods,
           installationCost: 0,
           assemblyCost,
@@ -710,6 +721,40 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
           </div>
         );
 
+        const rowWithDetail = (
+          label: string,
+          value: number,
+          onOpenDetail: () => void,
+          hasLines: boolean,
+          color = "#dde4f5"
+        ) => (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <span style={{ color: "#a9b8dc", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+              {label}
+              {hasLines && (
+                <button
+                  type="button"
+                  onClick={onOpenDetail}
+                  title="Ver detalhamento"
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: "#8fa8ff",
+                    background: "#1e2f5c",
+                    border: "1px solid #3a5590",
+                    borderRadius: 999,
+                    padding: "1px 8px",
+                    cursor: "pointer",
+                  }}
+                >
+                  ver detalhamento
+                </button>
+              )}
+            </span>
+            <span style={{ color, fontSize: 13, fontWeight: 600 }}>{fmt(value)}</span>
+          </div>
+        );
+
         const renderPanel = (title: string, d: (typeof adminBreakdown)["total"]) => (
           <div
             key={title}
@@ -725,8 +770,19 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
           >
             <div style={{ fontSize: 13, fontWeight: 700, color: "#f59e0b", marginBottom: 12 }}>{title}</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {row("Custo matéria-prima", d.materialCost)}
-              {d.laborCost > 0 && row("Mão de obra", d.laborCost)}
+              {rowWithDetail(
+                "Custo matéria-prima",
+                d.materialCost,
+                () => setDetailModal({ type: "material", title: `Matéria-prima — ${title}`, lines: d.materialLines }),
+                d.materialLines.length > 0
+              )}
+              {d.laborCost > 0 &&
+                rowWithDetail(
+                  "Mão de obra",
+                  d.laborCost,
+                  () => setDetailModal({ type: "labor", title: `Mão de obra — ${title}`, lines: d.laborLines }),
+                  d.laborLines.length > 0
+                )}
               <div style={{ borderTop: "1px solid #3a5590", paddingTop: 6, marginTop: 2 }}>
                 {row("CMV total", d.costOfGoods, "#f5f6fa")}
               </div>
@@ -1026,6 +1082,60 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {/* DETALHAMENTO DE MATÉRIA-PRIMA / MÃO DE OBRA (ADMIN)            */}
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {detailModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.65)" }} onClick={() => setDetailModal(null)} />
+          <div style={{ position: "relative", width: "100%", maxWidth: 560, maxHeight: "80vh", overflowY: "auto", background: "#16305F", borderRadius: 16, padding: 20, boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#f5f6fa" }}>{detailModal.title}</div>
+              <button
+                type="button"
+                onClick={() => setDetailModal(null)}
+                style={{ background: "transparent", border: "none", color: "#a9b8dc", fontSize: 20, cursor: "pointer", lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </div>
+
+            {detailModal.lines.length === 0 ? (
+              <div style={{ color: "#a9b8dc", fontSize: 13 }}>Sem itens detalhados.</div>
+            ) : detailModal.type === "material" ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {detailModal.lines.map((line, idx) => (
+                  <div key={idx} style={{ background: "#1E3D7A", borderRadius: 10, padding: "10px 12px", border: "1px solid #3a5590" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "#f5f6fa" }}>{line.name}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#8fa8ff" }}>{fmt(line.totalCost)}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#a9b8dc", marginTop: 3 }}>
+                      {line.color && line.color !== "Padrão" ? `Cor: ${line.color} · ` : ""}
+                      {line.quantity.toFixed(2)} {line.unit} × {fmt(line.unitCost)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {detailModal.lines.map((line, idx) => (
+                  <div key={idx} style={{ background: "#1E3D7A", borderRadius: 10, padding: "10px 12px", border: "1px solid #3a5590" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "#f5f6fa" }}>{line.role}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#8fa8ff" }}>{fmt(line.total)}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#a9b8dc", marginTop: 3 }}>
+                      {line.count} pessoa(s) × {line.hours}h × {fmt(line.rate)}/h
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
