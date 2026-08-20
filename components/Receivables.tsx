@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { getReceivables, markReceivableAsReceived } from "../services/receivablesServices";
-import { Receivable } from "../types";
+import { getReceivables } from "../services/receivablesServices";
+import { getCashFlow } from "../services/cashFlowServices";
+import { CashFlowEntry, Receivable } from "../types";
 
 type ReceivableRow = Receivable & { quoteNumber?: number };
 
@@ -39,18 +40,27 @@ function addBusinessDays(date: Date, days: number): Date {
 type StatusFilter = "pending" | "received" | "all";
 
 // ─── Component ───────────────────────────────────────────────────────────────
+// Tela só de visualização — o status "recebido" não é mais guardado à parte
+// aqui dentro; ele é calculado a partir do que realmente existe no Caixa. Um
+// botão "Dar baixa" manual criava um segundo lugar pra marcar "pago",
+// independente do Caixa, e os dois ficavam fora de sincronia (uma conta já
+// paga no Caixa continuava "Pendente" aqui, ou o contrário quando alguém
+// apagava o lançamento do Caixa). Sem esse botão, essa tela só reflete a
+// realidade do Caixa — serve pra enxergar o que ainda falta entrar e montar
+// a previsão de caixa, não pra registrar pagamento.
 const Receivables: React.FC = () => {
   const [rows, setRows] = useState<ReceivableRow[]>([]);
+  const [cashFlow, setCashFlow] = useState<CashFlowEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [payingId, setPayingId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
-    const res = await getReceivables();
-    if (res.ok) setRows(res.data as ReceivableRow[]);
+    const [receivablesRes, cashFlowRes] = await Promise.all([getReceivables(), getCashFlow()]);
+    if (receivablesRes.ok) setRows(receivablesRes.data as ReceivableRow[]);
+    if (cashFlowRes.ok) setCashFlow(cashFlowRes.data ?? []);
     setLoading(false);
   };
 
@@ -58,37 +68,55 @@ const Receivables: React.FC = () => {
     load();
   }, []);
 
-  const handleReceive = async (row: ReceivableRow) => {
-    if (!window.confirm(`Confirmar recebimento de ${money(row.amount)} de ${row.customerName}?`)) return;
-    setPayingId(row.id);
-    const res = await markReceivableAsReceived(row);
-    setPayingId(null);
-    if (!res.ok) {
-      alert(`Não foi possível dar baixa: ${(res.error as any)?.message ?? "ver console"}`);
-      console.error(res.error);
-      return;
-    }
-    load();
+  // Mesmo critério de match usado em QuoteDetail (histórico financeiro do
+  // pedido): primeiro tenta pela tag "quote:<id>", senão cai no fallback por
+  // número do pedido + nome do cliente na descrição.
+  const findPayment = (row: ReceivableRow): CashFlowEntry | undefined => {
+    const byTag = cashFlow.find(
+      (e) => e.type === "Entrada" && (e as any).subcategory === `quote:${row.quoteId}`
+    );
+    if (byTag) return byTag;
+
+    const num = row.quoteNumber;
+    const name = (row.customerName || "").toLowerCase();
+    return cashFlow.find((e) => {
+      if (e.type !== "Entrada") return false;
+      const desc = (e.description || "").toLowerCase();
+      return (num ? desc.includes(String(num)) : false) && (name ? desc.includes(name) : false);
+    });
   };
+
+  // Linhas com o status recalculado a partir do Caixa (ignora o campo
+  // "status" gravado na tabela — ele só serve de estado inicial até o
+  // primeiro lançamento de caixa aparecer).
+  const computedRows = useMemo(() => {
+    return rows.map((row) => {
+      const payment = findPayment(row);
+      if (payment) {
+        return { ...row, status: "received" as const, receivedAt: payment.date };
+      }
+      return { ...row, status: "pending" as const, receivedAt: undefined };
+    });
+  }, [rows, cashFlow]);
 
   // ─── Filtered ──────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
-    return rows.filter((r) => {
+    return computedRows.filter((r) => {
       if (statusFilter !== "all" && r.status !== statusFilter) return false;
       if (dateFrom && r.dueDate < dateFrom) return false;
       if (dateTo && r.dueDate > dateTo) return false;
       return true;
     });
-  }, [rows, statusFilter, dateFrom, dateTo]);
+  }, [computedRows, statusFilter, dateFrom, dateTo]);
 
   const totalPending = useMemo(
-    () => rows.filter((r) => r.status === "pending").reduce((sum, r) => sum + r.amount, 0),
-    [rows]
+    () => computedRows.filter((r) => r.status === "pending").reduce((sum, r) => sum + r.amount, 0),
+    [computedRows]
   );
 
   const totalReceived = useMemo(
-    () => rows.filter((r) => r.status === "received").reduce((sum, r) => sum + r.amount, 0),
-    [rows]
+    () => computedRows.filter((r) => r.status === "received").reduce((sum, r) => sum + r.amount, 0),
+    [computedRows]
   );
 
   // ─── Render ────────────────────────────────────────────────────────────────
@@ -99,7 +127,8 @@ const Receivables: React.FC = () => {
         <h3 className="text-2xl font-bold text-gray-800">Contas a Receber</h3>
         <p className="text-sm text-gray-500 mt-1">
           Gerado automaticamente quando um orçamento é aprovado. Prazo de recebimento segue a
-          data de entrega (PIX/Dinheiro) ou o próximo dia útil da venda (Cartão).
+          data de entrega (PIX/Dinheiro) ou o próximo dia útil da venda (Cartão). O status "Recebido"
+          reflete direto o Caixa — só visualização, não dá pra dar baixa por aqui.
         </p>
       </div>
 
@@ -116,7 +145,7 @@ const Receivables: React.FC = () => {
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
           <p className="text-xs font-semibold uppercase text-gray-500 mb-1">Qtd. Pendentes</p>
           <p className="text-2xl font-bold text-gray-800">
-            {rows.filter((r) => r.status === "pending").length}
+            {computedRows.filter((r) => r.status === "pending").length}
           </p>
         </div>
       </div>
@@ -196,7 +225,6 @@ const Receivables: React.FC = () => {
                   <th className="px-4 py-3 text-left font-semibold text-gray-600">Pagamento</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-600">Prazo Receb.</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-600">Status</th>
-                  <th className="px-4 py-3 text-right font-semibold text-gray-600">Ação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -241,17 +269,6 @@ const Receivables: React.FC = () => {
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        {row.status === "pending" && (
-                          <button
-                            onClick={() => handleReceive(row)}
-                            disabled={payingId === row.id}
-                            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-                          >
-                            {payingId === row.id ? "Salvando..." : "Dar baixa"}
-                          </button>
-                        )}
-                      </td>
                     </tr>
                   );
                 })}
@@ -278,17 +295,13 @@ const Receivables: React.FC = () => {
                   <p className="font-bold text-gray-800">{row.customerName}</p>
                   <p className="text-lg font-bold text-gray-700">{money(row.amount)}</p>
                   <p className="text-xs text-gray-500">{row.paymentMethod}</p>
-                  {row.status === "pending" ? (
-                    <button
-                      onClick={() => handleReceive(row)}
-                      disabled={payingId === row.id}
-                      className="w-full px-3 py-2 text-sm font-semibold rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-                    >
-                      {payingId === row.id ? "Salvando..." : "Dar baixa"}
-                    </button>
-                  ) : (
+                  {row.status === "received" ? (
                     <span className="inline-block text-xs font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700">
                       Recebido {row.receivedAt ? `em ${formatBR(row.receivedAt)}` : ""}
+                    </span>
+                  ) : (
+                    <span className="inline-block text-xs font-semibold px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">
+                      Pendente
                     </span>
                   )}
                 </div>
