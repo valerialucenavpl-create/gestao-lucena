@@ -178,7 +178,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
             .from("sales")
             .select("*")
             .is("deleted_at", null)
-            .order("created_at", { ascending: false }),
+            .order("date", { ascending: false }),
           supabase
             .from("quotes")
             .select("*")
