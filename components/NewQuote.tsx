@@ -2641,7 +2641,7 @@ const handleSavePDF = async () => {
                     onClick={() => setMrSelectedProductId(product.id)}
                     className={`p-3 border rounded-lg text-left flex gap-3 items-center ${
                       mrSelectedProductId === product.id
-                        ? "border-primary-600 bg-primary-50"
+                        ? "border-green-700 bg-green-100"
                         : "border-gray-200 bg-white"
                     }`}
                   >
@@ -2919,7 +2919,7 @@ const handleSavePDF = async () => {
                     onClick={() => setAcSelectedProductId(product.id)}
                     className={`p-3 border rounded-lg text-left flex gap-3 items-center ${
                       acSelectedProductId === product.id
-                        ? "border-primary-600 bg-primary-50"
+                        ? "border-green-700 bg-green-100"
                         : "border-gray-200 bg-white"
                     }`}
                   >
@@ -3048,7 +3048,7 @@ const handleSavePDF = async () => {
                   onClick={() => setAlSelectedProductId(product.id)}
                   className={`p-3 border rounded-lg text-left flex gap-3 items-center ${
                     alSelectedProductId === product.id
-                      ? "border-primary-600 bg-primary-50"
+                      ? "border-green-700 bg-green-100"
                       : "border-gray-200 bg-white"
                   }`}
                 >
@@ -3196,7 +3196,7 @@ const handleSavePDF = async () => {
                   key={product.id}
                   type="button"
                   onClick={() => setGwSelectedProduct(product.id)}
-                  className={`p-3 border rounded-lg text-left flex gap-3 items-center ${gwSelectedProduct === product.id ? "border-primary-600 bg-primary-50" : "border-gray-200 bg-white"}`}
+                  className={`p-3 border rounded-lg text-left flex gap-3 items-center ${gwSelectedProduct === product.id ? "border-green-700 bg-green-100" : "border-gray-200 bg-white"}`}
                 >
                   <div className="w-14 h-14 rounded-md bg-gray-100 overflow-hidden flex items-center justify-center shrink-0">
                     {product.image ? (
@@ -3337,7 +3337,7 @@ const handleSavePDF = async () => {
                       key={product.id}
                       type="button"
                       onClick={() => setEsSelectedProduct(product.id)}
-                      className={`p-3 border rounded-lg text-left flex gap-3 items-center ${esSelectedProduct === product.id ? "border-primary-600 bg-primary-50" : "border-gray-200 bg-white"}`}
+                      className={`p-3 border rounded-lg text-left flex gap-3 items-center ${esSelectedProduct === product.id ? "border-green-700 bg-green-100" : "border-gray-200 bg-white"}`}
                     >
                       <div className="w-14 h-14 rounded-md bg-gray-100 overflow-hidden flex items-center justify-center shrink-0">
                         {product.image ? (
@@ -3427,7 +3427,7 @@ const handleSavePDF = async () => {
                       key={product.id}
                       type="button"
                       onClick={() => setAvSelectedProduct(product.id)}
-                      className={`p-3 border rounded-lg text-left flex gap-3 items-center ${avSelectedProduct === product.id ? "border-primary-600 bg-primary-50" : "border-gray-200 bg-white"}`}
+                      className={`p-3 border rounded-lg text-left flex gap-3 items-center ${avSelectedProduct === product.id ? "border-green-700 bg-green-100" : "border-gray-200 bg-white"}`}
                     >
                       <div className="w-14 h-14 rounded-md bg-gray-100 overflow-hidden flex items-center justify-center shrink-0">
                         {product.image ? (
