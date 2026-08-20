@@ -42,8 +42,18 @@ const statusStyles: Record<Exclude<FastStatus, "Todos">, string> = {
   Aguardando: "bg-amber-50 text-amber-700 border-amber-200",
   "Pendente em aprovação": "bg-sky-50 text-sky-700 border-sky-200",
   Cancelado: "bg-rose-50 text-rose-700 border-rose-200",
-  Aprovado: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  Concluindo: "bg-violet-50 text-violet-700 border-violet-200",
+  Aprovado: "bg-red-50 text-red-700 border-red-200",
+  Concluindo: "bg-green-50 text-green-700 border-green-200",
+};
+
+// Borda fina do card inteiro seguindo a mesma cor do status, pra diferenciar
+// de relance (verde = concluído, vermelho = aprovado ainda não concluído).
+const cardBorderStyles: Record<Exclude<FastStatus, "Todos">, string> = {
+  Aguardando: "border-amber-200",
+  "Pendente em aprovação": "border-sky-200",
+  Cancelado: "border-rose-200",
+  Aprovado: "border-red-300",
+  Concluindo: "border-green-300",
 };
 
 function toDate(value: unknown): Date | null {
@@ -376,7 +386,7 @@ const getComputedStatus = (sale: Sale): Exclude<FastStatus, "Todos"> => {
           filteredSales.map((sale) => (
             <div
               key={(sale as any).id}
-              className="relative rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+              className={`relative rounded-xl border bg-white p-4 shadow-sm ${cardBorderStyles[sale.computedStatus]}`}
               style={{ zIndex: menuOpenId === (sale as any).id ? 20 : undefined }}
             >
               <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
