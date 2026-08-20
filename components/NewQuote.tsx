@@ -1156,6 +1156,11 @@ const NewQuote: React.FC<NewQuoteProps> = ({
       laborBreakdown.forEach((line) => {
         const existing = laborMap.get(line.role);
         if (existing) {
+          // Soma a quantidade de pessoas junto com o total — senão o total
+          // ficava somado de todas as peças, mas "horas" mostrava só da
+          // primeira peça, e pessoas × horas × valor/hora não batia com o
+          // total exibido.
+          existing.count += line.count;
           existing.total += line.total;
         } else {
           laborMap.set(line.role, { ...line });
