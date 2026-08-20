@@ -1445,6 +1445,8 @@ const categories = [
     const totalCost = calc.totalCost + totalExtra + assemblyCost;
 
     const validPieces = mrPieces.filter((p) => p.length > 0 && p.width > 0 && p.quantity > 0);
+    // Só pra equipe ver depois (dentro do sistema) o que foi medido peça a
+    // peça — nunca aparece no PDF/impressão que vai pro cliente.
     const detalhamentoLines = validPieces.map(
       (p, idx) => `Peça ${idx + 1}: ${p.quantity}x (${p.length}mm x ${p.width}mm)`
     );
@@ -1454,13 +1456,13 @@ const categories = [
     if (mrDescription.trim()) {
       detalhamentoLines.push(mrDescription.trim());
     }
-    const piecesDesc = detalhamentoLines.join("\n");
+    const internalDetail = detalhamentoLines.join("\n");
 
     const description = [
       `Cor: ${selectedColor || "Não informado"}`,
       `Área total: ${calc.totalAreaM2.toFixed(2)} m²`,
       `Acréscimo por serviço: R$ ${totalExtra.toFixed(2)}`,
-    ].join(" | ") + `\n\n[Detalhamento]\n${piecesDesc}`;
+    ].join(" | ");
 
     const newItem: QuoteItem = {
       id: `qi-marmore-${Date.now()}`,
@@ -1468,6 +1470,7 @@ const categories = [
       productName: selectedProduct.name,
       selectedColor,
       description,
+      internalDetail: internalDetail || undefined,
       width: 0,
       height: 0,
       quantity: 1,

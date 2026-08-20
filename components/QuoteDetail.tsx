@@ -587,6 +587,26 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
                           <div style={{ fontSize: 12, color: "#a9b8dc", marginTop: 3 }}>{cleanDesc}</div>
                         )}
                         <div style={{ fontSize: 11, color: "#a9b8dc", marginTop: 4 }}>Qtd: {item.quantity}</div>
+                        {item.internalDetail && (
+                          <div
+                            style={{
+                              marginTop: 6,
+                              padding: "6px 10px",
+                              background: "#1e2f5c",
+                              border: "1px dashed #4a68a8",
+                              borderRadius: 8,
+                              fontSize: 11,
+                              color: "#c8d4f0",
+                              whiteSpace: "pre-line",
+                            }}
+                          >
+                            <span style={{ fontWeight: 700, color: "#8fa8ff" }}>
+                              🔒 Detalhamento interno (não aparece no PDF do cliente)
+                            </span>
+                            {"\n"}
+                            {item.internalDetail}
+                          </div>
+                        )}
                       </div>
                       <div style={{ textAlign: "right", flexShrink: 0 }}>
                         <div style={{ fontSize: 16, fontWeight: 700, color: "#22c55e" }}>{fmt(item.price)}</div>

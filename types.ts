@@ -292,6 +292,9 @@ export interface QuoteItem {
   productName: string;
   selectedColor: string;
   description: string;
+  // Anotação só pra equipe (ex.: quebra de medida peça a peça) — aparece no
+  // orçamento/venda dentro do sistema, mas nunca no PDF/impressão pro cliente.
+  internalDetail?: string;
   width: number;
   height: number;
   quantity: number;
