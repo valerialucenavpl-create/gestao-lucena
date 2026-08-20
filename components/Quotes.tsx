@@ -57,7 +57,7 @@ const Quotes: React.FC<QuotesProps> = ({ quotes, setActiveView, onDeleteQuote })
                 <td className="px-4 py-3">{q.salesperson}</td>
                 <td className="px-4 py-3">{q.status}</td>
                 <td className="px-4 py-3">
-                  R$ {Number(q.totalPrice ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                  R$ {Number(q.totalPrice ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
                 <td className="px-4 py-3 text-center flex items-center justify-center gap-3">
                   <button
