@@ -136,6 +136,7 @@ function normalizeQuoteForDb(quote: Partial<Quote>): Record<string, unknown> {
     quote_number:     q.quoteNumber   ?? q.quote_number,
     delivery_date:    q.deliveryDate  ?? q.delivery_date,
     internal_status:  q.internalStatus ?? q.internal_status,
+    sale_completed:   q.saleCompleted   ?? q.sale_completed,
   };
 
   // Remove undefined fields
@@ -180,6 +181,7 @@ function normalizeQuoteFromDb(row: any): Quote {
     quoteNumber:       row.quote_number     ?? row.quoteNumber,
     deliveryDate:      row.delivery_date    ?? row.deliveryDate    ?? "",
     internalStatus:    row.internal_status  ?? row.internalStatus  ?? "Pedido",
+    saleCompleted:     Boolean(row.sale_completed ?? row.saleCompleted ?? false),
   };
 }
 

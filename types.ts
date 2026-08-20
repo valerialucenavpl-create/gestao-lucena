@@ -330,6 +330,9 @@ export interface Quote {
   deliveryDate?: string;
   status: "Pendente" | "Aprovado" | "Recusado";
   internalStatus?: QuoteInternalStatus;
+  // Marca manual, só Admin — pagamento 100% sozinho não conclui a venda,
+  // porque o produto pode ainda não ter sido entregue.
+  saleCompleted?: boolean;
 
   items: QuoteItem[];
 

@@ -216,8 +216,12 @@ const getComputedStatus = (sale: Sale): Exclude<FastStatus, "Todos"> => {
     if (quote?.status === "Recusado") return "Cancelado";
     if (quote?.status === "Pendente") return "Pendente em aprovação";
 
+    // "Concluindo" agora é sempre marcação manual (Admin) — pagamento 100%
+    // sozinho não conclui a venda, porque o produto pode ainda não ter sido
+    // entregue.
+    if (quote?.saleCompleted) return "Concluindo";
+
     const { percentage } = getFinancialInfo(sale);
-    if (percentage >= 99.9) return "Concluindo";
     if (percentage > 0) return "Aprovado";
     return "Aguardando";
   };
@@ -448,6 +452,22 @@ const getComputedStatus = (sale: Sale): Exclude<FastStatus, "Todos"> => {
                             className="w-full px-3 py-2 text-left text-sm text-blue-700 hover:bg-blue-50"
                           >
                             Ver detalhes
+                          </button>
+                        )}
+                        {isAdmin && resolveQuoteUUID(sale, safeQuotes) && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const uid = resolveQuoteUUID(sale, safeQuotes);
+                              const quote = getQuote(uid);
+                              await updateQuote(uid, { saleCompleted: !quote?.saleCompleted });
+                              setMenuOpenId(null);
+                            }}
+                            className="w-full px-3 py-2 text-left text-sm text-emerald-700 hover:bg-emerald-50"
+                          >
+                            {getQuote(resolveQuoteUUID(sale, safeQuotes))?.saleCompleted
+                              ? "Desfazer conclusão"
+                              : "Marcar como Concluído"}
                           </button>
                         )}
                         {isAdmin && (
