@@ -8,26 +8,6 @@ import {
   sanitizeMoneyInputBR,
 } from "../utils/money";
 
-// Key for localStorage: stores IDs of virtual sales (from quotes) that were deleted
-const DELETED_VIRTUAL_KEY = "deleted_virtual_sales";
-
-function getDeletedVirtualIds(): Set<string> {
-  try {
-    const raw = localStorage.getItem(DELETED_VIRTUAL_KEY);
-    return raw ? new Set(JSON.parse(raw)) : new Set();
-  } catch {
-    return new Set();
-  }
-}
-
-function addDeletedVirtualId(id: string) {
-  try {
-    const set = getDeletedVirtualIds();
-    set.add(id);
-    localStorage.setItem(DELETED_VIRTUAL_KEY, JSON.stringify([...set]));
-  } catch {}
-}
-
 interface SalesProps {
   currentUser?: User | null;
   sales?: Sale[] | null;
@@ -171,11 +151,7 @@ const Sales: React.FC<SalesProps> = ({ currentUser, sales, quotes, cashFlow, onO
   const [editStatus, setEditStatus] = useState<Exclude<FastStatus, "Todos">>("Aguardando");
 
   useEffect(() => {
-    const deletedIds = getDeletedVirtualIds();
-    // Always use DB sales — filter out locally-deleted IDs for this session
-    setLocalSales(
-      safeSales.filter((s) => !deletedIds.has(String((s as any).id)))
-    );
+    setLocalSales(safeSales);
   }, [safeSales]);
 
   const getQuote = (quoteId: string) => safeQuotes.find((q: any) => String(q.id) === String(quoteId));
@@ -336,11 +312,11 @@ const getComputedStatus = (sale: Sale): Exclude<FastStatus, "Todos"> => {
       }
     }
 
-    if (isVirtual) {
-      // Virtual sale (generated from quote) — persist deletion in localStorage
-      addDeletedVirtualId(saleId);
-    } else {
-      // Real DB sale — delete from Supabase
+    if (!isVirtual) {
+      // Real DB sale — delete from Supabase (venda virtual já foi resolvida
+      // marcando o orçamento como Recusado acima, o que a esconde pra
+      // qualquer pessoa/dispositivo assim que recarregar — sem depender de
+      // localStorage, que só escondia no navegador de quem clicou).
       const numericId = Number(saleId);
       if (!isNaN(numericId)) {
         const result = await deleteSale(numericId);
