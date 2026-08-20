@@ -1341,7 +1341,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
       {showExitConfirm && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60">
-          <div className="bg-white rounded-2xl p-6 shadow-2xl max-w-sm w-full mx-4 text-center">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-2xl max-w-sm w-full mx-4 text-center">
             <p className="text-lg font-semibold text-gray-800 mb-1">Sair sem salvar?</p>
             <p className="text-sm text-gray-500 mb-5">As alterações feitas ainda não foram salvas.</p>
             <div className="flex gap-3">
@@ -1352,13 +1352,13 @@ const ProductModal: React.FC<ProductModalProps> = ({
           </div>
         </div>
       )}
-      <div className="max-h-[94vh] w-full max-w-7xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-5">
+      <div className="max-h-[94vh] w-full max-w-7xl overflow-hidden rounded-[28px] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-6 py-5">
           <div>
-            <h2 className="text-2xl font-semibold text-slate-900">
+            <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
               {product ? "Editar produto personalizado" : "Novo produto personalizado"}
             </h2>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               Monte a composicao por materia-prima e teste a formula com largura e altura
               de referencia.
             </p>
@@ -1367,7 +1367,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+            className="rounded-full border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
           >
             Fechar
           </button>
@@ -1376,11 +1376,11 @@ const ProductModal: React.FC<ProductModalProps> = ({
         <div className="max-h-[calc(94vh-88px)] overflow-y-auto">
           <form onSubmit={handleSubmit} className="space-y-6 p-6">
             <section className="grid grid-cols-1 gap-6 xl:grid-cols-[320px,1fr]">
-              <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                <label className="mb-3 block text-sm font-semibold uppercase tracking-wide text-slate-500">
+              <div className="rounded-[24px] border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-5">
+                <label className="mb-3 block text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Foto do produto
                 </label>
-                <label className="block cursor-pointer overflow-hidden rounded-[20px] border border-dashed border-slate-300 bg-white">
+                <label className="block cursor-pointer overflow-hidden rounded-[20px] border border-dashed border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900">
                   {image ? (
                     <img
                       src={image}
@@ -1388,7 +1388,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                       className="h-[280px] w-full object-cover"
                     />
                   ) : (
-                    <div className="flex h-[280px] items-center justify-center px-6 text-center text-sm text-slate-400">
+                    <div className="flex h-[280px] items-center justify-center px-6 text-center text-sm text-slate-400 dark:text-slate-500">
                       Clique para enviar a imagem de pre-visualizacao do cliente
                     </div>
                   )}
@@ -1421,27 +1421,27 @@ const ProductModal: React.FC<ProductModalProps> = ({
                 </div>
               </div>
 
-              <div className="space-y-5 rounded-[24px] border border-slate-200 bg-white p-5">
+              <div className="space-y-5 rounded-[24px] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
                 <div className="grid gap-5 lg:grid-cols-2">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4">
+                    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       Nome do produto
                     </label>
                     <input
                       type="text"
                       value={name}
                       onChange={(event) => setName(event.target.value)}
-                      className="mt-3 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900"
+                      className="mt-3 w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-4 py-3 text-slate-900 dark:text-slate-100"
                       placeholder="Ex.: Portao de correr LB 030"
                       required
                     />
-                    <p className="mt-2 text-xs text-slate-500">
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                       Esta pre-visualizacao fica disponivel para o cliente.
                     </p>
                   </div>
 
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4">
+                    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       Categoria do produto
                     </label>
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -1453,7 +1453,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           className={`rounded-full border px-3 py-2 text-xs font-semibold transition ${
                             category === option
                               ? "border-primary-600 bg-primary-600 text-white"
-                              : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                              : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
                           }`}
                         >
                           {option}
@@ -1464,8 +1464,8 @@ const ProductModal: React.FC<ProductModalProps> = ({
                 </div>
 
                 {isSimpleAccessoryCategory ? (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-sm text-slate-600">
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4">
+                    <p className="text-sm text-slate-600 dark:text-slate-300">
                       Acessorio de motor e um produto simples, sem classificacao,
                       subcategoria ou medidas — o preco nao depende de largura/altura.
                     </p>
@@ -1473,8 +1473,8 @@ const ProductModal: React.FC<ProductModalProps> = ({
                 ) : (
                 <div className="grid gap-5 lg:grid-cols-[1.2fr,0.8fr]">
                   <div className="space-y-5">
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4">
+                      <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                         Classificacao do produto
                       </label>
 
@@ -1488,7 +1488,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                               className={`rounded-full border px-3 py-2 text-xs font-semibold transition ${
                                 productType === option
                                   ? "border-primary-600 bg-primary-600 text-white"
-                                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                                  : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
                               }`}
                             >
                               {option}
@@ -1500,15 +1500,15 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           type="text"
                           value={productType}
                           onChange={(event) => setProductType(event.target.value)}
-                          className="mt-3 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900"
+                          className="mt-3 w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-4 py-3 text-slate-900 dark:text-slate-100"
                           placeholder="Ex.: Portao"
                         />
                       )}
                     </div>
 
                     {subCategory1Options.length > 0 && (
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4">
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                           Subcategoria 1
                         </label>
                         <div className="mt-3 flex flex-wrap gap-2">
@@ -1520,7 +1520,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                               className={`rounded-full border px-3 py-2 text-xs font-semibold transition ${
                                 productSubCategory1 === option
                                   ? "border-primary-600 bg-primary-600 text-white"
-                                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                                  : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
                               }`}
                             >
                               {option}
@@ -1531,8 +1531,8 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     )}
 
                     {subCategory2Options.length > 0 && (
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4">
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                           Subcategoria 2
                         </label>
                         <div className="mt-3 flex flex-wrap gap-2">
@@ -1544,7 +1544,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                               className={`rounded-full border px-3 py-2 text-xs font-semibold transition ${
                                 productSubCategory2 === option
                                   ? "border-primary-600 bg-primary-600 text-white"
-                                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                                  : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
                               }`}
                             >
                               {option}
@@ -1555,8 +1555,8 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     )}
 
                     {subCategory3Options.length > 0 && (
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4">
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                           Subcategoria 3
                         </label>
                         <div className="mt-3 flex flex-wrap gap-2">
@@ -1568,7 +1568,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                               className={`rounded-full border px-3 py-2 text-xs font-semibold transition ${
                                 productSubCategory3 === option
                                   ? "border-primary-600 bg-primary-600 text-white"
-                                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                                  : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
                               }`}
                             >
                               {option}
@@ -1588,25 +1588,25 @@ const ProductModal: React.FC<ProductModalProps> = ({
                         Valor somado automaticamente à medida informada no orçamento.
                       </p>
                       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                        <label className="text-sm text-slate-700">
+                        <label className="text-sm text-slate-700 dark:text-slate-200">
                           Acréscimo de Altura (mm)
                           <input
                             type="number"
                             min={0}
                             value={heightIncrement}
                             onChange={(e) => setHeightIncrement(Number(e.target.value) || 0)}
-                            className="mt-2 w-full rounded-xl border border-orange-300 bg-white px-4 py-3 text-slate-900"
+                            className="mt-2 w-full rounded-xl border border-orange-300 bg-white dark:bg-slate-900 px-4 py-3 text-slate-900 dark:text-slate-100"
                             placeholder="Ex: 40"
                           />
                         </label>
-                        <label className="text-sm text-slate-700">
+                        <label className="text-sm text-slate-700 dark:text-slate-200">
                           Acréscimo de Largura (mm)
                           <input
                             type="number"
                             min={0}
                             value={widthIncrement}
                             onChange={(e) => setWidthIncrement(Number(e.target.value) || 0)}
-                            className="mt-2 w-full rounded-xl border border-orange-300 bg-white px-4 py-3 text-slate-900"
+                            className="mt-2 w-full rounded-xl border border-orange-300 bg-white dark:bg-slate-900 px-4 py-3 text-slate-900 dark:text-slate-100"
                             placeholder="Ex: 40"
                           />
                         </label>
@@ -1614,12 +1614,12 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     </div>
                   )}
 
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       Simulacao da formula
                     </h3>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                      <label className="text-sm text-slate-700">
+                      <label className="text-sm text-slate-700 dark:text-slate-200">
                         Altura do vao (mm)
                         <input
                           type="number"
@@ -1628,11 +1628,11 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           onChange={(event) =>
                             setReferenceHeightMm(Number(event.target.value) || 0)
                           }
-                          className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900"
+                          className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-4 py-3 text-slate-900 dark:text-slate-100"
                         />
                       </label>
 
-                      <label className="text-sm text-slate-700">
+                      <label className="text-sm text-slate-700 dark:text-slate-200">
                         Largura do vao (mm)
                         <input
                           type="number"
@@ -1641,11 +1641,11 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           onChange={(event) =>
                             setReferenceWidthMm(Number(event.target.value) || 0)
                           }
-                          className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900"
+                          className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-4 py-3 text-slate-900 dark:text-slate-100"
                         />
                       </label>
                     </div>
-                    <p className="mt-2 text-xs text-slate-500">
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                       Esses valores servem para testar a formula antes de salvar o produto.
                     </p>
                   </div>
@@ -1654,13 +1654,13 @@ const ProductModal: React.FC<ProductModalProps> = ({
               </div>
             </section>
 
-            <section className="rounded-[24px] border border-slate-200 bg-white">
-              <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
+            <section className="rounded-[24px] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+              <div className="flex flex-col gap-4 border-b border-slate-200 dark:border-slate-700 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <h3 className="text-xl font-semibold text-slate-900">
+                  <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
                     Materia-prima e composicao do produto
                   </h3>
-                  <p className="mt-1 text-sm text-slate-500">
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                     Cada card representa um item da composicao, com a formula que sera
                     usada no calculo do produto.
                   </p>
@@ -1684,7 +1684,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                 )}
 
                 {materialCatalog.length > 0 && compositionEntries.length === 0 && (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                  <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 p-8 text-center text-sm text-slate-500 dark:text-slate-400">
                     Ainda nao existe item nesta composicao. Clique em <strong>Adicionar item</strong>
                     {" "}para escolher a materia-prima e configurar a formula.
                   </div>
@@ -1695,24 +1695,24 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     {compositionEntries.map(({ item, material, unitCost, breakdown }) => (
                       <article
                         key={item.id}
-                        className="relative overflow-hidden rounded-[24px] border border-slate-200 bg-slate-50 shadow-sm"
+                        className="relative overflow-hidden rounded-[24px] border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 shadow-sm"
                       >
                         <button
                           type="button"
                           onClick={() =>
                             setOpenItemMenuId((prev) => (prev === item.id ? null : item.id))
                           }
-                          className="absolute right-4 top-4 z-10 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-100"
+                          className="absolute right-4 top-4 z-10 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
                         >
                           ...
                         </button>
 
                         {openItemMenuId === item.id && (
-                          <div className="absolute right-4 top-14 z-20 min-w-[150px] rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                          <div className="absolute right-4 top-14 z-20 min-w-[150px] rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-2 shadow-xl">
                             <button
                               type="button"
                               onClick={() => openEditItemModal(item)}
-                              className="w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                              className="w-full rounded-xl px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
                             >
                               Editar item
                             </button>
@@ -1727,7 +1727,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                         )}
 
                         <div className="grid grid-cols-[96px,1fr] gap-4 p-5">
-                          <div className="h-24 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                          <div className="h-24 overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
                             {getMaterialPhoto(material) ? (
                               <img
                                 src={getMaterialPhoto(material)}
@@ -1735,25 +1735,25 @@ const ProductModal: React.FC<ProductModalProps> = ({
                                 className="h-full w-full object-cover"
                               />
                             ) : (
-                              <div className="flex h-full items-center justify-center px-3 text-center text-[11px] text-slate-400">
+                              <div className="flex h-full items-center justify-center px-3 text-center text-[11px] text-slate-400 dark:text-slate-500">
                                 Sem foto
                               </div>
                             )}
                           </div>
 
                           <div className="pr-8">
-                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                               {getMaterialLine(material) || "Sem linha"}
                             </p>
-                            <h4 className="mt-1 text-lg font-semibold text-slate-900">
+                            <h4 className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
                               {material?.name || "Material nao encontrado"}
                             </h4>
                             {item.variantName && (
-                              <p className="mt-1 text-sm text-slate-500">
+                              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                                 Variacao: {item.variantName}
                               </p>
                             )}
-                            <p className="mt-2 text-sm text-slate-600">
+                            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
                               {material
                                 ? buildCompositionFormulaPreview(
                                     item,
@@ -1766,30 +1766,30 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           </div>
                         </div>
 
-                        <div className="grid gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:grid-cols-2">
-                          <div className="rounded-2xl bg-slate-50 p-3">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        <div className="grid gap-3 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-5 py-4 sm:grid-cols-2">
+                          <div className="rounded-2xl bg-slate-50 dark:bg-slate-800 p-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                               Fator de multiplicacao
                             </p>
-                            <p className="mt-1 text-base font-semibold text-slate-900">
+                            <p className="mt-1 text-base font-semibold text-slate-900 dark:text-slate-100">
                               x{getPositiveNumber(item.multiplyBy, 1).toLocaleString("pt-BR")}
                             </p>
                           </div>
 
-                          <div className="rounded-2xl bg-slate-50 p-3">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          <div className="rounded-2xl bg-slate-50 dark:bg-slate-800 p-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                               Quantidade
                             </p>
-                            <p className="mt-1 text-base font-semibold text-slate-900">
+                            <p className="mt-1 text-base font-semibold text-slate-900 dark:text-slate-100">
                               {breakdown?.pieceCount || 0} item(ns)
                             </p>
                           </div>
 
-                          <div className="rounded-2xl bg-slate-50 p-3">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          <div className="rounded-2xl bg-slate-50 dark:bg-slate-800 p-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                               Consumo total
                             </p>
-                            <p className="mt-1 text-base font-semibold text-slate-900">
+                            <p className="mt-1 text-base font-semibold text-slate-900 dark:text-slate-100">
                               {breakdown
                                 ? formatQuantity(
                                     breakdown.requiredQuantity,
@@ -1799,14 +1799,14 @@ const ProductModal: React.FC<ProductModalProps> = ({
                             </p>
                           </div>
 
-                          <div className="rounded-2xl bg-slate-50 p-3">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          <div className="rounded-2xl bg-slate-50 dark:bg-slate-800 p-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                               Custo estimado
                             </p>
-                            <p className="mt-1 text-base font-semibold text-slate-900">
+                            <p className="mt-1 text-base font-semibold text-slate-900 dark:text-slate-100">
                               {formatCurrency(breakdown?.totalCost || 0)}
                             </p>
-                            <p className="text-xs text-slate-500">
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
                               {formatCurrency(unitCost)} / {material?.unit || "un"}
                             </p>
                           </div>
@@ -1818,14 +1818,14 @@ const ProductModal: React.FC<ProductModalProps> = ({
               </div>
             </section>
 
-            <section className="rounded-[24px] border border-slate-200 bg-white p-6">
+            <section className="rounded-[24px] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6">
               <div className="grid gap-6 lg:grid-cols-[1.2fr,0.8fr]">
                 <div className="space-y-5">
                   <div>
-                    <h3 className="text-xl font-semibold text-slate-900">
+                    <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
                       Detalhamento financeiro do produto
                     </h3>
-                    <p className="mt-1 text-sm text-slate-500">
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                       A parte financeira foi mantida para testar se a formula esta chegando no
                       custo corretamente.
                     </p>
@@ -1833,19 +1833,19 @@ const ProductModal: React.FC<ProductModalProps> = ({
 
                   {/* Seletor de setor — define a taxa média do profissional */}
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Setor:</span>
-                    <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden">
+                    <span className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Setor:</span>
+                    <div className="inline-flex rounded-lg border border-slate-300 dark:border-slate-600 overflow-hidden">
                       <button
                         type="button"
                         onClick={() => setLaborSector("MARMORE")}
-                        className={`px-3 py-1.5 text-xs font-semibold transition-colors ${laborSector === "MARMORE" ? "bg-primary-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                        className={`px-3 py-1.5 text-xs font-semibold transition-colors ${laborSector === "MARMORE" ? "bg-primary-600 text-white" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"}`}
                       >
                         Mármore
                       </button>
                       <button
                         type="button"
                         onClick={() => setLaborSector("VIDRO")}
-                        className={`px-3 py-1.5 text-xs font-semibold transition-colors border-l border-slate-300 ${laborSector === "VIDRO" ? "bg-primary-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                        className={`px-3 py-1.5 text-xs font-semibold transition-colors border-l border-slate-300 dark:border-slate-600 ${laborSector === "VIDRO" ? "bg-primary-600 text-white" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"}`}
                       >
                         Vidro
                       </button>
@@ -1857,23 +1857,23 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     const makeColHeader = (hourLabel: string) => (
                       <div className="grid grid-cols-[76px_1fr_1fr_1fr_1fr] gap-x-1.5 mb-1">
                         <span />
-                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Qtd</span>
-                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">{hourLabel}</span>
-                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Valor/h (R$)</span>
-                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Total</span>
+                        <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wide">Qtd</span>
+                        <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wide">{hourLabel}</span>
+                        <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wide">Valor/h (R$)</span>
+                        <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wide">Total</span>
                       </div>
                     );
-                    const inputCls = "w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm";
-                    const readCls  = "w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-800";
+                    const inputCls = "w-full rounded-lg border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm";
+                    const readCls  = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-sm font-semibold text-slate-800 dark:text-slate-100";
                     return (
                       <>
                         {/* CARD PRODUÇÃO */}
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1.5">
-                          <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Produção</p>
+                        <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3 space-y-1.5">
+                          <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Produção</p>
                           {makeColHeader("H. Produção")}
                           {/* Profissional */}
                           <div className="grid grid-cols-[76px_1fr_1fr_1fr_1fr] gap-x-1.5 items-center">
-                            <span className="text-xs font-medium text-slate-700">Profissional</span>
+                            <span className="text-xs font-medium text-slate-700 dark:text-slate-200">Profissional</span>
                             <input type="number" min={0} value={professionalCount} onFocus={(e)=>e.target.select()} onChange={(e)=>setProfessionalCount(Number(e.target.value)||0)} className={inputCls} />
                             <input type="number" min={0} value={professionalHours} onFocus={(e)=>e.target.select()} onChange={(e)=>setProfessionalHours(Number(e.target.value)||0)} className={inputCls} />
                             <div>
@@ -1884,10 +1884,10 @@ const ProductModal: React.FC<ProductModalProps> = ({
                             </div>
                             <input readOnly value={professionalTotal.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})} className={readCls} />
                           </div>
-                          <div className="border-t border-slate-200" />
+                          <div className="border-t border-slate-200 dark:border-slate-700" />
                           {/* Ajudante */}
                           <div className="grid grid-cols-[76px_1fr_1fr_1fr_1fr] gap-x-1.5 items-center">
-                            <span className="text-xs font-medium text-slate-700">Ajudante</span>
+                            <span className="text-xs font-medium text-slate-700 dark:text-slate-200">Ajudante</span>
                             <input type="number" min={0} value={helperCount} onFocus={(e)=>e.target.select()} onChange={(e)=>setHelperCount(Number(e.target.value)||0)} className={inputCls} />
                             <input type="number" min={0} value={helperHours} onFocus={(e)=>e.target.select()} onChange={(e)=>setHelperHours(Number(e.target.value)||0)} className={inputCls} />
                             <div>
@@ -1901,12 +1901,12 @@ const ProductModal: React.FC<ProductModalProps> = ({
                         </div>
 
                         {/* CARD INSTALAÇÃO */}
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1.5">
-                          <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Instalação</p>
+                        <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3 space-y-1.5">
+                          <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Instalação</p>
                           {makeColHeader("H. Instalação")}
                           {/* Profissional */}
                           <div className="grid grid-cols-[76px_1fr_1fr_1fr_1fr] gap-x-1.5 items-center">
-                            <span className="text-xs font-medium text-slate-700">Profissional</span>
+                            <span className="text-xs font-medium text-slate-700 dark:text-slate-200">Profissional</span>
                             <input type="number" min={0} value={instProfCount} onFocus={(e)=>e.target.select()} onChange={(e)=>setInstProfCount(Number(e.target.value)||0)} className={inputCls} />
                             <input type="number" min={0} value={instProfInstHours} onFocus={(e)=>e.target.select()} onChange={(e)=>setInstProfInstHours(Number(e.target.value)||0)} className={inputCls} />
                             <div>
@@ -1917,10 +1917,10 @@ const ProductModal: React.FC<ProductModalProps> = ({
                             </div>
                             <input readOnly value={instProfTotal.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})} className={readCls} />
                           </div>
-                          <div className="border-t border-slate-200" />
+                          <div className="border-t border-slate-200 dark:border-slate-700" />
                           {/* Ajudante */}
                           <div className="grid grid-cols-[76px_1fr_1fr_1fr_1fr] gap-x-1.5 items-center">
-                            <span className="text-xs font-medium text-slate-700">Ajudante</span>
+                            <span className="text-xs font-medium text-slate-700 dark:text-slate-200">Ajudante</span>
                             <input type="number" min={0} value={instHelpCount} onFocus={(e)=>e.target.select()} onChange={(e)=>setInstHelpCount(Number(e.target.value)||0)} className={inputCls} />
                             <input type="number" min={0} value={instHelpInstHours} onFocus={(e)=>e.target.select()} onChange={(e)=>setInstHelpInstHours(Number(e.target.value)||0)} className={inputCls} />
                             <div>
@@ -1945,7 +1945,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-3">
-                    <label className="text-sm text-slate-700">
+                    <label className="text-sm text-slate-700 dark:text-slate-200">
                       Margem de lucro (%)
                       <input
                         type="text"
@@ -1958,11 +1958,11 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           setDesiredProfitMargin(parseMoneyInputBR(raw));
                         }}
                         onBlur={() => setDesiredProfitMarginInput(formatMoneyInputBR(desiredProfitMargin))}
-                        className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
+                        className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3"
                       />
                     </label>
 
-                    <label className="text-sm text-slate-700">
+                    <label className="text-sm text-slate-700 dark:text-slate-200">
                       Quantidade vendida
                       <input
                         type="number"
@@ -1971,11 +1971,11 @@ const ProductModal: React.FC<ProductModalProps> = ({
                         onChange={(event) =>
                           setQuantity(Number(event.target.value) || 1)
                         }
-                        className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
+                        className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3"
                       />
                     </label>
 
-                    <label className="text-sm text-slate-700">
+                    <label className="text-sm text-slate-700 dark:text-slate-200">
                       Lucro mínimo (R$)
                       <input
                         type="text"
@@ -1988,23 +1988,23 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           setMinProfitValue(parseMoneyInputBR(v));
                         }}
                         onBlur={() => setMinProfitValueInput(formatMoneyInputBR(minProfitValue))}
-                        className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
+                        className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3"
                       />
                     </label>
                   </div>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     Garante esse lucro mínimo por unidade no orçamento, mesmo que a % acima resulte em menos (útil em peças pequenas, onde a margem percentual gera pouco lucro em reais). Deixe em R$ 0,00 para não aplicar piso.
                   </p>
 
                   {productColorOptions.length > 0 && (
-                    <div className="mt-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
-                      <p className="text-sm font-semibold text-slate-700">Margem por cor (opcional)</p>
-                      <p className="mt-1 text-xs text-slate-500">
+                    <div className="mt-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3">
+                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Margem por cor (opcional)</p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                         Deixe em branco para usar a margem geral ({getPositiveNumber(desiredProfitMargin)}%) nessa cor. Útil quando uma cor (ex.: inox, madeirado) tem matéria-prima mais cara e a margem padrão deixa o preço final muito alto.
                       </p>
                       <div className="mt-3 grid gap-3 sm:grid-cols-2 md:grid-cols-3">
                         {productColorOptions.map((color) => (
-                          <label key={color} className="text-xs text-slate-600">
+                          <label key={color} className="text-xs text-slate-600 dark:text-slate-300">
                             {color}
                             <input
                               type="text"
@@ -2014,7 +2014,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                               onFocus={(e) => e.target.select()}
                               onChange={(event) => handleMarginByColorChange(color, event.target.value)}
                               onBlur={() => handleMarginByColorBlur(color)}
-                              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                              className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-2"
                             />
                           </label>
                         ))}
@@ -2022,21 +2022,21 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     </div>
                   )}
 
-                  <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                    <span className="font-semibold text-slate-700">Custos fixos:</span>{" "}
-                    <span className="font-bold text-slate-900">{fixedCostRate.toFixed(2)}%</span>
+                  <div className="mt-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
+                    <span className="font-semibold text-slate-700 dark:text-slate-200">Custos fixos:</span>{" "}
+                    <span className="font-bold text-slate-900 dark:text-slate-100">{fixedCostRate.toFixed(2)}%</span>
                     {percentVariableExpenses.length > 0 && (
                       <>
-                        <span className="mx-2 text-slate-400">·</span>
-                        <span className="font-semibold text-slate-700">Custos variáveis:</span>{" "}
+                        <span className="mx-2 text-slate-400 dark:text-slate-500">·</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">Custos variáveis:</span>{" "}
                         {percentVariableExpenses.map((e) => (
                           <span key={e.id} className="mr-2">
-                            {e.name} <span className="font-bold text-slate-900">{Number(e.value).toFixed(2)}%</span>
+                            {e.name} <span className="font-bold text-slate-900 dark:text-slate-100">{Number(e.value).toFixed(2)}%</span>
                           </span>
                         ))}
                       </>
                     )}
-                    <span className="ml-2 text-xs text-slate-400">(definidos no Financeiro)</span>
+                    <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">(definidos no Financeiro)</span>
                   </div>
                 </div>
 
@@ -2044,24 +2044,24 @@ const ProductModal: React.FC<ProductModalProps> = ({
                   const pricing = computeColorPricing(color);
                   const isEditingThis = editingPriceColor === color;
                   return (
-                    <div key={color || "__default__"} className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                    <div key={color || "__default__"} className="rounded-[24px] border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-5">
                       {color && (
                         <p className="mb-3 text-sm font-bold uppercase tracking-wide text-primary-700">{color}</p>
                       )}
-                      <div className="space-y-3 text-sm text-slate-700">
-                        <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                      <div className="space-y-3 text-sm text-slate-700 dark:text-slate-200">
+                        <div className="flex items-center justify-between rounded-2xl bg-white dark:bg-slate-900 px-4 py-3">
                           <span>Custo materia-prima</span>
                           <strong>{formatCurrency(pricing.colorMaterialCost)}</strong>
                         </div>
-                        <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                        <div className="flex items-center justify-between rounded-2xl bg-white dark:bg-slate-900 px-4 py-3">
                           <span>Mao de obra ({laborHoursTotal.toFixed(2)} h)</span>
                           <strong>{formatCurrency(laborCost)}</strong>
                         </div>
-                        <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                        <div className="flex items-center justify-between rounded-2xl bg-white dark:bg-slate-900 px-4 py-3">
                           <span>Impostos ({taxRate.toFixed(2)}%)</span>
                           <strong>{formatCurrency(pricing.taxValue)}</strong>
                         </div>
-                        <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                        <div className="flex items-center justify-between rounded-2xl bg-white dark:bg-slate-900 px-4 py-3">
                           <span>Comissao vendedora ({commissionRate.toFixed(2)}%)</span>
                           <strong>{formatCurrency(pricing.commissionValue)}</strong>
                         </div>
@@ -2069,13 +2069,13 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           const rate = Number(expense.value || 0);
                           const val = pricing.effectiveSalePriceUnit * (rate / 100);
                           return (
-                            <div key={expense.id} className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                            <div key={expense.id} className="flex items-center justify-between rounded-2xl bg-white dark:bg-slate-900 px-4 py-3">
                               <span>{expense.name} ({rate.toFixed(2)}%)</span>
                               <strong>{formatCurrency(val)}</strong>
                             </div>
                           );
                         })}
-                        <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                        <div className="flex items-center justify-between rounded-2xl bg-white dark:bg-slate-900 px-4 py-3">
                           <span>Custos fixos ({fixedCostRate.toFixed(2)}%)</span>
                           <strong>{formatCurrency(pricing.fixedCostValue)}</strong>
                         </div>
@@ -2095,13 +2095,13 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           </span>
                           <strong>{formatCurrency(pricing.salePriceUnit)}</strong>
                         </div>
-                        <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                        <div className="flex items-center justify-between rounded-2xl bg-white dark:bg-slate-900 px-4 py-3">
                           <span>Margem liquida</span>
                           <strong>
                             {formatCurrency(pricing.netMarginValue)} ({pricing.netMarginRate.toFixed(2)}%)
                           </strong>
                         </div>
-                        <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                        <div className="flex items-center justify-between rounded-2xl bg-white dark:bg-slate-900 px-4 py-3">
                           <span>Margem de contribuicao</span>
                           <strong>
                             {formatCurrency(pricing.contributionValue)} ({pricing.contributionRate.toFixed(2)}%)
@@ -2131,7 +2131,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                               setSqmPriceInputByColor((prev) => ({ ...prev, [color]: formatMoneyInputBR(val) }));
                             }}
                             style={{ width: 80, flexShrink: 0 }}
-                            className="rounded-lg border border-emerald-300 bg-white px-2 py-1 text-right text-xs font-semibold text-emerald-900"
+                            className="rounded-lg border border-emerald-300 bg-white dark:bg-slate-900 px-2 py-1 text-right text-xs font-semibold text-emerald-900"
                           />
                         </div>
                         <p className="mt-1 text-[10px] leading-tight text-emerald-700">
@@ -2238,7 +2238,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           </>
                         )}
 
-                        <p className="mt-3 text-[11px] text-slate-400">
+                        <p className="mt-3 text-[11px] text-slate-400 dark:text-slate-500">
                           Ao definir um valor aqui, ele substitui o cálculo automático por margem sempre que essa cor for usada num orçamento.
                         </p>
                       </div>
@@ -2248,11 +2248,11 @@ const ProductModal: React.FC<ProductModalProps> = ({
               </div>
             </section>
 
-            <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
+            <div className="flex justify-end gap-3 border-t border-slate-200 dark:border-slate-700 pt-4">
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-xl border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                className="rounded-xl border border-slate-300 dark:border-slate-600 px-5 py-3 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
               >
                 Cancelar
               </button>
@@ -2270,13 +2270,13 @@ const ProductModal: React.FC<ProductModalProps> = ({
 
       {isItemModalOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="max-h-[92vh] w-full max-w-6xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-5">
+          <div className="max-h-[92vh] w-full max-w-6xl overflow-hidden rounded-[28px] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-6 py-5">
               <div>
-                <h3 className="text-2xl font-semibold text-slate-900">
+                <h3 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
                   {draftItem ? "Configurar item" : "Selecionar materia-prima"}
                 </h3>
-                <p className="mt-1 text-sm text-slate-500">
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                   {draftItem
                     ? "Defina a formula do item e salve para voltar a composicao do produto."
                     : "Escolha o item com foto para montar a composicao do produto."}
@@ -2286,7 +2286,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
               <button
                 type="button"
                 onClick={closeItemModal}
-                className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                className="rounded-full border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
               >
                 Fechar
               </button>
@@ -2295,12 +2295,12 @@ const ProductModal: React.FC<ProductModalProps> = ({
             {!draftItem ? (
               <div className="max-h-[calc(92vh-88px)] overflow-y-auto p-6">
                 <div className="grid gap-4 md:grid-cols-2">
-                  <label className="text-sm text-slate-700">
+                  <label className="text-sm text-slate-700 dark:text-slate-200">
                     Filtre a linha do item
                     <select
                       value={lineFilter}
                       onChange={(event) => setLineFilter(event.target.value)}
-                      className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
+                      className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3"
                     >
                       <option value="">Todas as linhas</option>
                       {lineOptions.map((option) => (
@@ -2311,13 +2311,13 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     </select>
                   </label>
 
-                  <label className="text-sm text-slate-700">
+                  <label className="text-sm text-slate-700 dark:text-slate-200">
                     Filtre o nome do item
                     <input
                       type="text"
                       value={nameFilter}
                       onChange={(event) => setNameFilter(event.target.value)}
-                      className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
+                      className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3"
                       placeholder="Ex.: Perfil"
                     />
                   </label>
@@ -2326,7 +2326,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                 <div className="mt-6 space-y-6">
                   {groupedPickerMaterials.map(([groupName, items]) => (
                     <section key={groupName}>
-                      <h4 className="mb-3 text-lg font-semibold text-slate-900">
+                      <h4 className="mb-3 text-lg font-semibold text-slate-900 dark:text-slate-100">
                         {groupName || "Sem linha"}
                       </h4>
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -2335,9 +2335,9 @@ const ProductModal: React.FC<ProductModalProps> = ({
                             key={material.id}
                             type="button"
                             onClick={() => handleSelectMaterial(material)}
-                            className="grid grid-cols-[88px,1fr] items-center gap-4 rounded-[24px] border border-slate-200 bg-slate-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-primary-300 hover:bg-white"
+                            className="grid grid-cols-[88px,1fr] items-center gap-4 rounded-[24px] border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4 text-left transition hover:-translate-y-0.5 hover:border-primary-300 hover:bg-white dark:hover:bg-slate-800"
                           >
-                            <div className="h-24 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                            <div className="h-24 overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
                               {getMaterialPhoto(material) ? (
                                 <img
                                   src={getMaterialPhoto(material)}
@@ -2345,20 +2345,20 @@ const ProductModal: React.FC<ProductModalProps> = ({
                                   className="h-full w-full object-cover"
                                 />
                               ) : (
-                                <div className="flex h-full items-center justify-center px-3 text-center text-[11px] text-slate-400">
+                                <div className="flex h-full items-center justify-center px-3 text-center text-[11px] text-slate-400 dark:text-slate-500">
                                   Sem foto
                                 </div>
                               )}
                             </div>
 
                             <div>
-                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                                 {getMaterialLine(material) || "Sem linha"}
                               </p>
-                              <h5 className="mt-1 text-base font-semibold text-slate-900">
+                              <h5 className="mt-1 text-base font-semibold text-slate-900 dark:text-slate-100">
                                 {material.name}
                               </h5>
-                              <p className="mt-2 text-sm text-slate-500">
+                              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                                 Unidade: {material.unit}
                               </p>
                             </div>
@@ -2369,7 +2369,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                   ))}
 
                   {groupedPickerMaterials.length === 0 && (
-                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                    <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 p-8 text-center text-sm text-slate-500 dark:text-slate-400">
                       Nenhum material encontrado com os filtros informados.
                     </div>
                   )}
@@ -2378,8 +2378,8 @@ const ProductModal: React.FC<ProductModalProps> = ({
             ) : (
               <div className="max-h-[calc(92vh-88px)] overflow-y-auto p-6">
                 <div className="grid gap-6 xl:grid-cols-[340px,1fr]">
-                  <aside className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                    <div className="overflow-hidden rounded-[20px] border border-slate-200 bg-white">
+                  <aside className="rounded-[24px] border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-5">
+                    <div className="overflow-hidden rounded-[20px] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
                       {getMaterialPhoto(selectedDraftMaterial) ? (
                         <img
                           src={getMaterialPhoto(selectedDraftMaterial)}
@@ -2387,34 +2387,34 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           className="h-[220px] w-full object-cover"
                         />
                       ) : (
-                        <div className="flex h-[220px] items-center justify-center px-6 text-center text-sm text-slate-400">
+                        <div className="flex h-[220px] items-center justify-center px-6 text-center text-sm text-slate-400 dark:text-slate-500">
                           Sem foto cadastrada para este material
                         </div>
                       )}
                     </div>
 
                     <div className="mt-4 space-y-2">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                         Item selecionado
                       </p>
-                      <h4 className="text-xl font-semibold text-slate-900">
+                      <h4 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
                         {selectedDraftMaterial?.name}
                       </h4>
-                      <p className="text-sm text-slate-500">
+                      <p className="text-sm text-slate-500 dark:text-slate-400">
                         {getMaterialLine(selectedDraftMaterial) || "Sem linha"} - Unidade{" "}
                         {selectedDraftMaterial?.unit || "un"}
                       </p>
                     </div>
 
                     {getMaterialVariants(selectedDraftMaterial).length > 0 && (
-                      <label className="mt-5 block text-sm text-slate-700">
+                      <label className="mt-5 block text-sm text-slate-700 dark:text-slate-200">
                         Variacao do material
                         <select
                           value={draftItem.variantName || ""}
                           onChange={(event) =>
                             handleDraftChange("variantName", event.target.value)
                           }
-                          className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3"
+                          className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-4 py-3"
                         >
                           {getMaterialVariants(selectedDraftMaterial).map((variant: any) => (
                             <option key={variant.name} value={variant.name}>
@@ -2435,7 +2435,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                         </p>
                         <div className="mt-4 grid gap-3 sm:grid-cols-2">
                           <div>
-                            <p className="text-[11px] uppercase tracking-wide text-slate-400">
+                            <p className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
                               Quantidade
                             </p>
                             <p className="mt-1 text-lg font-semibold">
@@ -2443,7 +2443,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                             </p>
                           </div>
                           <div>
-                            <p className="text-[11px] uppercase tracking-wide text-slate-400">
+                            <p className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
                               Consumo
                             </p>
                             <p className="mt-1 text-lg font-semibold">
@@ -2460,10 +2460,10 @@ const ProductModal: React.FC<ProductModalProps> = ({
                       </div>
                     )}
                   </aside>
-                  <div className="space-y-6 rounded-[24px] border border-slate-200 bg-white p-5">
+                  <div className="space-y-6 rounded-[24px] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
                     <div className="grid gap-4 md:grid-cols-2">
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="text-sm font-semibold text-slate-700">
+                      <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4">
+                        <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                           Onde aplicar o item?
                         </p>
                         <div className="mt-3 flex gap-2 flex-wrap">
@@ -2497,7 +2497,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                                       : option.value === "area"
                                         ? "bg-teal-600 text-white"
                                         : "bg-primary-600 text-white"
-                                    : "bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100"
+                                    : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 ring-1 ring-slate-300 dark:ring-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
                                 }`}
                               >
                                 {option.label}
@@ -2517,8 +2517,8 @@ const ProductModal: React.FC<ProductModalProps> = ({
                         )}
                       </div>
 
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="text-sm font-semibold text-slate-700">
+                      <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4">
+                        <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                           Adicionar desconto ou acrescimo?
                         </p>
                         <div className="mt-3 flex gap-2">
@@ -2539,7 +2539,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                               className={`flex-1 rounded-full px-4 py-3 text-sm font-semibold transition ${
                                 (draftItem.adjustmentType || "none") === option.value
                                   ? "bg-primary-600 text-white"
-                                  : "bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100"
+                                  : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 ring-1 ring-slate-300 dark:ring-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
                               }`}
                             >
                               {option.label}
@@ -2551,7 +2551,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
 
                     {/* Campos de medida — desativados no modo Acessório e M² */}
                     <div className={`grid gap-4 md:grid-cols-3 transition-opacity ${draftItem.applyOn === "accessory" || (draftItem.applyOn as string) === "area" ? "opacity-40 pointer-events-none select-none" : ""}`}>
-                      <label className="text-sm text-slate-700">
+                      <label className="text-sm text-slate-700 dark:text-slate-200">
                         Tamanho em milimetros
                         <input
                           type="number"
@@ -2565,11 +2565,11 @@ const ProductModal: React.FC<ProductModalProps> = ({
                               Number(event.target.value) || 0
                             )
                           }
-                          className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 disabled:bg-slate-100"
+                          className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3 disabled:bg-slate-100 dark:bg-slate-700"
                         />
                       </label>
 
-                      <label className="text-sm text-slate-700">
+                      <label className="text-sm text-slate-700 dark:text-slate-200">
                         Dividir tamanho por
                         <input
                           type="number"
@@ -2583,11 +2583,11 @@ const ProductModal: React.FC<ProductModalProps> = ({
                               Number(event.target.value) || 1
                             )
                           }
-                          className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 disabled:bg-slate-100"
+                          className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3 disabled:bg-slate-100 dark:bg-slate-700"
                         />
                       </label>
 
-                      <label className="text-sm text-slate-700">
+                      <label className="text-sm text-slate-700 dark:text-slate-200">
                         Multiplicar por
                         <input
                           type="number"
@@ -2601,18 +2601,18 @@ const ProductModal: React.FC<ProductModalProps> = ({
                               Number(event.target.value) || 1
                             )
                           }
-                          className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 disabled:bg-slate-100"
+                          className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3 disabled:bg-slate-100 dark:bg-slate-700"
                         />
                       </label>
                     </div>
 
-                    <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                    <div className="rounded-[24px] border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-5">
                       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                         <div>
-                          <p className="text-sm font-semibold text-slate-700">
+                          <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                             Quantidade de itens
                           </p>
-                          <p className="text-xs text-slate-500">
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
                             Escolha se a quantidade sera fixa ou calculada por sob medida.
                           </p>
                         </div>
@@ -2633,7 +2633,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                               className={`rounded-full px-5 py-3 text-sm font-semibold transition ${
                                 (draftItem.quantityMode || "normal") === option.value
                                   ? "bg-primary-600 text-white"
-                                  : "bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100"
+                                  : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 ring-1 ring-slate-300 dark:ring-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
                               }`}
                             >
                               {option.label}
@@ -2643,7 +2643,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                       </div>
 
                       {(draftItem.quantityMode || "normal") === "normal" ? (
-                        <label className="mt-5 block text-sm text-slate-700">
+                        <label className="mt-5 block text-sm text-slate-700 dark:text-slate-200">
                           Quantidade
                           <input
                             type="text"
@@ -2675,14 +2675,14 @@ const ProductModal: React.FC<ProductModalProps> = ({
                                 setDraftQtyInput("1");
                               }
                             }}
-                            className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3"
+                            className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-4 py-3"
                           />
                         </label>
                       ) : (
-                        <div className="mt-5 space-y-4 rounded-[24px] border border-blue-100 bg-white p-4">
+                        <div className="mt-5 space-y-4 rounded-[24px] border border-blue-100 bg-white dark:bg-slate-900 p-4">
                           <div className="grid gap-4 md:grid-cols-2">
                             <div>
-                              <p className="text-sm font-semibold text-slate-700">
+                              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                                 Tipo da formula
                               </p>
                               <div className="mt-3 flex gap-2">
@@ -2706,7 +2706,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                                       (draftItem.measureFormula?.target || "height") ===
                                       option.value
                                         ? "bg-primary-600 text-white"
-                                        : "bg-slate-50 text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100"
+                                        : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 ring-1 ring-slate-300 dark:ring-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
                                     }`}
                                   >
                                     {option.label}
@@ -2715,7 +2715,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                               </div>
                             </div>
 
-                            <label className="text-sm text-slate-700">
+                            <label className="text-sm text-slate-700 dark:text-slate-200">
                               Adicionar um novo item a cada (mm)
                               <input
                                 type="number"
@@ -2733,11 +2733,11 @@ const ProductModal: React.FC<ProductModalProps> = ({
                                   );
                                   handleDraftChange("factor", nextInterval);
                                 }}
-                                className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
+                                className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3"
                               />
                             </label>
 
-                            <label className="text-sm text-slate-700">
+                            <label className="text-sm text-slate-700 dark:text-slate-200">
                               Porcentagem do vao usada por essa peca (%)
                               <input
                                 type="number"
@@ -2755,16 +2755,16 @@ const ProductModal: React.FC<ProductModalProps> = ({
                                     nextPercent
                                   );
                                 }}
-                                className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
+                                className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3"
                               />
-                              <span className="mt-1 block text-xs text-slate-500">
+                              <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
                                 Use menos de 100% quando o vao for dividido entre 2 materiais
                                 diferentes (ex: 2 lambris de tamanhos distintos).
                               </span>
                             </label>
                           </div>
 
-                          <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                          <div className="rounded-2xl bg-slate-50 dark:bg-slate-800 p-4 text-sm text-slate-600 dark:text-slate-300">
                             {(() => {
                               const spanPercent = Math.min(
                                 100,
@@ -2783,7 +2783,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                       )}
                     </div>
 
-                    <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
+                    <div className="flex justify-end gap-3 border-t border-slate-200 dark:border-slate-700 pt-4">
                       <button
                         type="button"
                         onClick={() => {
@@ -2793,7 +2793,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           }
                           setDraftItem(null);
                         }}
-                        className="rounded-xl border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                        className="rounded-xl border border-slate-300 dark:border-slate-600 px-5 py-3 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
                       >
                         {editingItemId ? "Cancelar" : "Voltar"}
                       </button>
