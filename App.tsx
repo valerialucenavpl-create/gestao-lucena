@@ -505,18 +505,34 @@ const App: React.FC = () => {
     if (!authResolved) return;
 
     loadCompanySettings().then((res) => res.ok && res.data && setCompanySettings(res.data));
-    // Carrega do Supabase; se vazio/erro, usa localStorage como fallback
-    getQuotes().then((r) => {
+
+    // Carrega orçamentos, com uma segunda tentativa se vier vazio — quando o
+    // cache/localStorage do navegador é limpo por completo, às vezes o token
+    // de sessão ainda não estava 100% propagado no instante exato dessa
+    // primeira busca (RLS filtra tudo silenciosamente, sem erro), e como o
+    // fallback de localStorage também foi apagado junto, a tela ficava
+    // vazia até a pessoa dar F5 na mão.
+    const loadQuotesWithRetry = async (attempt = 1) => {
+      const r = await getQuotes();
       if (r.ok && Array.isArray(r.data) && r.data.length > 0) {
         setQuotes(r.data);
         try { localStorage.setItem("local_quotes_cache", JSON.stringify(r.data)); } catch {}
-      } else {
-        try {
-          const cached = localStorage.getItem("local_quotes_cache");
-          if (cached) setQuotes(JSON.parse(cached) as Quote[]);
-        } catch {}
+        return;
       }
-    });
+      if (attempt < 2) {
+        setTimeout(() => loadQuotesWithRetry(attempt + 1), 1200);
+        return;
+      }
+      try {
+        const cached = localStorage.getItem("local_quotes_cache");
+        if (cached) setQuotes(JSON.parse(cached) as Quote[]);
+      } catch {}
+    };
+    loadQuotesWithRetry();
+
+    // sales (tabela real, sem fallback local) — hoje quase sempre vazia
+    // porque a maioria das "vendas" é derivada dos orçamentos aprovados
+    // (virtual), então 0 linhas aqui é normal, não indica falha.
     getSales().then((r) => {
       if (!r.ok) return;
       const mapped = (r.data ?? []).map((row: any) => ({
@@ -530,6 +546,7 @@ const App: React.FC = () => {
       })) as Sale[];
       setSales(mapped);
     });
+
     getCashFlow().then((r) => r.ok && setCashFlow(r.data ?? []));
   }, [authResolved]);
 
