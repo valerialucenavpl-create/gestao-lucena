@@ -78,7 +78,15 @@ function toSafeText(value: unknown): string {
 
 function formatDateBR(value: unknown): string {
   const d = toDate(value);
-  return d ? d.toLocaleDateString("pt-BR") : "—";
+  if (!d) return "—";
+  // Datas de venda/orçamento são salvas como meia-noite UTC (dia "puro",
+  // sem hora) — usar toLocaleDateString (hora local) volta um dia em fusos
+  // atrás de UTC (Brasil inteiro), fazendo uma venda do dia 1 aparecer como
+  // dia 31 do mês anterior. getUTC* lê o dia exatamente como foi salvo.
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const year = d.getUTCFullYear();
+  return `${day}/${month}/${year}`;
 }
 
 function getOSNumber(sale: Sale): string {

@@ -220,7 +220,7 @@ const FixedExpensesCards: React.FC = () => {
 
             <p className="text-xs text-gray-500">
               Pagamento:{" "}
-              {new Date(it.payment_date).toLocaleDateString("pt-BR")}
+              {new Date(String(it.payment_date).slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR")}
             </p>
 
             <div className="flex gap-3 mt-3 text-sm">
