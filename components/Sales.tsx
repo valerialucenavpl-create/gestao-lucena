@@ -173,22 +173,15 @@ const Sales: React.FC<SalesProps> = ({ currentUser, sales, quotes, cashFlow, onO
   }, [safeSales]);
 
   const getQuote = (quoteId: string) => safeQuotes.find((q: any) => String(q.id) === String(quoteId));
+  // Só pelo vínculo direto (subcategory "quote:<id>") — casar só pelo nome
+  // do cliente misturava pagamentos de OUTRO pedido do mesmo cliente
+  // (cliente com várias OS acumulava o valor recebido de todas juntas).
   const getFinancialInfo = (sale: Sale) => {
-     const saleDate = toDate(getSaleDate(sale));
-    const saleDateMs = saleDate ? saleDate.getTime() : null;
+    const quoteId = resolveQuoteUUID(sale, safeQuotes);
 
     const payments = safeCashFlow.filter((entry: any) => {
       if (entry.type !== "Entrada") return false;
-
-       const desc = toSafeText(entry.description).toLowerCase();
-      const quote = getQuote(getSaleQuoteId(sale));
-      const customer = getSaleCustomerName(sale, quote).toLowerCase();
-      if (customer && !desc.includes(customer)) return false;
-
-      const entryDate = toDate(entry.date);
-      if (!entryDate) return false;
-      if (saleDateMs === null) return true;
-      return entryDate.getTime() >= saleDateMs;
+      return quoteId ? entry.subcategory === `quote:${quoteId}` : false;
     });
 
     const totalPaidRaw = payments.reduce((sum, p: any) => sum + (Number(p.amount) || 0), 0);

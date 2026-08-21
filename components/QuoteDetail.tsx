@@ -333,16 +333,14 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
   );
 
   // ── Payments linked to this quote ──
+  // Só pelo vínculo direto (subcategory "quote:<id>") — o fallback por nome
+  // do cliente + número do pedido que existia aqui misturava pagamentos de
+  // OUTRO pedido do mesmo cliente (cliente com várias OS acumulava o valor
+  // recebido de todas juntas). O vínculo direto já é criado certinho toda
+  // vez que o pagamento é lançado por "Nova Receita" aqui dentro do pedido.
   const quotePayments = useMemo(() => {
-    const byTag = cashFlow.filter((e) => (e as any).subcategory === `quote:${localQuote.id}`);
-    if (byTag.length > 0) return byTag;
-    const num = localQuote.quoteNumber;
-    const name = (localQuote.customerName || "").toLowerCase();
-    return cashFlow.filter((e) => {
-      const desc = (e.description || "").toLowerCase();
-      return (num ? desc.includes(String(num)) : false) && (name ? desc.includes(name) : false);
-    });
-  }, [cashFlow, localQuote.id, localQuote.quoteNumber, localQuote.customerName]);
+    return cashFlow.filter((e) => (e as any).subcategory === `quote:${localQuote.id}`);
+  }, [cashFlow, localQuote.id]);
 
   const totalReceived = useMemo(
     () => quotePayments.filter((e) => (e.type as any) === "Entrada" || e.type === "income").reduce((s, e) => s + Number(e.amount || 0), 0),

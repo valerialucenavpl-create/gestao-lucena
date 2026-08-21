@@ -68,22 +68,14 @@ const Receivables: React.FC = () => {
     load();
   }, []);
 
-  // Mesmo critério de match usado em QuoteDetail (histórico financeiro do
-  // pedido): primeiro tenta pela tag "quote:<id>", senão cai no fallback por
-  // número do pedido + nome do cliente na descrição.
+  // Só pelo vínculo direto (subcategory "quote:<id>") — o fallback por nome
+  // do cliente + número do pedido que existia aqui misturava pagamentos de
+  // OUTRO pedido do mesmo cliente (cliente com várias OS acumulava/marcava
+  // como recebido com base no lançamento errado).
   const findPayment = (row: ReceivableRow): CashFlowEntry | undefined => {
-    const byTag = cashFlow.find(
+    return cashFlow.find(
       (e) => e.type === "Entrada" && (e as any).subcategory === `quote:${row.quoteId}`
     );
-    if (byTag) return byTag;
-
-    const num = row.quoteNumber;
-    const name = (row.customerName || "").toLowerCase();
-    return cashFlow.find((e) => {
-      if (e.type !== "Entrada") return false;
-      const desc = (e.description || "").toLowerCase();
-      return (num ? desc.includes(String(num)) : false) && (name ? desc.includes(name) : false);
-    });
   };
 
   // Linhas com o status recalculado a partir do Caixa (ignora o campo
