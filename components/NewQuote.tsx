@@ -471,9 +471,13 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [newClientName, setNewClientName] = useState<string>("");
   const [newClientPhone, setNewClientPhone] = useState<string>("");
 
-  // ✅ novos campos do modal
-  const [newClientAddress, setNewClientAddress] = useState<string>("");
-  const [newClientReferencePoint, setNewClientReferencePoint] = useState<string>("");
+  // Endereço separado em campos, mesmo padrão do painel de Clientes
+  // (components/Clients.tsx) — rua/bairro/cidade obrigatórios.
+  const [newClientEmail, setNewClientEmail] = useState<string>("");
+  const [newClientStreet, setNewClientStreet] = useState<string>("");
+  const [newClientNumber, setNewClientNumber] = useState<string>("");
+  const [newClientNeighborhood, setNewClientNeighborhood] = useState<string>("");
+  const [newClientCity, setNewClientCity] = useState<string>("");
   const [newClientNotes, setNewClientNotes] = useState<string>("");
 
   // Categoria ativa
@@ -2114,19 +2118,33 @@ const handleSavePDF = async () => {
 
   const handleSaveNewClient = async () => {
     if (!newClientName.trim()) return alert("Nome do cliente é obrigatório.");
+    if (!newClientStreet.trim()) return alert("Rua é obrigatória.");
+    if (!newClientNeighborhood.trim()) return alert("Bairro é obrigatório.");
+    if (!newClientCity.trim()) return alert("Cidade é obrigatória.");
 
     setIsSavingClient(true);
 
-    // A tabela "clients" só tem uma coluna de endereço (sem rua/complemento
-    // separados), então tudo isso é combinado num só texto antes de salvar
-    // — mesmo padrão usado no cadastro de clientes (components/Clients.tsx).
-    const addressCombined = [newClientAddress, newClientReferencePoint, newClientNotes ? `Obs: ${newClientNotes}` : ""]
+    // Mesmo padrão do cadastro completo de clientes (components/Clients.tsx):
+    // rua/número/bairro/cidade em colunas separadas, mais um texto único
+    // (endereço) montado a partir delas pras telas que ainda leem só isso.
+    const streetLine = [newClientStreet, newClientNumber].filter((v) => v.trim()).join(", ");
+    const locationLine = [newClientNeighborhood, newClientCity].filter((v) => v.trim()).join(" - ");
+    const addressCombined = [streetLine, locationLine, newClientNotes ? `Obs: ${newClientNotes}` : ""]
       .filter((v) => v && v.trim())
       .join(" | ");
 
     const { data: saved, error: saveError } = await supabase
       .from("clients")
-      .insert({ name: newClientName, phone: newClientPhone || null, address: addressCombined || null })
+      .insert({
+        name: newClientName,
+        phone: newClientPhone || null,
+        email: newClientEmail || null,
+        street: newClientStreet,
+        number: newClientNumber || null,
+        neighborhood: newClientNeighborhood,
+        city: newClientCity,
+        address: addressCombined || null,
+      })
       .select("id")
       .maybeSingle();
 
@@ -2136,15 +2154,17 @@ const handleSavePDF = async () => {
 
     // Se o salvamento falhar, o orçamento ainda é gerado com um ID local.
     const clientId = saved ? String((saved as any).id) : `local_${Date.now()}`;
-    const newClient: Client = {
+    const newClient: any = {
       id: clientId,
       name: newClientName,
       phone: newClientPhone || undefined,
+      email: newClientEmail || undefined,
       notes: newClientNotes || undefined,
-      address: {
-        street: newClientAddress || undefined,
-        referencePoint: newClientReferencePoint || undefined,
-      },
+      street: newClientStreet,
+      number: newClientNumber || undefined,
+      neighborhood: newClientNeighborhood,
+      city: newClientCity,
+      address: addressCombined || undefined,
     };
 
     onAddNewClient(newClient);
@@ -2153,8 +2173,11 @@ const handleSavePDF = async () => {
     setIsClientModalOpen(false);
     setNewClientName("");
     setNewClientPhone("");
-    setNewClientAddress("");
-    setNewClientReferencePoint("");
+    setNewClientEmail("");
+    setNewClientStreet("");
+    setNewClientNumber("");
+    setNewClientNeighborhood("");
+    setNewClientCity("");
     setNewClientNotes("");
   };
 
@@ -4406,45 +4429,76 @@ const handleSavePDF = async () => {
             <h3 className="text-lg font-medium text-gray-900 mb-4">Adicionar Novo Cliente Rápido</h3>
 
             <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Nome *</label>
+                  <input
+                    type="text"
+                    value={newClientName}
+                    onChange={(e) => setNewClientName(e.target.value)}
+                    className="w-full mt-1 p-2 border rounded text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Celular</label>
+                  <input
+                    type="text"
+                    value={newClientPhone}
+                    onChange={(e) => setNewClientPhone(e.target.value)}
+                    className="w-full mt-1 p-2 border rounded text-gray-900"
+                  />
+                </div>
+              </div>
+
               <div>
-                <label className="block text-sm font-medium text-gray-700">Nome</label>
+                <label className="block text-sm font-medium text-gray-700">E-mail</label>
                 <input
-                  type="text"
-                  value={newClientName}
-                  onChange={(e) => setNewClientName(e.target.value)}
+                  type="email"
+                  value={newClientEmail}
+                  onChange={(e) => setNewClientEmail(e.target.value)}
                   className="w-full mt-1 p-2 border rounded text-gray-900"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">Telefone</label>
+                <label className="block text-sm font-medium text-gray-700">Rua *</label>
                 <input
                   type="text"
-                  value={newClientPhone}
-                  onChange={(e) => setNewClientPhone(e.target.value)}
+                  value={newClientStreet}
+                  onChange={(e) => setNewClientStreet(e.target.value)}
                   className="w-full mt-1 p-2 border rounded text-gray-900"
-                />
-              </div>
-              {/* ✅ NOVOS CAMPOS */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Endereço</label>
-                <input
-                  type="text"
-                  value={newClientAddress}
-                  onChange={(e) => setNewClientAddress(e.target.value)}
-                  className="w-full mt-1 p-2 border rounded text-gray-900"
-                  placeholder="Rua, número, bairro"
+                  placeholder="Nome da rua"
                 />
               </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Número</label>
+                  <input
+                    type="text"
+                    value={newClientNumber}
+                    onChange={(e) => setNewClientNumber(e.target.value)}
+                    className="w-full mt-1 p-2 border rounded text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Bairro *</label>
+                  <input
+                    type="text"
+                    value={newClientNeighborhood}
+                    onChange={(e) => setNewClientNeighborhood(e.target.value)}
+                    className="w-full mt-1 p-2 border rounded text-gray-900"
+                  />
+                </div>
+              </div>
+
               <div>
-                <label className="block text-sm font-medium text-gray-700">Ponto de Referência</label>
+                <label className="block text-sm font-medium text-gray-700">Cidade *</label>
                 <input
                   type="text"
-                  value={newClientReferencePoint}
-                  onChange={(e) => setNewClientReferencePoint(e.target.value)}
+                  value={newClientCity}
+                  onChange={(e) => setNewClientCity(e.target.value)}
                   className="w-full mt-1 p-2 border rounded text-gray-900"
-                  placeholder="Ex: Próximo ao mercado"
                 />
               </div>
 
