@@ -515,6 +515,15 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [mrSelectedMontagemId, setMrSelectedMontagemId] = useState<string>("");
   const [mrMontagens, setMrMontagens] = useState<QuoteItemMontagem[]>([]);
 
+  // Acessório de Mármore (categoria "ACESSORIO DE MARMORE" — válvula,
+  // mangote, sifão, cuba etc.): igual à Montagem, o valor entra dentro do
+  // preço da peça e só aparece no detalhamento interno, nunca pro cliente.
+  const [mrSelectedAccessoryId, setMrSelectedAccessoryId] = useState<string>("");
+  const [mrAccessoryQty, setMrAccessoryQty] = useState<number>(1);
+  const [mrAccessories, setMrAccessories] = useState<
+    { id: string; productId: string; name: string; quantity: number; price: number; cost: number }[]
+  >([]);
+
   // ACESSÓRIOS / PRODUTOS PRONTOS (categoria "ACESSORIO DE MOTOR" — produtos
   // soltos, sem fórmula de medida: controles, fechaduras, cremalheiras, etc.)
   const [acSelectedProductId, setAcSelectedProductId] = useState<string>("");
@@ -602,6 +611,10 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   };
 
   const availableColors = useMemo(() => getColorsByCategory(), [activeCategory, rawMaterials]);
+
+  const marmoreAccessoryProducts = useMemo(() => {
+    return products.filter((p) => normalizeText(p.category || "").includes("ACESSORIO DE MARMORE"));
+  }, [products]);
 
   const glassProducts = useMemo(() => {
     const norm = (v: string) =>
@@ -1187,12 +1200,13 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   // Valor estimado em tempo real, conforme o usuário digita as medidas —
   // sem isso, só dava pra saber o preço depois de clicar em "Adicionar".
   const mrMontagemTotal = mrMontagens.reduce((s, m) => s + (Number(m.price) || 0), 0);
+  const mrAccessoryTotal = mrAccessories.reduce((s, a) => s + (Number(a.price) || 0), 0);
 
   const mrLivePrice = useMemo(() => {
     const calc = getMarmoreCalculations();
     if (!calc) return null;
-    return calc.totalPrice + (Number(mrExtraService) || 0) + mrMontagemTotal;
-  }, [mrSelectedProductId, mrPieces, selectedColor, mrExtraService, products, rawMaterials, mrMontagemTotal]);
+    return calc.totalPrice + (Number(mrExtraService) || 0) + mrMontagemTotal + mrAccessoryTotal;
+  }, [mrSelectedProductId, mrPieces, selectedColor, mrExtraService, products, rawMaterials, mrMontagemTotal, mrAccessoryTotal]);
 
   // ============================
 const categories = [
@@ -1373,6 +1387,28 @@ const categories = [
     setMrMontagens((prev) => prev.filter((m) => m.id !== id));
   };
 
+  // Acessório de Mármore: mesmo padrão da Montagem (valor entra no preço da
+  // peça, não vira linha separada pro cliente), mas calculado a partir de um
+  // produto de verdade (categoria "ACESSORIO DE MARMORE"), não de um valor
+  // fixo de catálogo.
+  const addMrAccessory = () => {
+    if (!mrSelectedAccessoryId) return;
+    const product = products.find((p) => p.id === mrSelectedAccessoryId);
+    if (!product) return;
+    const qty = Math.max(1, Number(mrAccessoryQty) || 1);
+    const { price, cost } = calculateItemPrice(mrSelectedAccessoryId, 1, 1, qty, "Padrão");
+    setMrAccessories((prev) => [
+      ...prev,
+      { id: `mra-${Date.now()}`, productId: product.id, name: product.name, quantity: qty, price, cost },
+    ]);
+    setMrSelectedAccessoryId("");
+    setMrAccessoryQty(1);
+  };
+
+  const removeMrAccessory = (id: string) => {
+    setMrAccessories((prev) => prev.filter((a) => a.id !== id));
+  };
+
   // ============================
   //          GLASS WIZARD
   // ============================
@@ -1449,9 +1485,11 @@ const categories = [
       return [...insumoLines, ...laborLines];
     });
     const assemblyCost = assemblyBreakdown.reduce((s, l) => s + l.value, 0);
+    const accessoryPriceTotal = mrAccessories.reduce((s, a) => s + (Number(a.price) || 0), 0);
+    const accessoryCostTotal = mrAccessories.reduce((s, a) => s + (Number(a.cost) || 0), 0);
 
-    const finalPrice = calc.totalPrice + totalExtra + montagemPriceTotal;
-    const totalCost = calc.totalCost + totalExtra + assemblyCost;
+    const finalPrice = calc.totalPrice + totalExtra + montagemPriceTotal + accessoryPriceTotal;
+    const totalCost = calc.totalCost + totalExtra + assemblyCost + accessoryCostTotal;
 
     const validPieces = mrPieces.filter((p) => p.length > 0 && p.width > 0 && p.quantity > 0);
     // Só pra equipe ver depois (dentro do sistema) o que foi medido peça a
@@ -1462,6 +1500,9 @@ const categories = [
     if (totalExtra > 0) {
       detalhamentoLines.push(`Acréscimo por serviço: R$ ${totalExtra.toFixed(2)}`);
     }
+    mrAccessories.forEach((a) => {
+      detalhamentoLines.push(`Acessório: ${a.name} (${a.quantity}x) — R$ ${a.price.toFixed(2)}`);
+    });
     if (mrDescription.trim()) {
       detalhamentoLines.push(mrDescription.trim());
     }
@@ -1502,6 +1543,9 @@ const categories = [
     setMrDescription("");
     setMrMontagens([]);
     setMrSelectedMontagemId("");
+    setMrAccessories([]);
+    setMrSelectedAccessoryId("");
+    setMrAccessoryQty(1);
   };
 
   // Produto pronto (categoria "ACESSORIO DE MOTOR"): sem medida, preço vem
@@ -2893,6 +2937,84 @@ const handleSavePDF = async () => {
               )}
               <p className="text-[11px] text-gray-400 mt-1">
                 O valor da montagem entra dentro do valor da peça — o cliente não vê esse nome.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">5. Acessório de Mármore</label>
+              <div className="flex gap-2">
+                <select
+                  value={mrSelectedAccessoryId}
+                  onChange={(e) => setMrSelectedAccessoryId(e.target.value)}
+                  className="flex-1 h-11 px-3 border rounded-lg text-gray-900"
+                >
+                  <option value="">Selecione um acessório (opcional)</option>
+                  {marmoreAccessoryProducts.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  min={1}
+                  value={mrAccessoryQty}
+                  onChange={(e) => setMrAccessoryQty(Number(e.target.value) || 1)}
+                  className="w-20 h-11 px-3 border rounded-lg text-gray-900"
+                />
+                <button
+                  type="button"
+                  onClick={addMrAccessory}
+                  disabled={!mrSelectedAccessoryId}
+                  className="px-4 h-11 bg-primary-600 text-white text-sm font-bold rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
+                >
+                  + Adicionar
+                </button>
+              </div>
+
+              {marmoreAccessoryProducts.length === 0 && (
+                <p className="text-xs text-gray-400 mt-1">
+                  Nenhum produto cadastrado com a categoria "Acessório de Mármore" ainda. Cadastre em Produtos.
+                </p>
+              )}
+
+              {mrAccessories.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {mrAccessories.map((a) => (
+                    <div
+                      key={a.id}
+                      className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                    >
+                      <span className="text-gray-700">{a.name} ({a.quantity}x)</span>
+                      <div className="flex items-center gap-3">
+                        <span className="font-semibold text-gray-900">
+                          R$ {a.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeMrAccessory(a.id)}
+                          className="text-red-500 hover:text-red-700"
+                          title="Remover"
+                        >
+                          <Icon className="w-4 h-4">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                          </Icon>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex justify-between text-xs font-bold text-gray-500 pt-1">
+                    <span>Total acessórios (soma no valor da peça):</span>
+                    <span>
+                      R${" "}
+                      {mrAccessoryTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              )}
+              <p className="text-[11px] text-gray-400 mt-1">
+                O valor do acessório entra dentro do valor da peça — aparece só no detalhamento interno, o cliente não vê separado.
               </p>
             </div>
 
