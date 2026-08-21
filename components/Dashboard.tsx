@@ -130,7 +130,7 @@ function normalizeSale(row: SaleRowAny) {
   const saleDate = row?.saleDate ?? row?.sale_date ?? row?.date ?? null;
   return {
     id: row?.id,
-    amount: Number(row?.amount || 0),
+    amount: Number(row?.amount ?? row?.total ?? 0),
     saleDate,
     // pode existir um ou outro no seu banco/código
     sellerId: row?.seller_id ?? row?.sellerId ?? null,
