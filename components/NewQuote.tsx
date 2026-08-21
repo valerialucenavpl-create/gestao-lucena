@@ -367,6 +367,8 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [showAdicionaisSaved, setShowAdicionaisSaved] = useState(false);
   const [installation, setInstallation] = useState<number>(0);
   const [installationInput, setInstallationInput] = useState<string>(formatMoneyInputBR(0));
+  const [feedingCost, setFeedingCost] = useState<number>(0);
+  const [feedingCostInput, setFeedingCostInput] = useState<string>(formatMoneyInputBR(0));
   const [installationCostItems, setInstallationCostItems] = useState<
     { id: string; name: string; value: number; valueInput: string }[]
   >([]);
@@ -402,6 +404,8 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     setDissolveFreight(editingQuote.dissolveFreight !== false);
     setInstallation(Number(editingQuote.installation || 0));
     setInstallationInput(formatMoneyInputBR(Number(editingQuote.installation || 0)));
+    setFeedingCost(Number(editingQuote.feedingCost || 0));
+    setFeedingCostInput(formatMoneyInputBR(Number(editingQuote.feedingCost || 0)));
     setInstallationCostItems(
       (editingQuote.installationCostItems || []).map((item) => ({
         id: item.id,
@@ -2060,6 +2064,7 @@ const netProfit =
   totalPrice -
   totalCostOfGoods -
   installationCostTotal -
+  feedingCost -
   commissionValue -
   taxValue -
   cardValue -
@@ -2138,6 +2143,7 @@ const buildQuoteObject = (): Quote => {
       installationCostItems.length > 0
         ? installationCostItems.map(({ id, name, value }) => ({ id, name, value }))
         : undefined,
+    feedingCost,
     totalPrice,
     paymentMethod,
     assemblyNotes,
@@ -2457,7 +2463,7 @@ const handleSavePDF = async () => {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-5">
           <div>
             <label className="block text-sm font-medium text-gray-700">Frete (R$)</label>
 
@@ -2566,6 +2572,22 @@ const handleSavePDF = async () => {
                 setInstallation(parseMoneyInputBR(rawValue));
               }}
               onBlur={() => setInstallationInput(formatMoneyInputBR(installation))}
+              className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-gray-900"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Alimentação (R$)</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={feedingCostInput}
+              onChange={(e) => {
+                const rawValue = sanitizeMoneyInputBR(e.target.value);
+                setFeedingCostInput(rawValue);
+                setFeedingCost(parseMoneyInputBR(rawValue));
+              }}
+              onBlur={() => setFeedingCostInput(formatMoneyInputBR(feedingCost))}
               className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-gray-900"
             />
           </div>
@@ -4022,7 +4044,7 @@ const handleSavePDF = async () => {
 
         {currentUser.role === "Admin" && items.length > 0 && (() => {
           const variableCosts = commissionValue + taxValue + cardValue + referralCommissionValue;
-          const contribuicao = totalPrice - totalCostOfGoods - installationCostTotal - variableCosts;
+          const contribuicao = totalPrice - totalCostOfGoods - installationCostTotal - feedingCost - variableCosts;
           const contribuicaoPct = totalPrice > 0 ? (contribuicao / totalPrice) * 100 : 0;
 
           // Descobre a categoria de um item pelo produto do catálogo (mesma

@@ -348,6 +348,9 @@ export interface Quote {
   dissolveFreight?: boolean;
   installation: number;
   installationCostItems?: QuoteInstallationCostLine[];
+  // Custo de alimentação da equipe de instalação — reduz o lucro, diferente
+  // de "installation" (que é cobrado do cliente).
+  feedingCost?: number;
   totalPrice: number;
 
   paymentMethod: "A Definir" | "PIX" | "Cartão" | "Dinheiro" | "Transferência" | "Boleto";
