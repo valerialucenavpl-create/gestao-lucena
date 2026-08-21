@@ -38,6 +38,7 @@ const categories = [
   "VIDRO",
   "ESTRUTURA",
   "ALUMINIO",
+  "CUBAS",
   "ACESSORIO VIDRO",
   "ACESSORIO DE ALUMINIO",
   "FERRO PORTAO AUTOMATICO",
