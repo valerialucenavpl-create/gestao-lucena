@@ -2942,11 +2942,11 @@ const handleSavePDF = async () => {
 
             <div>
               <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">5. Acessório de Mármore</label>
-              <div className="flex gap-2">
+              <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 64px auto" }}>
                 <select
                   value={mrSelectedAccessoryId}
                   onChange={(e) => setMrSelectedAccessoryId(e.target.value)}
-                  className="flex-1 h-11 px-3 border rounded-lg text-gray-900"
+                  className="h-11 px-3 border rounded-lg text-gray-900 w-full min-w-0"
                 >
                   <option value="">Selecione um acessório (opcional)</option>
                   {marmoreAccessoryProducts.map((p) => (
@@ -2960,13 +2960,13 @@ const handleSavePDF = async () => {
                   min={1}
                   value={mrAccessoryQty}
                   onChange={(e) => setMrAccessoryQty(Number(e.target.value) || 1)}
-                  className="w-20 h-11 px-3 border rounded-lg text-gray-900"
+                  className="h-11 px-2 border rounded-lg text-gray-900 w-full min-w-0 text-center"
                 />
                 <button
                   type="button"
                   onClick={addMrAccessory}
                   disabled={!mrSelectedAccessoryId}
-                  className="px-4 h-11 bg-primary-600 text-white text-sm font-bold rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
+                  className="px-4 h-11 bg-primary-600 text-white text-sm font-bold rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 shrink-0"
                 >
                   + Adicionar
                 </button>
