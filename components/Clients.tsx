@@ -114,6 +114,18 @@ const Clients: React.FC = () => {
       alert("Nome é obrigatório");
       return;
     }
+    if (!form.street.trim()) {
+      alert("Rua é obrigatória");
+      return;
+    }
+    if (!form.neighborhood.trim()) {
+      alert("Bairro é obrigatório");
+      return;
+    }
+    if (!form.city.trim()) {
+      alert("Cidade é obrigatória");
+      return;
+    }
 
     const basePayload = {
       name: form.name,
@@ -452,7 +464,7 @@ const Clients: React.FC = () => {
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {[
-                ["Nome", "name"],
+                ["Nome *", "name"],
                 ["Celular", "phone"],
                 ["E-mail", "email"],
               ].map(([label, field]) => (
@@ -476,12 +488,13 @@ const Clients: React.FC = () => {
               )}
 
               <div className="md:col-span-2">
-                <label className="mb-1.5 block text-sm font-semibold text-slate-700">Rua</label>
+                <label className="mb-1.5 block text-sm font-semibold text-slate-700">Rua *</label>
                 <input
                   className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
                   placeholder="Nome da rua"
                   value={form.street || ""}
                   onChange={(e) => setForm({ ...form, street: e.target.value })}
+                  required
                 />
               </div>
 
@@ -495,20 +508,22 @@ const Clients: React.FC = () => {
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-semibold text-slate-700">Bairro</label>
+                <label className="mb-1.5 block text-sm font-semibold text-slate-700">Bairro *</label>
                 <input
                   className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
                   value={form.neighborhood || ""}
                   onChange={(e) => setForm({ ...form, neighborhood: e.target.value })}
+                  required
                 />
               </div>
 
               <div className="md:col-span-2">
-                <label className="mb-1.5 block text-sm font-semibold text-slate-700">Cidade</label>
+                <label className="mb-1.5 block text-sm font-semibold text-slate-700">Cidade *</label>
                 <input
                   className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
                   value={form.city || ""}
                   onChange={(e) => setForm({ ...form, city: e.target.value })}
+                  required
                 />
               </div>
 
