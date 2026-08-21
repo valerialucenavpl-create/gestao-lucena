@@ -220,12 +220,24 @@ const getComputedStatus = (sale: Sale): Exclude<FastStatus, "Todos"> => {
     return "Aguardando";
   };
 
+  // Ordem de cadastro (não a data da compra, que às vezes é lançada
+  // retroativa) — o id do orçamento é sequencial, então usar ele como chave
+  // de ordenação garante que o último cadastrado sempre fica em cima.
+  const getRegistrationKey = (sale: any): number => {
+    const quoteId = Number(sale?.quoteId);
+    if (Number.isFinite(quoteId) && quoteId > 0) return quoteId;
+    const digits = String(sale?.id ?? "").replace(/\D/g, "");
+    return digits ? Number(digits) : 0;
+  };
+
   const computedSales = useMemo<SaleWithComputed[]>(
     () =>
-      localSales.map((sale) => ({
-        ...sale,
-        computedStatus: getComputedStatus(sale),
-      })),
+      localSales
+        .map((sale) => ({
+          ...sale,
+          computedStatus: getComputedStatus(sale),
+        }))
+        .sort((a, b) => getRegistrationKey(b) - getRegistrationKey(a)),
     [localSales, safeQuotes, safeCashFlow]
   );
 
