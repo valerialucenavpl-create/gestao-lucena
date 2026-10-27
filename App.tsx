@@ -1,5 +1,5 @@
 // src/App.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 // COMPONENTES
 import Sidebar from "./components/Sidebar";
@@ -8,7 +8,7 @@ import Dashboard from "./components/Dashboard";
 import Reports from "./components/Reports";
 import Inventory from "./components/inventory/InventoryPage";
 import Clients from "./components/Clients";
-import Assistant from "./components/Assistant";
+import ClientDetail from "./components/ClientDetail";
 import Settings from "./components/Settings";
 import Financials from "./components/financial/Financials";
 import Login from "./components/Login";
@@ -22,7 +22,6 @@ import Receivables from "./components/Receivables";
 import AgendaPage from "./components/agenda/AgendaPage";
 
 // FUNCIONÁRIOS
-import EmployeesList from "./components/employees/EmployeesList";
 import EmployeeForm from "./components/employees/EmployeesForm";
 import EmployeeDetailsPage from "./components/employees/details/EmployeeDetailsPage";
 import DeliverySectorDetail from "./components/DeliverySectorDetail";
@@ -41,10 +40,17 @@ import { supabase } from "./services/supabase";
 import { enrichMaterialRowsWithPhotoUrls } from "./utils/materialPhoto";
 import { resolveMaterialPurchaseLengthMeters } from "./utils/materialPurchaseLength";
 
+// Clientes paginados (o Supabase devolve no máximo 1000 linhas por select)
+// — ver services/clientsServices.ts.
+async function fetchAllClients(): Promise<any[]> {
+  return (await fetchAllClientsService()).data;
+}
+
 // SERVICES
 import { loadCompanySettings } from "./services/companySettingsServices";
-import { getSales } from "./services/salesServices";
-import { getQuotes, createQuote, updateQuote, deleteQuote } from "./services/quotesServices";
+import { getSales, createSale, updateSale } from "./services/salesServices";
+import { getQuotes, createQuote, updateQuote, deleteQuote, getNextQuoteNumber } from "./services/quotesServices";
+import { fetchAllClients as fetchAllClientsService } from "./services/clientsServices";
 import { getCashFlow } from "./services/cashFlowServices";
 import { getUsers } from "./services/userService";
 
@@ -339,6 +345,60 @@ const App: React.FC = () => {
     return () => window.removeEventListener("keydown", handleEsc);
   }, [activeView]);;
   const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
+  // De onde a tela de detalhe do orçamento foi aberta — "Vendas" ou
+  // "Orçamentos" — pra o botão "Voltar" mandar de volta pro lugar certo em
+  // vez de sempre cair em Orçamentos mesmo quando aberto a partir de Vendas.
+  const [quoteDetailOrigin, setQuoteDetailOrigin] = useState<"quotes" | "sales" | "clientDetail">("quotes");
+  const [selectedClient, setSelectedClient] = useState<{ id: string; name: string; phone?: string | null; address?: string | null } | null>(null);
+  // Posição de scroll do painel de Vendas — salva no exato instante em que a
+  // usuária abre uma venda, pra "Voltar para Vendas" devolver pro card em
+  // que ela estava (não só o mesmo mês, o mesmo ponto da lista). <main> é o
+  // único elemento que rola (o resto do layout é h-screen/overflow-hidden),
+  // por isso rastreamos o scrollTop dele em vez de window.scrollY.
+  const mainScrollRef = useRef<HTMLElement | null>(null);
+  const salesScrollTopRef = useRef(0);
+  // Mesmo esquema pra lista de Orçamentos: "Voltar" do detalhe devolve pro
+  // orçamento em que a usuária estava, não pro topo da página.
+  const quotesScrollTopRef = useRef(0);
+
+  // Próximo número de OS segundo o banco (conta também os orçamentos
+  // excluídos, que a lista na tela não tem) — buscado ao abrir "Novo
+  // Orçamento". O número definitivo é sempre o que o gatilho do banco grava.
+  const [dbNextQuoteNumber, setDbNextQuoteNumber] = useState<number | null>(null);
+  useEffect(() => {
+    if (activeView !== "newQuote") return;
+    getNextQuoteNumber().then(setDbNextQuoteNumber);
+  }, [activeView]);
+  const localNextQuoteNumber = () =>
+    quotes.length > 0 ? Math.max(...quotes.map((q) => (q as any).quoteNumber || 0)) + 1 : 1;
+
+  useEffect(() => {
+    if (!mainScrollRef.current) return;
+    if (activeView === "sales") {
+      mainScrollRef.current.scrollTop = salesScrollTopRef.current;
+    } else if (activeView === "quotes") {
+      mainScrollRef.current.scrollTop = quotesScrollTopRef.current;
+      // Só vale pra volta do detalhe — entrar em Orçamentos pelo menu depois
+      // começa do topo.
+      quotesScrollTopRef.current = 0;
+    }
+  }, [activeView]);
+  // Filtros da tela de Vendas (mês, período, status, busca) levantados pra
+  // cá — assim eles sobrevivem quando a usuária abre o detalhamento de uma
+  // venda e clica em "Voltar para Vendas", em vez de sempre resetar pro mês
+  // atual (o componente Sales desmonta ao trocar de view).
+  const [salesMonthCursor, setSalesMonthCursor] = useState<Date>(() => {
+    const d = new Date();
+    d.setDate(1);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
+  const [salesDateRangeStart, setSalesDateRangeStart] = useState<string>("");
+  const [salesDateRangeEnd, setSalesDateRangeEnd] = useState<string>("");
+  const [salesFilterStatus, setSalesFilterStatus] = useState<
+    "Todos" | "Aguardando" | "Pendente em aprovação" | "Entregue – a receber" | "Cancelado" | "Concluído"
+  >("Todos");
+  const [salesSearchTerm, setSalesSearchTerm] = useState<string>("");
   // Quando preenchido, a tela "newQuote" abre em modo de edição desse
   // orçamento (carrega os itens/dados existentes) em vez de criar um novo.
   const [editingQuoteId, setEditingQuoteId] = useState<string | null>(null);
@@ -542,7 +602,7 @@ const App: React.FC = () => {
         salesperson: "",
         saleDate: row.date ? new Date(row.date) : new Date(),
         amount: Number(row.total ?? 0),
-        status: "Pendente",
+        status: (row.status ?? "") as any,
       })) as Sale[];
       setSales(mapped);
     });
@@ -575,14 +635,14 @@ const App: React.FC = () => {
         salesperson: "",
         saleDate: row.date ? new Date(row.date) : new Date(),
         amount: Number(row.total ?? 0),
-        status: "Pendente",
+        status: (row.status ?? "") as any,
       })) as Sale[];
       setSales(mapped);
     };
 
     const reloadClients = async () => {
-      const clientsRes = await supabase.from("clients").select("*").is("deleted_at", null);
-      if (Array.isArray(clientsRes.data)) setClients(clientsRes.data as Client[]);
+      const all = await fetchAllClients();
+      setClients(all as Client[]);
     };
 
     // Cashflow entra aqui também: a tela de detalhe de um orçamento mostra
@@ -593,15 +653,69 @@ const App: React.FC = () => {
       if (r.ok) setCashFlow(r.data ?? []);
     };
 
-    const channel = supabase
-      .channel("realtime-quotes-sales-clients")
-      .on("postgres_changes", { event: "*", schema: "public", table: "quotes" }, reloadQuotes)
-      .on("postgres_changes", { event: "*", schema: "public", table: "sales" }, reloadSales)
-      .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, reloadClients)
-      .on("postgres_changes", { event: "*", schema: "public", table: "cashflow" }, reloadCashFlow)
-      .subscribe();
+    const reloadAll = () => {
+      reloadQuotes();
+      reloadSales();
+      reloadClients();
+      reloadCashFlow();
+    };
 
-    return () => { supabase.removeChannel(channel); };
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+    let disposed = false;
+
+    // O canal de tempo real cai sozinho quando o token de autenticação expira
+    // (padrão de ~1h de sessão) ou quando o computador hiberna / a aba fica
+    // muito tempo em segundo plano — e o cliente do Supabase não se
+    // reconecta automaticamente nesses casos. Sem isso, o painel parava de
+    // atualizar sozinho depois de um tempo (o problema relatado de "hoje não
+    // está em tempo real"), mesmo com a conexão de internet normal.
+    const connect = () => {
+      if (disposed) return;
+      if (channel) supabase.removeChannel(channel);
+
+      channel = supabase
+        .channel(`realtime-quotes-sales-clients-${Date.now()}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "quotes" }, reloadQuotes)
+        .on("postgres_changes", { event: "*", schema: "public", table: "sales" }, reloadSales)
+        .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, reloadClients)
+        .on("postgres_changes", { event: "*", schema: "public", table: "cashflow" }, reloadCashFlow)
+        .subscribe((status) => {
+          if (disposed) return;
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+            if (reconnectTimeout) clearTimeout(reconnectTimeout);
+            reconnectTimeout = setTimeout(connect, 2000);
+          }
+        });
+    };
+
+    connect();
+
+    // Fallback extra: quando o usuário volta pra aba (troca de aba, aba
+    // minimizada, notebook saiu do modo de espera), força uma releitura e
+    // recria o canal — cobre o caso do WebSocket ter caído silenciosamente
+    // sem disparar CLOSED/TIMED_OUT.
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        reloadAll();
+        connect();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    const { data: authSub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "TOKEN_REFRESHED" && session) {
+        supabase.realtime.setAuth(session.access_token);
+      }
+    });
+
+    return () => {
+      disposed = true;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      authSub.subscription.unsubscribe();
+      if (channel) supabase.removeChannel(channel);
+    };
   }, [authResolved]);
 
   useEffect(() => {
@@ -644,8 +758,8 @@ const App: React.FC = () => {
     const loadSystemData = async () => {
       try {
         const loadClients = async () => {
-          const clientsRes = await supabase.from("clients").select("*").is("deleted_at", null);
-          setClients(Array.isArray(clientsRes.data) ? (clientsRes.data as Client[]) : []);
+          const all = await fetchAllClients();
+          setClients(all as Client[]);
         };
 
         const loadInventory = async () => {
@@ -694,7 +808,9 @@ const App: React.FC = () => {
                 id: String(row.id),
                 name: row.name || "",
                 price: Number(row.price || 0),
+                categoria: ["Marmore", "Vidro", "Aluminio", "ProdutosProntos"].includes(row.categoria) ? row.categoria : undefined,
                 insumos: Array.isArray(row.insumos) ? row.insumos : [],
+                labor: Array.isArray(row.labor) ? row.labor : [],
               }))
             );
           }
@@ -775,16 +891,17 @@ const App: React.FC = () => {
             "quotes", "newQuote", "quoteDetail",
             "sales",
             "clients",
+            "clientDetail",
             "agenda",
             "cashflow",
             "payables",
             "receivables",
             "financials",
             "employees",
+            "employee-new",
             "sellers",
             "reports",
             "frete",
-            "assistant",
           ] as any).includes(view)
         );
       }
@@ -798,13 +915,13 @@ const App: React.FC = () => {
             "quoteDetail",
             "sales",
             "clients",
+            "clientDetail",
             "agenda",
             "products",
             "inventory",
             "sellers",
             "frete",
             "settings",
-            "assistant",
           ] as any).includes(view)
         );
       }
@@ -819,16 +936,25 @@ const App: React.FC = () => {
   // vazia), então assim que existia qualquer venda real, orçamentos
   // recém-aprovados paravam de aparecer aqui.
   const effectiveSales = useMemo<Sale[]>(() => {
-    const realSaleQuoteIds = new Set(sales.map((s) => s.quoteId));
+    // String(...) dos dois lados de propósito — quote.id às vezes vem como
+    // number direto do Supabase (bigint) apesar do tipo TS dizer string, e
+    // Set.has(number) nunca bate com um Set de strings. Sem isso, todo
+    // orçamento com venda real "gerada" continuava aparecendo TAMBÉM como
+    // venda virtual (duplicado) porque essa comparação nunca dava match.
+    const realSaleQuoteIds = new Set(sales.map((s) => String(s.quoteId)));
 
     const virtualSales = quotes
-      .filter((q) => q.status === "Aprovado" && !realSaleQuoteIds.has(q.id))
+      .filter((q) => q.status === "Aprovado" && !realSaleQuoteIds.has(String(q.id)))
       .map((q) => ({
         id: `quote-${q.id}`,
         quoteId: q.id,
         customerName: q.customerName || "",
         salesperson: q.salesperson || "",
-        saleDate: q.date ? new Date(q.date) : new Date(),
+        // Data em que o orçamento virou venda (approved_at, gravado pelo
+        // banco ao aprovar), não a de criação do orçamento — senão um
+        // orçamento feito em setembro e fechado hoje aparecia como venda de
+        // setembro pra quem enxerga a versão virtual (ex.: vendedora).
+        saleDate: q.approvedAt ? new Date(q.approvedAt) : q.date ? new Date(q.date) : new Date(),
         amount: Number(q.totalPrice || 0),
         status: "" as any,
       }));
@@ -840,13 +966,77 @@ const App: React.FC = () => {
   // modo de edição (adicionar/remover item de um orçamento já salvo).
   const handleUpdateQuote = async (u: any) => {
     const r = await updateQuote(u.id, u);
-    const finalQuote = (r.ok && r.data) ? r.data as Quote : u as Quote;
-    if (!r.ok) console.warn("Orçamento não atualizado no banco:", r.error?.message);
+    if (!r.ok) {
+      // Não aplica a mudança otimista quando o banco recusou — senão a
+      // tela mostra "Aprovado" por um instante e depois volta sozinha pra
+      // "Pendente" (ex.: quando outra ação força um refetch), dando a
+      // impressão de que "não ficou salvo" sem nenhum aviso de erro.
+      console.warn("Orçamento não atualizado no banco:", r.error?.message);
+      return { ok: false, error: r.error };
+    }
+    const finalQuote = r.data as Quote;
     setQuotes((prev) => {
       const next = prev.map((q) => (q.id === u.id ? finalQuote : q));
       try { localStorage.setItem("local_quotes_cache", JSON.stringify(next)); } catch {}
       return next;
     });
+
+    // Pedido que já virou venda: o valor da venda acompanha o valor final do
+    // pedido (com desconto). Antes a venda ficava com o valor do momento em
+    // que foi gerada — dar desconto/editar depois não mudava o que aparecia
+    // em Vendas, Dashboard e Comissões.
+    const newTotal = Number(finalQuote.totalPrice || 0);
+    const linkedSale = sales.find(
+      (s) => String(s.quoteId) === String(finalQuote.id) && (s as any).status !== "Cancelado"
+    );
+    if (linkedSale && Math.abs(Number(linkedSale.amount || 0) - newTotal) > 0.005) {
+      const sr = await updateSale(Number((linkedSale as any).id), { total: newTotal });
+      if (sr.ok) {
+        setSales((prev) =>
+          prev.map((s) => (String((s as any).id) === String((linkedSale as any).id) ? { ...s, amount: newTotal } : s))
+        );
+      } else {
+        console.warn("Valor da venda não atualizado:", (sr as any).error?.message);
+      }
+    }
+    // Callers que precisam saber se realmente gravou no banco (em vez de só
+    // cair no cache local) checam esse retorno — ver botão "Salvar Frete /
+    // Instalação / Comissão" em NewQuote.tsx, que mostrava sucesso mesmo
+    // quando o Supabase recusava a gravação (ex.: RLS, coluna, rede).
+    return { ok: r.ok, error: r.error };
+  };
+
+  // Cria uma linha real na tabela "sales" pro orçamento — antes disso a
+  // venda só existia "virtual" (derivada de orçamento aprovado, sem
+  // registro próprio). Nasce sem status explícito pra computar como
+  // "Aguardando" no painel de Vendas (ver getComputedStatus em Sales.tsx).
+  const handleGenerateSale = async (quote: Quote, overrideDate?: string) => {
+    const alreadyExists = sales.some((s) => String(s.quoteId) === String(quote.id));
+    if (alreadyExists) return;
+
+    const saleDateSource = overrideDate || quote.date;
+    const r = await createSale({
+      quote_id: Number(quote.id),
+      total: Number(quote.totalPrice || 0),
+      date: saleDateSource ? new Date(saleDateSource).toISOString() : new Date().toISOString(),
+    });
+
+    if (!r.ok || !r.data) {
+      alert("Não foi possível gerar a venda: " + (r.error?.message ?? "erro desconhecido"));
+      return;
+    }
+
+    const row = r.data as any;
+    const newSale: Sale = {
+      id: String(row.id),
+      quoteId: String(row.quote_id ?? quote.id),
+      customerName: quote.customerName || "",
+      salesperson: quote.salesperson || "",
+      saleDate: row.date ? new Date(row.date) : new Date(),
+      amount: Number(row.total ?? quote.totalPrice ?? 0),
+      status: "" as any,
+    };
+    setSales((prev) => [...prev, newSale]);
   };
 
   // ===============================
@@ -882,7 +1072,26 @@ if (
       activeView.startsWith("delivery-sector-")
     ) {
       const sector = activeView.replace("delivery-sector-", "") as DeliverySector;
-      return <DeliverySectorDetail sector={sector} setActiveView={setActiveView} />;
+      return (
+        <DeliverySectorDetail
+          sector={sector}
+          setActiveView={setActiveView}
+          quotes={quotes}
+          clients={clients}
+          products={products}
+          onOpenQuote={(quoteId) => {
+            // entry.quoteId vem de uma busca própria (raw Supabase) dentro
+            // de DeliverySectorDetail — resolve pro id no formato ORIGINAL
+            // usado no estado "quotes" do App (mesmo padrão do
+            // resolveQuoteUUID em Sales.tsx), senão a comparação estrita
+            // "===" no render de quoteDetail nunca bate.
+            const match = quotes.find((q) => String(q.id) === String(quoteId));
+            setSelectedQuoteId(match ? match.id : quoteId);
+            setQuoteDetailOrigin("quotes");
+            setActiveView("quoteDetail");
+          }}
+        />
+      );
     }
 
 
@@ -900,8 +1109,25 @@ if (
         return (
           <Quotes
             quotes={quotes}
+            currentUser={currentUser}
+            onUpdateQuote={handleUpdateQuote}
             setActiveView={(v: any, id?: string) => {
               if (id) setSelectedQuoteId(id);
+              if (v === "quoteDetail") {
+                setQuoteDetailOrigin("quotes");
+                if (mainScrollRef.current) quotesScrollTopRef.current = mainScrollRef.current.scrollTop;
+              } else {
+                quotesScrollTopRef.current = 0;
+              }
+              // "+ Novo Orçamento" tem que sempre abrir em branco. Sem isso,
+              // se um editingQuoteId de uma edição anterior tivesse ficado
+              // "grudado" no estado (usuária saiu da tela de edição sem
+              // clicar em Cancelar/Voltar — ex.: trocou de aba pelo menu
+              // lateral), a tela de "novo" orçamento secretamente continuava
+              // em modo de edição daquele orçamento antigo — e salvar
+              // sobrescrevia o orçamento de outro cliente por baixo dos
+              // panos (foi o que aconteceu com o orçamento Nº102).
+              if (v === "newQuote") setEditingQuoteId(null);
               setActiveView(v);
             }}
             onDeleteQuote={async (id) => {
@@ -916,13 +1142,49 @@ if (
                 alert("Erro ao excluir orçamento.");
               }
             }}
+            onDuplicateQuote={async (original) => {
+              try {
+                const nextQuoteNumber = Math.max(localNextQuoteNumber(), (await getNextQuoteNumber()) ?? 0);
+                // createQuote já descarta o "id" recebido e deixa o banco gerar
+                // um novo — aqui só precisa zerar o que não deve ser herdado
+                // (número, status, data, conclusão/entrega/aprovação) pra virar
+                // um orçamento novo de verdade, não uma cópia "aprovada"/
+                // "concluída"/"entregue" por engano.
+                const duplicate: any = {
+                  ...original,
+                  quoteNumber: nextQuoteNumber,
+                  status: "Pendente",
+                  date: new Date().toISOString(),
+                  saleCompleted: false,
+                  approvedAt: undefined,
+                  concludedAt: undefined,
+                  deliveredAt: undefined,
+                  originLegacy: undefined,
+                };
+                const r = await createQuote(duplicate);
+                if (!r.ok) {
+                  alert("Não foi possível duplicar o orçamento: " + (r.error?.message ?? "erro desconhecido"));
+                  return;
+                }
+                const finalQuote = r.data as Quote;
+                setQuotes((prev) => {
+                  const next = [finalQuote, ...prev];
+                  try { localStorage.setItem("local_quotes_cache", JSON.stringify(next)); } catch {}
+                  return next;
+                });
+                setSelectedQuoteId(finalQuote.id);
+                setQuoteDetailOrigin("quotes");
+                setActiveView("quoteDetail");
+              } catch (err: any) {
+                console.error("Erro inesperado ao duplicar orçamento:", err);
+                alert("Não foi possível duplicar o orçamento: " + (err?.message ?? "erro inesperado — ver console"));
+              }
+            }}
           />
         );
 
       case "newQuote": {
-        const nextQuoteNumber = quotes.length > 0
-          ? Math.max(...quotes.map((q) => (q as any).quoteNumber || 0)) + 1
-          : 1;
+        const nextQuoteNumber = Math.max(localNextQuoteNumber(), dbNextQuoteNumber ?? 0);
         const editingQuote = editingQuoteId ? quotes.find((q) => q.id === editingQuoteId) || null : null;
         return (
           <NewQuote
@@ -937,15 +1199,29 @@ if (
             companySettings={companySettings}
             nextQuoteNumber={nextQuoteNumber}
             editingQuote={editingQuote}
+            hasSale={Boolean(editingQuote && sales.some((s) => String(s.quoteId) === String(editingQuote.id)))}
             onAddQuote={async (q: any) => {
               const r = await createQuote(q);
-              const finalQuote = (r.ok && r.data) ? r.data as Quote : q as Quote;
-              if (!r.ok) console.warn("Orçamento não salvo no banco:", r.error?.message);
+              if (!r.ok) {
+                // Nunca guardar como "salvo" quando o banco recusou o insert —
+                // isso fazia o orçamento aparecer na tela com um ID local
+                // (q<timestamp>) e sumir depois, porque nunca existiu no
+                // banco de verdade (ver incidente do orçamento do Jefersson).
+                console.error("Orçamento não salvo no banco:", r.error?.message);
+                alert(
+                  "Não foi possível salvar o orçamento no banco de dados. " +
+                  "Nada foi perdido ainda, mas ele NÃO está salvo — tente novamente.\n\n" +
+                  "Detalhe: " + (r.error?.message ?? "erro desconhecido")
+                );
+                return;
+              }
+              const finalQuote = r.data as Quote;
               setQuotes((prev) => {
                 const next = [finalQuote, ...prev];
                 try { localStorage.setItem("local_quotes_cache", JSON.stringify(next)); } catch {}
                 return next;
               });
+              return finalQuote;
             }}
             onUpdateQuote={handleUpdateQuote}
             onAddNewClient={(c: any) => setClients((prev) => [c, ...prev])}
@@ -964,6 +1240,9 @@ if (
 
       case "quoteDetail": {
         const selectedQuote = quotes.find((q) => q.id === selectedQuoteId);
+        const matchingSale = selectedQuote
+          ? sales.find((s) => String(s.quoteId) === String(selectedQuote.id))
+          : undefined;
         return selectedQuote ? (
           <QuoteDetail
             quote={selectedQuote}
@@ -978,11 +1257,43 @@ if (
             onCashFlowAdded={(entry) => {
               setCashFlow((prev) => [entry, ...prev]);
             }}
-            onBack={() => setActiveView("quotes")}
+            onBack={() => setActiveView(quoteDetailOrigin === "clientDetail" ? "clientDetail" : quoteDetailOrigin)}
+            backLabel={
+              quoteDetailOrigin === "sales" ? "Voltar para Vendas" :
+              quoteDetailOrigin === "clientDetail" ? `Voltar para ${selectedClient?.name ?? "Cliente"}` :
+              "Voltar para Orçamentos"
+            }
             onGoToSales={() => setActiveView("sales")}
             onEditQuote={() => {
               setEditingQuoteId(selectedQuote.id);
               setActiveView("newQuote");
+            }}
+            // Sempre passa onGenerateSale, independente de ter vindo de
+            // Orçamentos ou de Vendas — o próprio botão já se desabilita e
+            // vira "Venda gerada ✓" quando hasSale é true. Antes isso só era
+            // passado vindo de "quotes", então um orçamento aberto a partir
+            // de Vendas mas que ainda não tinha uma venda REAL gerada
+            // (só a virtual, derivada do status Aprovado) ficava sem
+            // nenhum botão de ação — nem "Gerar Venda" nem "Editar data".
+            onGenerateSale={handleGenerateSale}
+            hasSale={Boolean(matchingSale)}
+            // Data gravada na venda (meia-noite UTC) — lida em UTC pra não
+            // voltar um dia no fuso do Brasil.
+            saleDate={
+              matchingSale?.saleDate && !isNaN(new Date(matchingSale.saleDate as any).getTime())
+                ? new Date(matchingSale.saleDate as any).toISOString().slice(0, 10)
+                : undefined
+            }
+            onChangeSaleDate={async (ymd) => {
+              if (!matchingSale) return false;
+              const r = await updateSale(Number((matchingSale as any).id), { date: `${ymd}T00:00:00.000Z` });
+              if (!r.ok) return false;
+              setSales((prev) =>
+                prev.map((s) =>
+                  String((s as any).id) === String((matchingSale as any).id) ? { ...s, saleDate: new Date(`${ymd}T00:00:00.000Z`) } : s
+                )
+              );
+              return true;
             }}
           />
         ) : null;
@@ -997,19 +1308,58 @@ if (
             quotes={quotes}
             clients={clients}
             cashFlow={cashFlow}
+            monthCursor={salesMonthCursor}
+            setMonthCursor={setSalesMonthCursor}
+            dateRangeStart={salesDateRangeStart}
+            setDateRangeStart={setSalesDateRangeStart}
+            dateRangeEnd={salesDateRangeEnd}
+            setDateRangeEnd={setSalesDateRangeEnd}
+            filterStatus={salesFilterStatus}
+            setFilterStatus={setSalesFilterStatus}
+            searchTerm={salesSearchTerm}
+            setSearchTerm={setSalesSearchTerm}
             onOpenQuote={(quoteId) => {
+              if (mainScrollRef.current) salesScrollTopRef.current = mainScrollRef.current.scrollTop;
               setSelectedQuoteId(quoteId);
+              setQuoteDetailOrigin("sales");
               setActiveView("quoteDetail");
             }}
             onDeleteSale={(saleId) => {
               setSales((prev) => prev.filter((s) => String((s as any).id) !== saleId));
             }}
+            onUpdateQuote={handleUpdateQuote}
           />
         );
 
       // ✅ CLIENTES / ESTOQUE / PRODUTOS
       case "clients":
-        return <Clients />;
+        return (
+          <Clients
+            onOpenClient={(client) => {
+              setSelectedClient(client);
+              setActiveView("clientDetail");
+            }}
+          />
+        );
+
+      case "clientDetail":
+        return selectedClient ? (
+          <ClientDetail
+            client={selectedClient}
+            quotes={quotes}
+            sales={effectiveSales}
+            onOpenQuote={(quoteId) => {
+              setSelectedQuoteId(quoteId);
+              setQuoteDetailOrigin("clientDetail");
+              setActiveView("quoteDetail");
+            }}
+            onBack={() => setActiveView("clients")}
+          />
+        ) : (
+          <div className="bg-white p-6 rounded-xl shadow">
+            <p className="text-gray-500">Nenhum cliente selecionado.</p>
+          </div>
+        );
 
       case "agenda":
         return <AgendaPage currentUser={currentUser} />;
@@ -1040,9 +1390,15 @@ if (
       case "receivables":
         return <Receivables />;
 
+      // Funcionários agora é uma aba dentro de Financeiro — "employees" (usado
+      // pelo "voltar" das telas de detalhe/edição) abre Financeiro nessa aba.
       case "financials":
+      case "employees":
         return (
           <Financials
+            key={activeView}
+            initialTab={activeView === "employees" ? "employees" : "summary"}
+            setActiveView={setActiveView}
             onVariableExpensesChange={(expenses) => {
               const normalized = expenses.map((e: any) => ({
                 ...e,
@@ -1056,9 +1412,6 @@ if (
         );
 
       // ✅ ADMIN
-      case "employees":
-        return <EmployeesList setActiveView={setActiveView} />;
-
       case "employee-new":
         return <EmployeeForm setActiveView={setActiveView} />;
 
@@ -1094,6 +1447,7 @@ if (
             quotes={quotes}
             cashFlow={cashFlow}
             products={products}
+            onUpdateQuote={handleUpdateQuote}
           />
         );
 
@@ -1108,9 +1462,6 @@ if (
             onUpdateCurrentUser={(updated) => setCurrentUser(updated)}
           />
         );
-
-      case "assistant":
-        return <Assistant />;
 
       default:
         return <Dashboard currentUser={currentUser} setActiveView={setActiveView} />;
@@ -1143,7 +1494,7 @@ if (
           onLogout={handleLogout}
         />
 
-        <main className="flex-1 overflow-y-auto p-4">{renderView()}</main>
+        <main ref={mainScrollRef} className="flex-1 overflow-y-auto p-4">{renderView()}</main>
       </div>
 
       {/* Confirmação de saída via ESC */}

@@ -163,8 +163,8 @@ const ProductReportModal: React.FC<ProductReportModalProps> = ({ products, rawMa
   const productTotals = useMemo(() => {
     const result: Record<string, number> = {};
     for (const row of report) {
-      for (const [pid, data] of Object.entries(row.byProduct)) {
-        result[pid] = (result[pid] || 0) + data.totalCost;
+      for (const pid of Object.keys(row.byProduct)) {
+        result[pid] = (result[pid] || 0) + row.byProduct[pid].totalCost;
       }
     }
     return result;

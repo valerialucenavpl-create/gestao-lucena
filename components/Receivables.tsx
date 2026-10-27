@@ -1,9 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { getReceivables } from "../services/receivablesServices";
 import { getCashFlow } from "../services/cashFlowServices";
-import { CashFlowEntry, Receivable } from "../types";
+import { getQuotes } from "../services/quotesServices";
+import { getSales } from "../services/salesServices";
+import { supabase } from "../services/supabase";
+import { CashFlowEntry, Quote, Receivable } from "../types";
+import { getSaleStatus } from "../utils/saleStatus";
+import { CreditoFornecedor, getCreditosFornecedor } from "../services/pedidoAjustesServices";
 
-type ReceivableRow = Receivable & { quoteNumber?: number };
+type ReceivableRow = Receivable & { quoteNumber?: number; awaitingDelivery?: boolean };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function parseDateFlex(value: unknown): Date | null {
@@ -51,45 +56,124 @@ type StatusFilter = "pending" | "received" | "all";
 const Receivables: React.FC = () => {
   const [rows, setRows] = useState<ReceivableRow[]>([]);
   const [cashFlow, setCashFlow] = useState<CashFlowEntry[]>([]);
+  const [quotes, setQuotes] = useState<Quote[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [supplierCredits, setSupplierCredits] = useState<CreditoFornecedor[]>([]);
+  const [cancelledQuoteIds, setCancelledQuoteIds] = useState<Set<string>>(new Set());
+
+  // Repete a consulta enquanto vier vazia sem erro — um array vazio sem
+  // erro é o sintoma clássico de RLS filtrando tudo porque o token de auth
+  // ainda não tinha sido anexado no primeiro request logo após o login (o
+  // mesmo problema já corrigido em App.tsx para produtos/matéria-prima).
+  // Sem isso, cashFlow ficava vazio pra sempre nessa tela e TODA conta
+  // aparecia como "Pendente", mesmo as que já tinham pagamento no Caixa.
+  const fetchWithRetry = async <T,>(
+    run: () => Promise<{ ok: boolean; data?: T[] | null }>,
+    attempts = 4
+  ): Promise<T[]> => {
+    let lastData: T[] = [];
+    for (let i = 0; i < attempts; i++) {
+      const result = await run();
+      if (result.ok && Array.isArray(result.data) && result.data.length > 0) return result.data;
+      if (result.ok && Array.isArray(result.data)) lastData = result.data;
+      if (i < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 600 * (i + 1)));
+    }
+    return lastData;
+  };
 
   const load = async () => {
     setLoading(true);
-    const [receivablesRes, cashFlowRes] = await Promise.all([getReceivables(), getCashFlow()]);
-    if (receivablesRes.ok) setRows(receivablesRes.data as ReceivableRow[]);
-    if (cashFlowRes.ok) setCashFlow(cashFlowRes.data ?? []);
+    const [receivablesData, cashFlowData, quotesRes, salesRes] = await Promise.all([
+      fetchWithRetry(() => getReceivables() as Promise<{ ok: boolean; data?: ReceivableRow[] | null }>),
+      fetchWithRetry(() => getCashFlow() as Promise<{ ok: boolean; data?: CashFlowEntry[] | null }>),
+      getQuotes(),
+      getSales(),
+    ]);
+    // Cancelar uma venda só marca a VENDA (o pedido continua "Aprovado"), então
+    // o título gerado na aprovação continuava aqui como pendente. Filtra na
+    // tela (não apaga nada): se a venda for reativada, o título volta sozinho.
+    setCancelledQuoteIds(
+      new Set((salesRes.ok ? salesRes.data : []).filter((s) => s.status === "Cancelado").map((s) => String(s.quote_id)))
+    );
+    setRows(receivablesData);
+    setCashFlow(cashFlowData);
+    if ((quotesRes as any)?.ok) setQuotes((quotesRes as any).data ?? []);
+    const creditsRes = await getCreditosFornecedor();
+    setSupplierCredits(creditsRes.ok ? creditsRes.data.filter((c) => c.status === "Pendente") : []);
     setLoading(false);
   };
 
   useEffect(() => {
     load();
+
+    // Atualiza sozinho quando um pagamento é registrado em outra tela (ex.:
+    // "Finanças do Pedido" em Orçamentos/Vendas) — sem isso, quem já estava
+    // com essa tela aberta só via a baixa depois de sair e voltar (ou dar
+    // F5), mesmo com o pagamento já valendo no Caixa.
+    const channel = supabase
+      .channel(`realtime-receivables-${Date.now()}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "cashflow" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "receivables" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "sales" }, load)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Só pelo vínculo direto (subcategory "quote:<id>") — o fallback por nome
   // do cliente + número do pedido que existia aqui misturava pagamentos de
   // OUTRO pedido do mesmo cliente (cliente com várias OS acumulava/marcava
   // como recebido com base no lançamento errado).
-  const findPayment = (row: ReceivableRow): CashFlowEntry | undefined => {
-    return cashFlow.find(
-      (e) => e.type === "Entrada" && (e as any).subcategory === `quote:${row.quoteId}`
+  //
+  // Uma venda pode ter mais de um lançamento (sinal + restante), então soma
+  // tudo que já entrou no Caixa em vez de considerar "recebido" assim que
+  // aparece o primeiro pagamento — senão um sinal parcial escondia o
+  // restante que ainda falta receber.
+  const findPayments = (row: ReceivableRow): CashFlowEntry[] => {
+    // orcamentoId é o vínculo estruturado novo; subcategory "quote:<id>" é
+    // o formato antigo (embutido em texto) — mantido como fallback até os
+    // lançamentos antigos serem migrados.
+    return cashFlow.filter(
+      (e) =>
+        e.type === "Entrada" &&
+        (String((e as any).orcamentoId ?? "") === String(row.quoteId) ||
+          (e as any).subcategory === `quote:${row.quoteId}`)
     );
   };
 
-  // Linhas com o status recalculado a partir do Caixa (ignora o campo
-  // "status" gravado na tabela — ele só serve de estado inicial até o
-  // primeiro lançamento de caixa aparecer).
+  // Linhas com o status e o valor recalculados a partir do Caixa (ignora o
+  // campo "status" gravado na tabela — ele só serve de estado inicial até o
+  // primeiro lançamento de caixa aparecer). O valor exibido é sempre o que
+  // ainda falta receber (total do orçamento - soma do que já caiu no Caixa).
   const computedRows = useMemo(() => {
     return rows.map((row) => {
-      const payment = findPayment(row);
-      if (payment) {
-        return { ...row, status: "received" as const, receivedAt: payment.date };
+      const cancelled = cancelledQuoteIds.has(String(row.quoteId));
+      const payments = findPayments(row);
+      const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+      const remaining = Math.max(0, row.amount - totalPaid);
+      const lastPaymentDate = payments.length
+        ? payments.reduce((latest, p) => (p.date > latest ? p.date : latest), payments[0].date)
+        : undefined;
+
+      const quote = quotes.find((q) => String(q.id) === String(row.quoteId));
+      // Enquanto a venda estiver "Aguardando" (aprovada, ainda não entregue),
+      // o título é só uma previsão — não vence de verdade até a entrega.
+      const saleStatus = getSaleStatus(quote);
+      const awaitingDelivery = saleStatus === "Aguardando";
+
+      if (remaining <= 0.005 && totalPaid > 0) {
+        return { ...row, status: "received" as const, receivedAt: lastPaymentDate, awaitingDelivery };
       }
-      return { ...row, status: "pending" as const, receivedAt: undefined };
-    });
-  }, [rows, cashFlow]);
+      // Venda cancelada: o que faltava receber não é mais devido.
+      if (cancelled) return null;
+      return { ...row, amount: remaining, status: "pending" as const, receivedAt: undefined, awaitingDelivery };
+    }).filter((r): r is NonNullable<typeof r> => r !== null);
+  }, [rows, cashFlow, quotes, cancelledQuoteIds]);
 
   // ─── Filtered ──────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -111,6 +195,39 @@ const Receivables: React.FC = () => {
     [computedRows]
   );
 
+  // ─── Vencidos por idade ────────────────────────────────────────────────────
+  const AGE_BANDS = ["Até 30 dias", "31–60 dias", "61–90 dias", "Mais de 90 dias"] as const;
+  type AgeBand = (typeof AGE_BANDS)[number];
+  const ageBandOf = (days: number): AgeBand =>
+    days <= 30 ? "Até 30 dias" : days <= 60 ? "31–60 dias" : days <= 90 ? "61–90 dias" : "Mais de 90 dias";
+
+  const overdueRows = useMemo(() => {
+    const today = toISO(new Date());
+    return computedRows
+      .filter((r) => r.status === "pending" && !r.awaitingDelivery && r.dueDate && r.dueDate < today)
+      .map((r) => {
+        const days = Math.max(0, Math.round((new Date(today).getTime() - new Date(r.dueDate + "T00:00:00").getTime()) / 86400000));
+        return { ...r, overdueDays: days, band: ageBandOf(days) };
+      });
+  }, [computedRows]);
+
+  const totalOverdue = overdueRows.reduce((s, r) => s + r.amount, 0);
+
+  const overdueByBand = useMemo(() => {
+    const map = new Map<AgeBand, number>();
+    AGE_BANDS.forEach((b) => map.set(b, 0));
+    overdueRows.forEach((r) => map.set(r.band, (map.get(r.band) || 0) + r.amount));
+    return map;
+  }, [overdueRows]);
+
+  const overdueByClient = useMemo(() => {
+    const map = new Map<string, number>();
+    overdueRows.forEach((r) => map.set(r.customerName, (map.get(r.customerName) || 0) + r.amount));
+    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
+  }, [overdueRows]);
+
+  const [showOverdueDetail, setShowOverdueDetail] = useState(false);
+
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-5">
@@ -119,8 +236,9 @@ const Receivables: React.FC = () => {
         <h3 className="text-2xl font-bold text-gray-800">Contas a Receber</h3>
         <p className="text-sm text-gray-500 mt-1">
           Gerado automaticamente quando um orçamento é aprovado. Prazo de recebimento segue a
-          data de entrega (PIX/Dinheiro) ou o próximo dia útil da venda (Cartão). O status "Recebido"
-          reflete direto o Caixa — só visualização, não dá pra dar baixa por aqui.
+          data de entrega (PIX/Dinheiro) ou o próximo dia útil da venda (Cartão). O valor e o status
+          refletem direto o Caixa: se só uma parte já foi paga, aqui aparece o restante que ainda
+          falta receber — não dá pra dar baixa por aqui.
         </p>
       </div>
 
@@ -140,6 +258,73 @@ const Receivables: React.FC = () => {
             {computedRows.filter((r) => r.status === "pending").length}
           </p>
         </div>
+      </div>
+
+      {/* CRÉDITOS COM FORNECEDOR (lançados em Finanças do Pedido → Despesas) */}
+      {supplierCredits.length > 0 && (
+        <div className="bg-white rounded-xl border border-sky-200 shadow-sm p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h4 className="text-base font-bold text-gray-800">Créditos a receber de fornecedores</h4>
+              <p className="text-xs text-gray-500">Pendentes — marque como recebido dentro do pedido (Finanças do Pedido → Despesas).</p>
+            </div>
+            <p className="text-lg font-bold text-sky-600">{money(supplierCredits.reduce((s, c) => s + c.valor, 0))}</p>
+          </div>
+          <div className="divide-y">
+            {supplierCredits.map((c) => {
+              const q = quotes.find((qq) => String(qq.id) === c.pedidoId);
+              return (
+                <div key={c.id} className="flex items-center justify-between py-2 text-sm gap-3">
+                  <div>
+                    <span className="text-xs font-mono text-primary-700 font-semibold mr-2">OS #{q?.quoteNumber ?? c.pedidoId}</span>
+                    <span className="font-semibold text-gray-800">{c.fornecedor}</span>
+                    {c.motivo && <span className="text-gray-500"> — {c.motivo}</span>}
+                  </div>
+                  <span className="font-bold text-sky-600 whitespace-nowrap">{money(c.valor)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* VENCIDOS POR IDADE */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h4 className="text-base font-bold text-gray-800">Vencidos por Idade</h4>
+            <p className="text-xs text-gray-500">Total vencido: <span className="font-bold text-red-600">{money(totalOverdue)}</span></p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowOverdueDetail((v) => !v)}
+            className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50"
+          >
+            {showOverdueDetail ? "Ocultar por cliente" : "Ver por cliente"}
+          </button>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {AGE_BANDS.map((band) => (
+            <div key={band} className="border rounded-lg p-3 text-center">
+              <p className="text-xs text-gray-500">{band}</p>
+              <p className="text-lg font-bold text-red-600">{money(overdueByBand.get(band) || 0)}</p>
+            </div>
+          ))}
+        </div>
+        {showOverdueDetail && (
+          <div className="mt-4 border-t pt-3 space-y-1">
+            {overdueByClient.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-2">Nenhuma conta vencida.</p>
+            ) : (
+              overdueByClient.map(([client, amount]) => (
+                <div key={client} className="flex justify-between text-sm py-1">
+                  <span className="text-gray-700">{client}</span>
+                  <span className="font-semibold text-red-600">{money(amount)}</span>
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       {/* FILTROS */}
@@ -222,7 +407,7 @@ const Receivables: React.FC = () => {
               <tbody className="divide-y divide-gray-100">
                 {filtered.map((row) => {
                   const today = toISO(new Date());
-                  const isOverdue = row.status === "pending" && row.dueDate && row.dueDate < today;
+                  const isOverdue = row.status === "pending" && !row.awaitingDelivery && row.dueDate && row.dueDate < today;
                   const isSoon =
                     row.status === "pending" &&
                     row.dueDate &&
@@ -255,6 +440,10 @@ const Receivables: React.FC = () => {
                           <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700">
                             Recebido {row.receivedAt ? `em ${formatBR(row.receivedAt)}` : ""}
                           </span>
+                        ) : row.awaitingDelivery ? (
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">
+                            A receber na entrega
+                          </span>
                         ) : (
                           <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">
                             Pendente
@@ -272,7 +461,7 @@ const Receivables: React.FC = () => {
           <div className="md:hidden space-y-3">
             {filtered.map((row) => {
               const today = toISO(new Date());
-              const isOverdue = row.status === "pending" && row.dueDate && row.dueDate < today;
+              const isOverdue = row.status === "pending" && !row.awaitingDelivery && row.dueDate && row.dueDate < today;
 
               return (
                 <div key={row.id} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 space-y-2">
@@ -290,6 +479,10 @@ const Receivables: React.FC = () => {
                   {row.status === "received" ? (
                     <span className="inline-block text-xs font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700">
                       Recebido {row.receivedAt ? `em ${formatBR(row.receivedAt)}` : ""}
+                    </span>
+                  ) : row.awaitingDelivery ? (
+                    <span className="inline-block text-xs font-semibold px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">
+                      A receber na entrega
                     </span>
                   ) : (
                     <span className="inline-block text-xs font-semibold px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">

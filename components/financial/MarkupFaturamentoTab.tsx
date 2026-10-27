@@ -44,7 +44,7 @@ const MarkupFaturamentoTab: React.FC = () => {
       // (mesmo ajuste já feito no carregamento geral do sistema).
       const [settingsRes, empRes, partnersRes, fixRes] = await Promise.all([
         supabase.from("billing_settings").select("*").order("updated_at", { ascending: false }).limit(1),
-        supabase.from("employees").select("total_monthly_cost, department"),
+        supabase.from("employees").select("total_monthly_cost, department").eq("active", true),
         supabase.from("partners").select("pro_labore"),
         supabase.from("fixed_expenses").select("value"),
       ]);

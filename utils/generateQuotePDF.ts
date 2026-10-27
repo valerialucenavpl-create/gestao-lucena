@@ -5,6 +5,9 @@ export interface PDFOptions {
   hidePrice: boolean;
   hideMeasures: boolean;
   hideDetailedDescription: boolean;
+  /** Venda já gerada: o PDF vira "ORDEM DE SERVIÇO" (sem "Proposta comercial"
+   *  nem validade da proposta, com o prazo de entrega no lugar). */
+  isServiceOrder?: boolean;
 }
 
 type RGB = [number, number, number];
@@ -41,7 +44,7 @@ function mix(c1: RGB, c2: RGB, t: number): RGB {
 
 // Gradiente horizontal feito com várias faixas verticais finas (jsPDF não
 // tem fill de gradiente nativo).
-function gradientH(doc: jsPDF, x: number, y: number, w: number, h: number, c1: RGB, c2: RGB, steps = 48) {
+export function gradientH(doc: jsPDF, x: number, y: number, w: number, h: number, c1: RGB, c2: RGB, steps = 48) {
   const stepW = w / steps;
   for (let i = 0; i < steps; i++) {
     setFill(doc, mix(c1, c2, steps === 1 ? 0 : i / (steps - 1)));
@@ -50,7 +53,7 @@ function gradientH(doc: jsPDF, x: number, y: number, w: number, h: number, c1: R
 }
 
 // Mesmo gradiente, recortado num retângulo de cantos arredondados.
-function gradientRoundedH(doc: jsPDF, x: number, y: number, w: number, h: number, r: number, c1: RGB, c2: RGB) {
+export function gradientRoundedH(doc: jsPDF, x: number, y: number, w: number, h: number, r: number, c1: RGB, c2: RGB) {
   doc.saveGraphicsState();
   doc.roundedRect(x, y, w, h, r, r, null);
   doc.clip();
@@ -59,13 +62,13 @@ function gradientRoundedH(doc: jsPDF, x: number, y: number, w: number, h: number
   doc.restoreGraphicsState();
 }
 
-function formatCNPJ(raw: string): string {
+export function formatCNPJ(raw: string): string {
   const digits = (raw || "").replace(/\D/g, "");
   if (digits.length !== 14) return raw || "";
   return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
 }
 
-function loadImage(url: string): Promise<{ dataUrl: string; width: number; height: number } | null> {
+export function loadImage(url: string): Promise<{ dataUrl: string; width: number; height: number } | null> {
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -214,11 +217,16 @@ export async function generateQuotePDF(
   setTxt(doc, WHITE);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(17);
-  doc.text("ORÇAMENTO", margin + 8, y + 10);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  setTxt(doc, mix(WHITE, NAVY, 0.15));
-  doc.text("Proposta comercial", margin + 8, y + 16);
+  if (options.isServiceOrder) {
+    // Venda já fechada — sem subtítulo comercial, título centralizado na faixa.
+    doc.text("ORDEM DE SERVIÇO", margin + 8, y + bandH / 2 + 2.2);
+  } else {
+    doc.text("ORÇAMENTO", margin + 8, y + 10);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    setTxt(doc, mix(WHITE, NAVY, 0.15));
+    doc.text("Proposta comercial", margin + 8, y + 16);
+  }
 
   // badge com número do orçamento e data de emissão
   const badgeW = 52;
@@ -255,8 +263,16 @@ export async function generateQuotePDF(
     { label: "CLIENTE", value: quote.customerName || "—" },
   ];
   if (quote.salesperson) clientFields.push({ label: "VENDEDOR(A)", value: quote.salesperson });
-  // Validade padrão da proposta (período comercial fixo da empresa).
-  clientFields.push({ label: "VALIDADE DA PROPOSTA", value: "15 dias" });
+  if (options.isServiceOrder) {
+    // Ordem de serviço: no lugar da validade, o prazo de entrega em dias
+    // (da linha "Prazo de entrega: N dias" das notas) — sem a data exata.
+    const notesText = `${(quote as any).measurementNotes || ""}\n${(quote as any).assemblyNotes || ""}`;
+    const leadDays = notesText.match(/prazo de entrega:\s*(\d+)\s*dias?/i)?.[1];
+    clientFields.push({ label: "PRAZO DE ENTREGA", value: leadDays ? `${leadDays} dias` : "A combinar" });
+  } else {
+    // Validade padrão da proposta (período comercial fixo da empresa).
+    clientFields.push({ label: "VALIDADE DA PROPOSTA", value: "15 dias" });
+  }
 
   // Larguras desiguais (cliente ganha mais espaço) em vez de dividir o
   // card em partes iguais — um nome de cliente longo (ex.: "ANTONIO DE
@@ -293,13 +309,26 @@ export async function generateQuotePDF(
   y += clientCardH + 8;
 
   // ─── TABELA DE PRODUTOS ───────────────────────────────────────────────────
-  // Frete diluído é opcional (quote.dissolveFreight, padrão true pra
-  // orçamentos antigos); instalação e comissão de indicação continuam
-  // sempre diluídas, como já era.
-  const freightDissolved = (quote as any).dissolveFreight !== false;
-  const dissolvedFreightValue = freightDissolved ? (quote.freight || 0) : 0;
-  const extraTotal = dissolvedFreightValue + (quote.installation || 0) + (quote.referralCommissionValue || 0);
+  // Frete, instalação, alimentação, diferença, comissão de indicação e
+  // desconto são sempre diluídos nos itens (cada produto carrega sua fatia
+  // proporcional) — sem isso a soma das linhas da tabela não batia com o
+  // Total mostrado embaixo. extraTotal = totalPrice - subtotal em vez de
+  // somar campo por campo (frete + instalação + ...) porque listar campo
+  // por campo esquecia a Alimentação e o Desconto — qualquer campo novo que
+  // afete o total e não entrar nessa lista quebra a diluição de novo; esse
+  // cálculo cobre tudo automaticamente.
   const subtotal = quote.subtotal || 0;
+  // Se a usuária definiu manualmente quanto de frete vai pra cada item (em
+  // vez do rateio proporcional automático), esse frete some do "extraTotal"
+  // genérico e é aplicado à parte por item — o resto (instalação,
+  // alimentação, diferença, comissão, desconto) continua ratado
+  // proporcionalmente como sempre.
+  const freightManualByItem = quote.freightManualByItem || {};
+  const hasManualFreight = Object.keys(freightManualByItem).length > 0;
+  // O desconto NÃO é diluído nos itens: cada produto mostra o valor cheio e
+  // o desconto aparece separado nos totais (Subtotal → Descontos → Total).
+  // Antes ele era diluído E mostrado na linha "Descontos" (contava 2 vezes).
+  const extraTotal = (quote.totalPrice || 0) + (quote.discount || 0) - subtotal - (hasManualFreight ? (quote.freight || 0) : 0);
   // item.price já é o TOTAL da linha (preço unitário × quantidade, calculado
   // no orçamento) — não um valor por unidade. O bug anterior multiplicava
   // por item.quantity de novo tanto aqui quanto na tabela abaixo, inflando
@@ -308,7 +337,8 @@ export async function generateQuotePDF(
   // outra vez, dando R$6.389,71 em vez de R$2.129,90).
   const dissolvedItems = (quote.items || []).map((item) => {
     const share = subtotal > 0 ? item.price / subtotal : 0;
-    const extraShareForLine = share * extraTotal;
+    const itemFreight = hasManualFreight ? Number(freightManualByItem[item.id] || 0) : 0;
+    const extraShareForLine = itemFreight + share * extraTotal;
     const displayedTotal = item.price + extraShareForLine;
     const displayedUnitPrice = item.quantity > 0 ? displayedTotal / item.quantity : displayedTotal;
     return { ...item, displayedTotal, displayedUnitPrice };
@@ -504,8 +534,17 @@ export async function generateQuotePDF(
   y += 8;
 
   // ─── TOTAIS ────────────────────────────────────────────────────────────
-  if (!options.hidePrice) {
-    const dissolvedSubtotal = dissolvedItems.reduce((s, i) => s + i.displayedTotal, 0);
+  // Cliente vê Subtotal, Desconto (quando houver) e o Total final — Frete,
+  // Instalação, Alimentação, Diferença e Comissão de indicação NÃO aparecem
+  // aqui: esses valores só são visíveis dentro do sistema (tela de detalhe
+  // do orçamento). No PDF/impressão eles continuam diluídos proporcional-
+  // mente dentro do preço de cada produto na tabela acima — por isso a soma
+  // das linhas ainda bate com o Total mesmo sem essas linhas aparecerem
+  // aqui soltas.
+  // Mostrado mesmo com "ocultar preço" marcado: essa opção esconde o preço
+  // POR ITEM (linha a linha), não o valor total do orçamento — sem isso o
+  // cliente via a lista de produtos sem nenhum valor em lugar nenhum.
+  {
     const boxW = 85;
     const boxX = pageW - margin - boxW;
 
@@ -513,21 +552,19 @@ export async function generateQuotePDF(
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9.5);
-    setTxt(doc, MUTED);
-    doc.text("Subtotal dos produtos", boxX, y + 4);
-    setTxt(doc, INK);
-    doc.text(`R$ ${fmtBR(dissolvedSubtotal)}`, pageW - margin, y + 4, { align: "right" });
-    y += 7;
 
-    if (!freightDissolved && (quote.freight || 0) > 0) {
-      setTxt(doc, MUTED);
-      doc.text("Frete", boxX, y + 4);
-      setTxt(doc, INK);
-      doc.text(`R$ ${fmtBR(quote.freight || 0)}`, pageW - margin, y + 4, { align: "right" });
-      y += 7;
-    }
-
+    // Subtotal só aparece quando há desconto — sem desconto, Subtotal e
+    // Total são o mesmo valor, então mostrar os dois é redundante.
     if ((quote.discount || 0) > 0) {
+      setTxt(doc, MUTED);
+      doc.text("Subtotal (produtos)", boxX, y + 4);
+      setTxt(doc, INK);
+      // Soma das linhas da tabela (produtos + frete/instalação diluídos),
+      // pra que Subtotal - Descontos = Total feche com o que o cliente vê.
+      const tableSum = dissolvedItems.reduce((s, i) => s + i.displayedTotal, 0);
+      doc.text(`R$ ${fmtBR(tableSum)}`, pageW - margin, y + 4, { align: "right" });
+      y += 7;
+
       setTxt(doc, MUTED);
       doc.text("Descontos", boxX, y + 4);
       setTxt(doc, GREEN);
@@ -545,8 +582,6 @@ export async function generateQuotePDF(
     doc.setFontSize(15);
     doc.text(`R$ ${fmtBR(quote.totalPrice || 0)}`, boxX + boxW - 6, y + grandH / 2 + 1.8, { align: "right" });
     y += grandH + 10;
-  } else {
-    y += 4;
   }
 
   // ─── EXTRAÇÃO DE PRAZO DE ENTREGA / OBSERVAÇÕES DAS NOTAS ────────────────

@@ -26,6 +26,14 @@ textarea {
   display: block !important;
   box-sizing: border-box !important;
 }
+/* ...menos checkbox/radio: com 100% de largura a caixinha empurrava o texto
+   do lado pra fora (ex.: "Cores disponíveis", opções do PDF do orçamento). */
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto !important;
+  display: inline-block !important;
+  flex-shrink: 0;
+}
 
 /* =============================================
    DARK MODE — overrides globais

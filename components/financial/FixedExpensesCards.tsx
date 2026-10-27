@@ -36,7 +36,7 @@ const FixedExpensesCards: React.FC = () => {
     // ou mais (mesmo ajuste já feito no carregamento geral do sistema).
     const [fixedRes, employeesRes, partnersRes] = await Promise.all([
       supabase.from("fixed_expenses").select("*").order("id", { ascending: false }),
-      supabase.from("employees").select("total_monthly_cost"),
+      supabase.from("employees").select("total_monthly_cost").eq("active", true),
       supabase.from("partners").select("pro_labore"),
     ]);
 

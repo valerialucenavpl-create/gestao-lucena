@@ -11,6 +11,7 @@ type Employee = {
   name: string | null;
   role: string | null;
   base_salary: number | null;
+  active: boolean;
 };
 
 const initials = (name: string | null) =>
@@ -28,12 +29,13 @@ const EmployeesList: React.FC<Props> = ({ setActiveView }) => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
 
   const loadEmployees = async () => {
     setLoading(true);
     const { data, error } = await supabase
       .from("employees")
-      .select("id, name, role, base_salary")
+      .select("id, name, role, base_salary, active")
       .order("name", { ascending: true });
 
     if (error) {
@@ -57,9 +59,10 @@ const EmployeesList: React.FC<Props> = ({ setActiveView }) => {
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
+    const visible = showInactive ? employees : employees.filter((e) => e.active !== false);
     const base = !term
-      ? employees
-      : employees.filter(
+      ? visible
+      : visible.filter(
           (e) => (e.name || "").toLowerCase().includes(term) || (e.role || "").toLowerCase().includes(term)
         );
     // Ordena aqui também (não só no banco) — nomes com espaço a mais no
@@ -68,7 +71,7 @@ const EmployeesList: React.FC<Props> = ({ setActiveView }) => {
     return [...base].sort((a, b) =>
       (a.name || "").trim().localeCompare((b.name || "").trim(), "pt-BR", { sensitivity: "base" })
     );
-  }, [employees, search]);
+  }, [employees, search, showInactive]);
 
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm p-6 space-y-5">
@@ -93,18 +96,24 @@ const EmployeesList: React.FC<Props> = ({ setActiveView }) => {
         </button>
       </div>
 
-      <div className="relative max-w-md">
-        <Icon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-          <circle cx="11" cy="11" r="8" />
-          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-        </Icon>
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar por nome ou cargo..."
-          className="w-full rounded-xl border border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white pl-9 pr-4 py-2.5 text-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-900"
-        />
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative max-w-md flex-1 min-w-[200px]">
+          <Icon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </Icon>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nome ou cargo..."
+            className="w-full rounded-xl border border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white pl-9 pr-4 py-2.5 text-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-900"
+          />
+        </div>
+        <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+          <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
+          Mostrar desligados
+        </label>
       </div>
 
       {loading ? (
@@ -139,14 +148,19 @@ const EmployeesList: React.FC<Props> = ({ setActiveView }) => {
                 filtered.map((e) => (
                   <tr
                     key={e.id}
-                    className="hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors"
+                    className={`hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors ${e.active === false ? "opacity-50" : ""}`}
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-full bg-primary-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
                           {initials(e.name)}
                         </div>
-                        <span className="font-medium text-gray-900 dark:text-white">{e.name ?? "-"}</span>
+                        <span className="font-medium text-gray-900 dark:text-white flex items-center gap-2">
+                          {e.name ?? "-"}
+                          {e.active === false && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 uppercase">Desligado</span>
+                          )}
+                        </span>
                       </div>
                     </td>
                     <td className="px-4 py-3">

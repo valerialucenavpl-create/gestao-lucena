@@ -34,6 +34,20 @@ export async function getQuoteById(id: string) {
 }
 
 // ---------------------------
+// NEXT QUOTE NUMBER — considera também orçamentos excluídos (função no banco,
+// ver supabase/2026-10-10_quote_number_sem_reuso.sql). null se falhar.
+// ---------------------------
+export async function getNextQuoteNumber(): Promise<number | null> {
+  const { data, error } = await supabase.rpc("next_quote_number");
+  if (error) {
+    console.warn("Não foi possível buscar o próximo número de OS:", error.message);
+    return null;
+  }
+  const n = Number(data);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// ---------------------------
 // CREATE QUOTE
 // ---------------------------
 export async function createQuote(quote: Quote) {
@@ -103,6 +117,16 @@ export async function deleteQuote(id: string) {
 function normalizeQuoteForDb(quote: Partial<Quote>): Record<string, unknown> {
   const q = quote as any;
 
+  // "??" trata null E undefined como "cai pro próximo" — então
+  // "q.deliveredAt ?? q.delivered_at" com deliveredAt explicitamente null
+  // (ex.: desfazer entrega) acaba voltando pro valor antigo de delivered_at
+  // em vez de null, porque null também aciona o fallback. Isso fazia
+  // "Aguardando"/"Desfazer entrega" nunca limpar a data de verdade no banco.
+  // pickNullable preserva um null explícito, só cai no fallback quando a
+  // chave nem existe no objeto (undefined de verdade).
+  const pickNullable = (camelKey: string, snakeKey: string) =>
+    camelKey in q ? q[camelKey] : snakeKey in q ? q[snakeKey] : undefined;
+
   // client_id só inclui se for um ID real do banco (não local_xxx gerado pelo front)
   const rawClientId = q.clientId ?? q.client_id;
   const validClientId = rawClientId && !String(rawClientId).startsWith("local_") && !String(rawClientId).startsWith("tmp_")
@@ -121,9 +145,11 @@ function normalizeQuoteForDb(quote: Partial<Quote>): Record<string, unknown> {
     freight:          q.freight,
     freight_items:    q.freightItems ?? q.freight_items,
     dissolve_freight: q.dissolveFreight ?? q.dissolve_freight,
+    freight_manual_by_item: q.freightManualByItem ?? q.freight_manual_by_item,
     installation:     q.installation,
     installation_cost_items: q.installationCostItems ?? q.installation_cost_items,
     feeding_cost:     q.feedingCost ?? q.feeding_cost,
+    price_difference: q.priceDifference ?? q.price_difference,
     total_price:      q.totalPrice    ?? q.total_price,
     payment_method:   q.paymentMethod ?? q.payment_method,
     cost_of_goods:    q.costOfGoods   ?? q.cost_of_goods,
@@ -135,10 +161,30 @@ function normalizeQuoteForDb(quote: Partial<Quote>): Record<string, unknown> {
     referral_commission_rate:  q.referralCommissionRate  ?? q.referral_commission_rate,
     referral_commission_value: q.referralCommissionValue ?? q.referral_commission_value,
     quote_number:     q.quoteNumber   ?? q.quote_number,
-    delivery_date:    q.deliveryDate  ?? q.delivery_date,
+    delivery_date:    pickNullable("deliveryDate", "delivery_date"),
     internal_status:  q.internalStatus ?? q.internal_status,
     sale_completed:   q.saleCompleted   ?? q.sale_completed,
+    not_closed:       q.notClosed ?? q.not_closed,
+    contact_log:      q.contactLog ?? q.contact_log,
+    next_contact_date: pickNullable("nextContactDate", "next_contact_date"),
+    approved_at:      pickNullable("approvedAt", "approved_at"),
+    concluded_at:     pickNullable("concludedAt", "concluded_at"),
+    delivered_at:     pickNullable("deliveredAt", "delivered_at"),
+    origin_legacy:    q.originLegacy ?? q.origin_legacy,
+    // Só vai pro banco quando definido — orçamentos lidos antes da migração
+    // 2026-10-12 não trazem a chave, então salvar não quebra sem a coluna.
+    lost_reason:        pickNullable("lostReason", "lost_reason"),
+    lost_reason_detail: pickNullable("lostReasonDetail", "lost_reason_detail"),
   };
+
+  // Campos de data no banco são tipo "date"/"timestamptz" — uma string vazia
+  // "" (valor padrão usado na leitura, pra não quebrar <input type="date">
+  // controlados) não é uma data válida pro Postgres ("invalid input syntax
+  // for type date"). Só null representa "sem data" de verdade.
+  const dateKeys = ["delivery_date", "next_contact_date", "approved_at", "concluded_at", "delivered_at"];
+  dateKeys.forEach((k) => {
+    if (payload[k] === "") payload[k] = null;
+  });
 
   // Remove undefined fields
   Object.keys(payload).forEach((k) => {
@@ -165,11 +211,17 @@ function normalizeQuoteFromDb(row: any): Quote {
       ? (row.freight_items ?? row.freightItems)
       : [],
     dissolveFreight:   (row.dissolve_freight ?? row.dissolveFreight) !== false,
+    freightManualByItem:
+      (row.freight_manual_by_item ?? row.freightManualByItem) &&
+      typeof (row.freight_manual_by_item ?? row.freightManualByItem) === "object"
+        ? (row.freight_manual_by_item ?? row.freightManualByItem)
+        : {},
     installation:      Number(row.installation ?? 0),
     installationCostItems: Array.isArray(row.installation_cost_items ?? row.installationCostItems)
       ? (row.installation_cost_items ?? row.installationCostItems)
       : [],
     feedingCost:       Number(row.feeding_cost ?? row.feedingCost ?? 0),
+    priceDifference:   Number(row.price_difference ?? row.priceDifference ?? 0),
     totalPrice:        Number(row.total_price     ?? row.totalPrice     ?? 0),
     paymentMethod:     row.payment_method   ?? row.paymentMethod   ?? "A Definir",
     costOfGoods:       Number(row.cost_of_goods   ?? row.costOfGoods   ?? 0),
@@ -184,6 +236,16 @@ function normalizeQuoteFromDb(row: any): Quote {
     deliveryDate:      row.delivery_date    ?? row.deliveryDate    ?? "",
     internalStatus:    row.internal_status  ?? row.internalStatus  ?? "Pedido",
     saleCompleted:     Boolean(row.sale_completed ?? row.saleCompleted ?? false),
+    notClosed:         Boolean(row.not_closed ?? row.notClosed ?? false),
+    contactLog:        Array.isArray(row.contact_log ?? row.contactLog) ? (row.contact_log ?? row.contactLog) : [],
+    nextContactDate:   row.next_contact_date ?? row.nextContactDate ?? "",
+    approvedAt:        row.approved_at ?? row.approvedAt ?? "",
+    concludedAt:       row.concluded_at ?? row.concludedAt ?? "",
+    deliveredAt:       row.delivered_at ?? row.deliveredAt ?? "",
+    originLegacy:      Boolean(row.origin_legacy ?? row.originLegacy ?? false),
+    // undefined (não "") quando a coluna ainda não existe — ver normalizeQuoteForDb.
+    ...("lost_reason" in row ? { lostReason: row.lost_reason ?? "" } : {}),
+    ...("lost_reason_detail" in row ? { lostReasonDetail: row.lost_reason_detail ?? "" } : {}),
   };
 }
 

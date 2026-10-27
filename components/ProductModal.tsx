@@ -768,7 +768,11 @@ const ProductModal: React.FC<ProductModalProps> = ({
 
   useEffect(() => {
     const family = resolveProductFamily(category);
-    setProductCategory(family || category);
+    // productCategory precisa ser a categoria exata escolhida (ex.: "ACESSORIO
+    // DE MARMORE"), não a família base — usar a família aqui colapsava
+    // acessórios de mármore/vidro/alumínio de volta pra categoria principal,
+    // porque resolveProductFamily só olha se o texto contém "MARMORE" etc.
+    setProductCategory(category);
     if (family === "VIDRO" || family === "MARMORE") {
       setLaborSector(family);
     }
@@ -908,6 +912,35 @@ const ProductModal: React.FC<ProductModalProps> = ({
     });
     return names.sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
   }, [compositionEntries]);
+
+  // Cores que a usuária desmarcou ("este produto não tem essa cor"). Guarda
+  // só as desmarcadas — produto antigo / cor nova da matéria-prima continua
+  // disponível por padrão.
+  const [unavailableColors, setUnavailableColors] = useState<string[]>(
+    Array.isArray((product as any)?.unavailableColors) ? (product as any).unavailableColors : []
+  );
+  const unavailableColorKeys = useMemo(
+    () => new Set(unavailableColors.map((c) => normalizeText(c))),
+    [unavailableColors]
+  );
+  const availableColorOptions = useMemo(() => {
+    const kept = productColorOptions.filter((c) => !unavailableColorKeys.has(normalizeText(c)));
+    // Nunca deixa o produto sem nenhuma cor.
+    return kept.length > 0 ? kept : productColorOptions;
+  }, [productColorOptions, unavailableColorKeys]);
+
+  const toggleColorAvailability = (color: string) => {
+    const key = normalizeText(color);
+    if (unavailableColorKeys.has(key)) {
+      setUnavailableColors((prev) => prev.filter((c) => normalizeText(c) !== key));
+      return;
+    }
+    if (availableColorOptions.length <= 1) {
+      alert("O produto precisa ter pelo menos uma cor disponível.");
+      return;
+    }
+    setUnavailableColors((prev) => [...prev, color]);
+  };
 
   // Migração: produtos antigos tinham um único "fixedSalePrice" pra todas as
   // cores. Na primeira vez que as cores ficam disponíveis, se ainda não há
@@ -1049,7 +1082,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
 
   // Lista de cores a exibir: uma por variante de cor usada na composição, ou
   // um único bloco "sem cor" pra produtos sem variação (ex.: acessórios).
-  const colorsToShow = productColorOptions.length > 0 ? productColorOptions : [""];
+  const colorsToShow = availableColorOptions.length > 0 ? availableColorOptions : [""];
 
   const computeColorPricing = (color: string) => {
     const colorMaterialCost = color ? materialCostForColor(color) : materialCost;
@@ -1273,6 +1306,10 @@ const ProductModal: React.FC<ProductModalProps> = ({
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    submitProduct();
+  };
+
+  const submitProduct = () => {
     if (submitting) return;
 
     if (!name.trim()) {
@@ -1299,7 +1336,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
     onSave({
       name: name.trim(),
       category,
-      productCategory: resolveProductFamily(category) || productCategory,
+      productCategory: category || productCategory,
       productType: productType.trim(),
       productSubCategory1: productSubCategory1.trim(),
       productSubCategory2: productSubCategory2.trim(),
@@ -1311,6 +1348,8 @@ const ProductModal: React.FC<ProductModalProps> = ({
       minProfitValue: getPositiveNumber(minProfitValue),
       fixedSalePriceByColor: Object.keys(fixedSalePriceByColor).length > 0 ? fixedSalePriceByColor : undefined,
       pricePerSqmByColor: Object.keys(pricePerSqmByColor).length > 0 ? pricePerSqmByColor : undefined,
+      // Só guarda cores que ainda existem nas matérias-primas da composição.
+      unavailableColors: productColorOptions.filter((c) => unavailableColorKeys.has(normalizeText(c))),
       laborCost,
       productionHours: getPositiveNumber(productionHours),
       assemblyHours: getPositiveNumber(assemblyHours),
@@ -1347,7 +1386,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
             <p className="text-sm text-gray-500 mb-5">As alterações feitas ainda não foram salvas.</p>
             <div className="flex gap-3">
               <button onClick={() => setShowExitConfirm(false)} className="flex-1 px-4 py-2 border rounded-xl hover:bg-gray-50 text-sm font-medium">Continuar editando</button>
-              <button onClick={() => { setShowExitConfirm(false); handleSubmit(); }} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 text-sm font-medium">Salvar</button>
+              <button onClick={() => { setShowExitConfirm(false); submitProduct(); }} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 text-sm font-medium">Salvar</button>
               <button onClick={() => { setShowExitConfirm(false); onClose(); }} className="flex-1 px-4 py-2 bg-red-500 text-white rounded-xl hover:bg-red-600 text-sm font-medium">Sair</button>
             </div>
           </div>
@@ -1997,14 +2036,46 @@ const ProductModal: React.FC<ProductModalProps> = ({
                     Garante esse lucro mínimo por unidade no orçamento, mesmo que a % acima resulte em menos (útil em peças pequenas, onde a margem percentual gera pouco lucro em reais). Deixe em R$ 0,00 para não aplicar piso.
                   </p>
 
-                  {productColorOptions.length > 0 && (
+                  {productColorOptions.length > 1 && (
+                    <div className="mt-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3">
+                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Cores disponíveis neste produto</p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        Desmarque as cores que este produto não tem. Elas somem do preço final e do orçamento.
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {productColorOptions.map((color) => {
+                          const checked = !unavailableColorKeys.has(normalizeText(color));
+                          return (
+                            <label
+                              key={color}
+                              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold cursor-pointer select-none ${
+                                checked
+                                  ? "border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
+                                  : "border-slate-200 text-slate-400 line-through dark:border-slate-700"
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleColorAvailability(color)}
+                                className="w-3.5 h-3.5 shrink-0"
+                              />
+                              <span>{color}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {availableColorOptions.length > 0 && (
                     <div className="mt-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3">
                       <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Margem por cor (opcional)</p>
                       <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                         Deixe em branco para usar a margem geral ({getPositiveNumber(desiredProfitMargin)}%) nessa cor. Útil quando uma cor (ex.: inox, madeirado) tem matéria-prima mais cara e a margem padrão deixa o preço final muito alto.
                       </p>
                       <div className="mt-3 grid gap-3 sm:grid-cols-2 md:grid-cols-3">
-                        {productColorOptions.map((color) => (
+                        {availableColorOptions.map((color) => (
                           <label key={color} className="text-xs text-slate-600 dark:text-slate-300">
                             {color}
                             <input
@@ -2045,24 +2116,24 @@ const ProductModal: React.FC<ProductModalProps> = ({
                   const pricing = computeColorPricing(color);
                   const isEditingThis = editingPriceColor === color;
                   return (
-                    <div key={color || "__default__"} className="rounded-[24px] border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-5">
+                    <div key={color || "__default__"} className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3">
                       {color && (
-                        <p className="mb-3 text-sm font-bold uppercase tracking-wide text-primary-700">{color}</p>
+                        <p className="mb-2 text-xs font-bold uppercase tracking-wide text-primary-700">{color}</p>
                       )}
-                      <div className="space-y-3 text-sm text-slate-700 dark:text-slate-200">
-                        <div className="flex items-center justify-between rounded-2xl bg-white dark:bg-slate-900 px-4 py-3">
+                      <div className="space-y-1 text-[13px] text-slate-700 dark:text-slate-200">
+                        <div className="flex items-center justify-between rounded-lg bg-white dark:bg-slate-900 px-3 py-1.5">
                           <span>Custo materia-prima</span>
                           <strong>{formatCurrency(pricing.colorMaterialCost)}</strong>
                         </div>
-                        <div className="flex items-center justify-between rounded-2xl bg-white dark:bg-slate-900 px-4 py-3">
+                        <div className="flex items-center justify-between rounded-lg bg-white dark:bg-slate-900 px-3 py-1.5">
                           <span>Mao de obra ({laborHoursTotal.toFixed(2)} h)</span>
                           <strong>{formatCurrency(laborCost)}</strong>
                         </div>
-                        <div className="flex items-center justify-between rounded-2xl bg-white dark:bg-slate-900 px-4 py-3">
+                        <div className="flex items-center justify-between rounded-lg bg-white dark:bg-slate-900 px-3 py-1.5">
                           <span>Impostos ({taxRate.toFixed(2)}%)</span>
                           <strong>{formatCurrency(pricing.taxValue)}</strong>
                         </div>
-                        <div className="flex items-center justify-between rounded-2xl bg-white dark:bg-slate-900 px-4 py-3">
+                        <div className="flex items-center justify-between rounded-lg bg-white dark:bg-slate-900 px-3 py-1.5">
                           <span>Comissao vendedora ({commissionRate.toFixed(2)}%)</span>
                           <strong>{formatCurrency(pricing.commissionValue)}</strong>
                         </div>
@@ -2070,17 +2141,17 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           const rate = Number(expense.value || 0);
                           const val = pricing.effectiveSalePriceUnit * (rate / 100);
                           return (
-                            <div key={expense.id} className="flex items-center justify-between rounded-2xl bg-white dark:bg-slate-900 px-4 py-3">
+                            <div key={expense.id} className="flex items-center justify-between rounded-lg bg-white dark:bg-slate-900 px-3 py-1.5">
                               <span>{expense.name} ({rate.toFixed(2)}%)</span>
                               <strong>{formatCurrency(val)}</strong>
                             </div>
                           );
                         })}
-                        <div className="flex items-center justify-between rounded-2xl bg-white dark:bg-slate-900 px-4 py-3">
+                        <div className="flex items-center justify-between rounded-lg bg-white dark:bg-slate-900 px-3 py-1.5">
                           <span>Custos fixos ({fixedCostRate.toFixed(2)}%)</span>
                           <strong>{formatCurrency(pricing.fixedCostValue)}</strong>
                         </div>
-                        <div className="flex items-center justify-between rounded-2xl bg-blue-50 px-4 py-3 text-blue-900">
+                        <div className="flex items-center justify-between rounded-lg bg-blue-50 px-3 py-1.5 text-blue-900">
                           <span>
                             Preco sugerido por unidade
                             {pricing.pricePerSqm > 0 ? (
@@ -2096,13 +2167,13 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           </span>
                           <strong>{formatCurrency(pricing.salePriceUnit)}</strong>
                         </div>
-                        <div className="flex items-center justify-between rounded-2xl bg-white dark:bg-slate-900 px-4 py-3">
+                        <div className="flex items-center justify-between rounded-lg bg-white dark:bg-slate-900 px-3 py-1.5">
                           <span>Margem liquida</span>
                           <strong>
                             {formatCurrency(pricing.netMarginValue)} ({pricing.netMarginRate.toFixed(2)}%)
                           </strong>
                         </div>
-                        <div className="flex items-center justify-between rounded-2xl bg-white dark:bg-slate-900 px-4 py-3">
+                        <div className="flex items-center justify-between rounded-lg bg-white dark:bg-slate-900 px-3 py-1.5">
                           <span>Margem de contribuicao</span>
                           <strong>
                             {formatCurrency(pricing.contributionValue)} ({pricing.contributionRate.toFixed(2)}%)
@@ -2110,7 +2181,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                         </div>
                       </div>
 
-                      <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+                      <div className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                           <span className="text-xs font-semibold text-emerald-900">Preço/m² (opcional)</span>
                           <input
@@ -2140,7 +2211,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                         </p>
                       </div>
 
-                      <div className="mt-3 rounded-[24px] bg-slate-900 px-5 py-4 text-white">
+                      <div className="mt-2 rounded-2xl bg-slate-900 px-4 py-3 text-white">
                         <div className="flex items-center justify-between">
                           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
                             Preco final{color ? ` — ${color}` : ""}
@@ -2200,13 +2271,13 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           </div>
                         ) : (
                           <>
-                            <p className="mt-2 text-3xl font-semibold">
+                            <p className="mt-1 text-2xl font-semibold">
                               {formatCurrency(pricing.effectiveFinalTotal)}
                             </p>
-                            <p className="mt-1 text-sm text-slate-300">
+                            <p className="mt-0.5 text-xs text-slate-300">
                               Considerando {getPositiveInteger(quantity, 1)} unidade(s) vendida(s).
                             </p>
-                            <p className="mt-1 text-sm text-slate-300">
+                            <p className="mt-0.5 text-xs text-slate-300">
                               Margem líquida real: {formatCurrency(pricing.netMarginValue)} ({pricing.netMarginRate.toFixed(2)}%)
                             </p>
                             {pricing.pricePerSqm > 0 && (
@@ -2472,6 +2543,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                             { value: "height", label: "Altura do vao" },
                             { value: "width", label: "Largura do vao" },
                             { value: "area", label: "M² (Área)" },
+                            { value: "fixed_length", label: "Tamanho Fixo (mm)" },
                             { value: "accessory", label: "Acessório" },
                           ] as { value: ProductCompositionAxis; label: string }[]).map(
                             (option) => (
@@ -2480,8 +2552,28 @@ const ProductModal: React.FC<ProductModalProps> = ({
                                 type="button"
                                 onClick={() => {
                                   handleDraftChange("applyOn", option.value);
-                                  // ao selecionar Acessório ou M², força modo Normal e limpa campos de medida
-                                  if (option.value === "accessory" || option.value === "area") {
+                                  // ao selecionar Acessório, força modo Normal e limpa campos de medida
+                                  if (option.value === "accessory") {
+                                    handleDraftChange("quantityMode", "normal");
+                                    handleDraftChange("adjustmentType", "none");
+                                    handleDraftChange("adjustmentMm", 0);
+                                    handleDraftChange("divideBy", 1);
+                                    handleDraftChange("multiplyBy", 1);
+                                    const currentQty = draftItem?.quantity ?? 1;
+                                    setDraftQtyInput(String(currentQty).replace(".", ","));
+                                  }
+                                  // ao selecionar M², força modo Normal (área não usa "sobre medida")
+                                  // mas preserva desconto/acréscimo de largura e altura do vão
+                                  if (option.value === "area") {
+                                    handleDraftChange("quantityMode", "normal");
+                                    handleDraftChange("divideBy", 1);
+                                    handleDraftChange("multiplyBy", 1);
+                                    const currentQty = draftItem?.quantity ?? 1;
+                                    setDraftQtyInput(String(currentQty).replace(".", ","));
+                                  }
+                                  // ao selecionar Tamanho Fixo, força modo Normal e limpa modificadores
+                                  // que não se aplicam (o valor não depende do vão)
+                                  if (option.value === "fixed_length") {
                                     handleDraftChange("quantityMode", "normal");
                                     handleDraftChange("adjustmentType", "none");
                                     handleDraftChange("adjustmentMm", 0);
@@ -2497,7 +2589,9 @@ const ProductModal: React.FC<ProductModalProps> = ({
                                       ? "bg-amber-500 text-white"
                                       : option.value === "area"
                                         ? "bg-teal-600 text-white"
-                                        : "bg-primary-600 text-white"
+                                        : option.value === "fixed_length"
+                                          ? "bg-fuchsia-600 text-white"
+                                          : "bg-primary-600 text-white"
                                     : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 ring-1 ring-slate-300 dark:ring-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
                                 }`}
                               >
@@ -2514,6 +2608,11 @@ const ProductModal: React.FC<ProductModalProps> = ({
                         {(draftItem.applyOn as string) === "area" && (
                           <p className="mt-2 text-xs text-teal-600 font-medium">
                             Modo M²: largura × altura do vão ÷ 1.000.000 × quantidade. Ideal para vidros e mármores.
+                          </p>
+                        )}
+                        {(draftItem.applyOn as string) === "fixed_length" && (
+                          <p className="mt-2 text-xs text-fuchsia-600 font-medium">
+                            Modo Tamanho Fixo: informe o comprimento em mm direto, sem depender do vão. Ideal para kits prontos (ex.: perfil de acessório de motor de 1200mm).
                           </p>
                         )}
                       </div>
@@ -2550,62 +2649,127 @@ const ProductModal: React.FC<ProductModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Campos de medida — desativados no modo Acessório e M² */}
-                    <div className={`grid gap-4 md:grid-cols-3 transition-opacity ${draftItem.applyOn === "accessory" || (draftItem.applyOn as string) === "area" ? "opacity-40 pointer-events-none select-none" : ""}`}>
-                      <label className="text-sm text-slate-700 dark:text-slate-200">
-                        Tamanho em milimetros
-                        <input
-                          type="number"
-                          min={0}
-                          disabled={(draftItem.adjustmentType || "none") === "none" || draftItem.applyOn === "accessory"}
-                          value={draftItem.adjustmentMm || 0}
-                          onFocus={(e) => e.target.select()}
-                          onChange={(event) =>
-                            handleDraftChange(
-                              "adjustmentMm",
-                              Number(event.target.value) || 0
-                            )
-                          }
-                          className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3 disabled:bg-slate-100 dark:bg-slate-700"
-                        />
-                      </label>
+                    {/* Campos de medida — desativados no modo Acessório */}
+                    {(draftItem.applyOn as string) === "area" ? (
+                      <div className={`grid gap-4 md:grid-cols-2 transition-opacity ${(draftItem.adjustmentType || "none") === "none" ? "opacity-40 pointer-events-none select-none" : ""}`}>
+                        <label className="text-sm text-slate-700 dark:text-slate-200">
+                          Desconto/Acrescimo na Largura (mm)
+                          <input
+                            type="number"
+                            min={0}
+                            disabled={(draftItem.adjustmentType || "none") === "none"}
+                            value={draftItem.areaWidthAdjustmentMm || 0}
+                            onFocus={(e) => e.target.select()}
+                            onChange={(event) =>
+                              handleDraftChange(
+                                "areaWidthAdjustmentMm",
+                                Number(event.target.value) || 0
+                              )
+                            }
+                            className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3 disabled:bg-slate-100 dark:bg-slate-700"
+                          />
+                        </label>
 
-                      <label className="text-sm text-slate-700 dark:text-slate-200">
-                        Dividir tamanho por
-                        <input
-                          type="number"
-                          min={1}
-                          disabled={draftItem.applyOn === "accessory"}
-                          value={draftItem.divideBy || 1}
-                          onFocus={(e) => e.target.select()}
-                          onChange={(event) =>
-                            handleDraftChange(
-                              "divideBy",
-                              Number(event.target.value) || 1
-                            )
-                          }
-                          className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3 disabled:bg-slate-100 dark:bg-slate-700"
-                        />
-                      </label>
+                        <label className="text-sm text-slate-700 dark:text-slate-200">
+                          Desconto/Acrescimo na Altura (mm)
+                          <input
+                            type="number"
+                            min={0}
+                            disabled={(draftItem.adjustmentType || "none") === "none"}
+                            value={draftItem.areaHeightAdjustmentMm || 0}
+                            onFocus={(e) => e.target.select()}
+                            onChange={(event) =>
+                              handleDraftChange(
+                                "areaHeightAdjustmentMm",
+                                Number(event.target.value) || 0
+                              )
+                            }
+                            className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3 disabled:bg-slate-100 dark:bg-slate-700"
+                          />
+                        </label>
+                        <p className="md:col-span-2 text-xs text-slate-500 dark:text-slate-400">
+                          Valor descontado (ou somado) de cada dimensão do vão antes de calcular o M² — ex.: perfis que reduzem o vão útil.
+                        </p>
+                      </div>
+                    ) : (draftItem.applyOn as string) === "fixed_length" ? (
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <label className="text-sm text-slate-700 dark:text-slate-200">
+                          Tamanho fixo (mm)
+                          <input
+                            type="number"
+                            min={0}
+                            value={draftItem.fixedLengthMm || 0}
+                            onFocus={(e) => e.target.select()}
+                            onChange={(event) =>
+                              handleDraftChange(
+                                "fixedLengthMm",
+                                Number(event.target.value) || 0
+                              )
+                            }
+                            className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3 disabled:bg-slate-100 dark:bg-slate-700"
+                          />
+                        </label>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 self-end pb-3">
+                          Comprimento cobrado direto, ignorando as medidas do vão. O sistema converte pro preço cadastrado na matéria-prima (ex.: metro linear).
+                        </p>
+                      </div>
+                    ) : (
+                      <div className={`grid gap-4 md:grid-cols-3 transition-opacity ${draftItem.applyOn === "accessory" ? "opacity-40 pointer-events-none select-none" : ""}`}>
+                        <label className="text-sm text-slate-700 dark:text-slate-200">
+                          Tamanho em milimetros
+                          <input
+                            type="number"
+                            min={0}
+                            disabled={(draftItem.adjustmentType || "none") === "none" || draftItem.applyOn === "accessory"}
+                            value={draftItem.adjustmentMm || 0}
+                            onFocus={(e) => e.target.select()}
+                            onChange={(event) =>
+                              handleDraftChange(
+                                "adjustmentMm",
+                                Number(event.target.value) || 0
+                              )
+                            }
+                            className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3 disabled:bg-slate-100 dark:bg-slate-700"
+                          />
+                        </label>
 
-                      <label className="text-sm text-slate-700 dark:text-slate-200">
-                        Multiplicar por
-                        <input
-                          type="number"
-                          min={1}
-                          disabled={draftItem.applyOn === "accessory"}
-                          value={draftItem.multiplyBy || 1}
-                          onFocus={(e) => e.target.select()}
-                          onChange={(event) =>
-                            handleDraftChange(
-                              "multiplyBy",
-                              Number(event.target.value) || 1
-                            )
-                          }
-                          className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3 disabled:bg-slate-100 dark:bg-slate-700"
-                        />
-                      </label>
-                    </div>
+                        <label className="text-sm text-slate-700 dark:text-slate-200">
+                          Dividir tamanho por
+                          <input
+                            type="number"
+                            min={1}
+                            disabled={draftItem.applyOn === "accessory"}
+                            value={draftItem.divideBy || 1}
+                            onFocus={(e) => e.target.select()}
+                            onChange={(event) =>
+                              handleDraftChange(
+                                "divideBy",
+                                Number(event.target.value) || 1
+                              )
+                            }
+                            className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3 disabled:bg-slate-100 dark:bg-slate-700"
+                          />
+                        </label>
+
+                        <label className="text-sm text-slate-700 dark:text-slate-200">
+                          Multiplicar por
+                          <input
+                            type="number"
+                            min={1}
+                            disabled={draftItem.applyOn === "accessory"}
+                            value={draftItem.multiplyBy || 1}
+                            onFocus={(e) => e.target.select()}
+                            onChange={(event) =>
+                              handleDraftChange(
+                                "multiplyBy",
+                                Number(event.target.value) || 1
+                              )
+                            }
+                            className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-3 disabled:bg-slate-100 dark:bg-slate-700"
+                          />
+                        </label>
+                      </div>
+                    )}
 
                     <div className="rounded-[24px] border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-5">
                       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -2618,7 +2782,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                           </p>
                         </div>
 
-                        <div className={`flex gap-2 ${draftItem.applyOn === "accessory" || (draftItem.applyOn as string) === "area" ? "opacity-40 pointer-events-none" : ""}`}>
+                        <div className={`flex gap-2 ${draftItem.applyOn === "accessory" || (draftItem.applyOn as string) === "area" || (draftItem.applyOn as string) === "fixed_length" ? "opacity-40 pointer-events-none" : ""}`}>
                           {([
                             { value: "normal", label: "Normal" },
                             { value: "made_to_measure", label: "Sobre medida" },
@@ -2629,7 +2793,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                             <button
                               key={option.value}
                               type="button"
-                              disabled={draftItem.applyOn === "accessory" || (draftItem.applyOn as string) === "area"}
+                              disabled={draftItem.applyOn === "accessory" || (draftItem.applyOn as string) === "area" || (draftItem.applyOn as string) === "fixed_length"}
                               onClick={() => handleDraftChange("quantityMode", option.value)}
                               className={`rounded-full px-5 py-3 text-sm font-semibold transition ${
                                 (draftItem.quantityMode || "normal") === option.value

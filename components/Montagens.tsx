@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../services/supabase";
 import { Icon } from "./icons/Icon";
-import { InventoryItem, Montagem, MontagemInsumo, MontagemLaborLine, User, VariableExpense } from "../types";
+import { InventoryItem, Montagem, MontagemCategoria, MontagemInsumo, MontagemLaborLine, User, VariableExpense } from "../types";
 import { formatMoneyInputBR, parseMoneyInputBR, sanitizeMoneyInputBR } from "../utils/money";
 import { normalizeText } from "../utils/deliveryEntries";
 
@@ -85,10 +85,19 @@ const emptyLaborRow = (): LaborRowState => ({
   hourlyRateInput: formatMoneyInputBR(0),
 });
 
+const MONTAGEM_CATEGORIAS: MontagemCategoria[] = ["Marmore", "Vidro", "Aluminio", "ProdutosProntos"];
+const MONTAGEM_CATEGORIA_LABELS: Record<MontagemCategoria, string> = {
+  Marmore: "Mármore",
+  Vidro: "Vidro",
+  Aluminio: "Alumínio",
+  ProdutosProntos: "Produtos Prontos",
+};
+
 const normalizeRow = (row: any): Montagem => ({
   id: String(row.id),
   name: row.name || "",
   price: Number(row.price || 0),
+  categoria: MONTAGEM_CATEGORIAS.includes(row.categoria) ? row.categoria : undefined,
   insumos: Array.isArray(row.insumos) ? row.insumos : [],
   labor: Array.isArray(row.labor) ? row.labor : [],
 });
@@ -154,6 +163,7 @@ const Montagens: React.FC<Props> = ({
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const [categoria, setCategoria] = useState<MontagemCategoria | "">("");
   const [priceInput, setPriceInput] = useState(formatMoneyInputBR(0));
   const [price, setPrice] = useState(0);
   const [insumoRows, setInsumoRows] = useState<InsumoRowState[]>([]);
@@ -183,7 +193,7 @@ const Montagens: React.FC<Props> = ({
     (async () => {
       const [fixedRes, empRes, billingRes] = await Promise.all([
         supabase.from("fixed_expenses").select("value"),
-        supabase.from("employees").select("role, hour_value, department, total_monthly_cost"),
+        supabase.from("employees").select("role, hour_value, department, total_monthly_cost").eq("active", true),
         supabase
           .from("billing_settings")
           .select("monthly_revenue_target")
@@ -227,6 +237,7 @@ const Montagens: React.FC<Props> = ({
   const resetForm = () => {
     setEditingId(null);
     setName("");
+    setCategoria("");
     setPrice(0);
     setPriceInput(formatMoneyInputBR(0));
     setInsumoRows([]);
@@ -236,6 +247,7 @@ const Montagens: React.FC<Props> = ({
   const handleEdit = (m: Montagem) => {
     setEditingId(m.id);
     setName(m.name);
+    setCategoria(m.categoria || "");
     setPrice(m.price);
     setPriceInput(formatMoneyInputBR(m.price));
     setInsumoRows(
@@ -387,6 +399,7 @@ const Montagens: React.FC<Props> = ({
 
     const payload = {
       name: name.trim(),
+      categoria: categoria || null,
       price,
       insumos: insumosPayload,
       labor: laborPayload,
@@ -455,6 +468,25 @@ const Montagens: React.FC<Props> = ({
             placeholder="Ex: Montagem Pia Padrão"
             className="mt-1 block w-full max-w-md px-3 py-2 bg-white dark:bg-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded-md shadow-sm"
           />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Categoria</label>
+          <select
+            value={categoria}
+            onChange={(e) => setCategoria(e.target.value as MontagemCategoria | "")}
+            className="mt-1 block w-full max-w-md px-3 py-2 bg-white dark:bg-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded-md shadow-sm"
+          >
+            <option value="">Selecione a categoria</option>
+            {MONTAGEM_CATEGORIAS.map((c) => (
+              <option key={c} value={c}>
+                {MONTAGEM_CATEGORIA_LABELS[c]}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Define em qual painel (Mármore, Vidro ou Alumínio) esta montagem vai aparecer pra ser escolhida.
+          </p>
         </div>
 
         {/* INSUMOS (matéria-prima) */}
@@ -725,7 +757,14 @@ const Montagens: React.FC<Props> = ({
             {montagens.map((m) => (
               <div key={m.id} className="flex items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
-                  <p className="font-medium text-gray-900 dark:text-white truncate">{m.name}</p>
+                  <p className="font-medium text-gray-900 dark:text-white truncate">
+                    {m.name}
+                    {m.categoria && (
+                      <span className="ml-2 inline-block px-1.5 py-0.5 text-[10px] font-semibold uppercase rounded bg-primary-50 text-primary-700 dark:bg-primary-950/50 dark:text-primary-300 align-middle">
+                        {MONTAGEM_CATEGORIA_LABELS[m.categoria]}
+                      </span>
+                    )}
+                  </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     {money(m.price)}
                     {(m.insumos || []).length > 0 && ` · ${m.insumos!.length} insumo${m.insumos!.length === 1 ? "" : "s"}`}

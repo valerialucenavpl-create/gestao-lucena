@@ -2,11 +2,14 @@ import { supabase } from "./supabase";
 
 export type SaleRow = {
   id: number;
-  client_id: number | null;
   quote_id: number | null;
   total: number | null;
-  date: string | null;        // timestamptz
-  created_at: string | null;  // timestamptz
+  date: string | null; // timestamptz
+  client_id?: number | null;
+  seller_id?: number | null;
+  // Status próprio da venda — hoje só usado pra "Cancelado" (cancelar não
+  // mexe no orçamento de origem, só marca a venda em si).
+  status?: string | null;
 };
 
 // -------------------------------------------------------
@@ -31,19 +34,19 @@ export async function getSales() {
 // CREATE SALE
 // -------------------------------------------------------
 export async function createSale(input: {
-  client_id?: number | null;
-  quote_id?: number | null;
+  quote_id: number;
   total?: number | null;
   date?: string | null; // ex: new Date().toISOString()
 }) {
+  // Colunas reais da tabela "sales" (conferido direto no banco):
+  // id, date, seller_id, total, deleted_at, deleted_by, client_id, quote_id.
+  // Sem created_at — a tabela não tem essa coluna.
   const { data, error } = await supabase
     .from("sales")
     .insert({
-      client_id: input.client_id ?? null,
       quote_id: input.quote_id ?? null,
       total: input.total ?? null,
       date: input.date ?? new Date().toISOString(),
-      created_at: new Date().toISOString(),
     })
     .select()
     .single();

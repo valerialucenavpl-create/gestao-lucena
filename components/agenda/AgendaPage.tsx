@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Agendamento, AgendaStatus, User } from "../../types";
 import { supabase } from "../../services/supabase";
+import { fetchAllClients } from "../../services/clientsServices";
 import { getAgendamentos, updateAgendamento, deleteAgendamento } from "../../services/agendaServices";
 import {
   AGENDA_SEGMENTS,
@@ -37,7 +38,7 @@ const AgendaPage: React.FC<AgendaPageProps> = () => {
       setAgendamentos(agendaRes.ok ? agendaRes.data : []);
       setSellers(Array.isArray(sellersRes.data) ? (sellersRes.data as AgendaSellerOption[]) : []);
 
-      const clientsRes = await supabase.from("clients").select("id,name,phone").is("deleted_at", null);
+      const clientsRes = await fetchAllClients("id,name,phone");
       setClients(Array.isArray(clientsRes.data) ? (clientsRes.data as AgendaClientOption[]) : []);
 
       setLoading(false);

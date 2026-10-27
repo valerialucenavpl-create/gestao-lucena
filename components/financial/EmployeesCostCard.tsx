@@ -22,7 +22,8 @@ const EmployeesCostCard: React.FC = () => {
 
     const { data, error } = await supabase
       .from("employees")
-      .select("base_salary, net_salary");
+      .select("base_salary, net_salary")
+      .eq("active", true);
 
     if (error) {
       console.error("Erro ao carregar custos dos funcionários:", error);

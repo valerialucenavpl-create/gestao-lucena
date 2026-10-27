@@ -1,6 +1,7 @@
 import React from "react";
 import { useSingleRecord } from "../useSingleRecord";
 import RecordsEditor from "../RecordsEditor";
+import PagamentosContasSection from "./PagamentosContasSection";
 
 type Pagamento = {
   dia_pagamento: number | "";
@@ -121,6 +122,16 @@ const PagamentoTab: React.FC<{ funcionarioId: number; baseSalary: number }> = ({
             </button>
           </>
         )}
+      </div>
+
+      <div className="border-t pt-6">
+        <h4 className="text-sm font-semibold text-gray-700 mb-3">
+          Pagamentos
+          <span className="block text-xs font-normal text-gray-400 mt-0.5">
+            Baixas dadas em Contas a Pagar nas contas vinculadas a este funcionário.
+          </span>
+        </h4>
+        <PagamentosContasSection funcionarioId={funcionarioId} />
       </div>
 
       <div className="border-t pt-6">

@@ -7,17 +7,22 @@ import VariableExpensesCards from "./VariableExpensesCards";
 import MarkupFaturamentoTab from "./MarkupFaturamentoTab"; // ✅ NOVO
 import PartnersTab from "./PartnersTab";
 import FreightConfigTab from "./FreightConfigTab";
+import EmployeesList from "../employees/EmployeesList";
 
-type TabKey = "summary" | "fixed" | "variable" | "markup" | "partners" | "freight_config";
+type TabKey = "summary" | "employees" | "fixed" | "variable" | "markup" | "partners" | "freight_config";
 
 interface FinancialProps {
   onVariableExpensesChange?: (expenses: { id: number; name: string; type: string; value: number }[]) => void;
+  // Usado pela aba Funcionários (abrir detalhes / editar / novo funcionário).
+  setActiveView?: (view: any) => void;
+  initialTab?: TabKey;
 }
 
-const Financial: React.FC<FinancialProps> = ({ onVariableExpensesChange }) => {
+const Financial: React.FC<FinancialProps> = ({ onVariableExpensesChange, setActiveView, initialTab }) => {
   const tabs = useMemo(
     () => [
       { key: "summary" as const, label: "Resumo" },
+      { key: "employees" as const, label: "Funcionários" },
       { key: "fixed" as const, label: "Despesas Fixas" },
       { key: "variable" as const, label: "Despesas Variáveis" },
       { key: "partners" as const, label: "Sócios (Pró-labore)" },
@@ -27,7 +32,7 @@ const Financial: React.FC<FinancialProps> = ({ onVariableExpensesChange }) => {
     []
   );
 
-  const [activeTab, setActiveTab] = useState<TabKey>("summary");
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab ?? "summary");
 
   return (
     <div className="space-y-6">
@@ -51,6 +56,7 @@ const Financial: React.FC<FinancialProps> = ({ onVariableExpensesChange }) => {
 
       {/* CONTEÚDO */}
       {activeTab === "summary" && <SummaryTab />}
+      {activeTab === "employees" && <EmployeesList setActiveView={setActiveView ?? (() => {})} />}
       {activeTab === "fixed" && <FixedExpensesCards />}
       {activeTab === "variable" && <VariableExpensesCards onExpensesChange={onVariableExpensesChange as any} />}
       {activeTab === "partners" && <PartnersTab />}

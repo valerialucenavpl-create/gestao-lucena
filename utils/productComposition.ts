@@ -254,9 +254,33 @@ const buildAreaBreakdown = (
   // Modo M² explícito: largura × altura do vão ÷ 1.000.000 × quantidade
   if ((item.applyOn as string) === "area") {
     const qty = clampPositive(toNumber(item.quantity, 1), 1) || 1;
-    const areaM2 = round((clampPositive(widthMm) * clampPositive(heightMm)) / 1_000_000);
+    const adjustmentType = item.adjustmentType || "none";
+    const widthAdjustmentMm = clampPositive(toNumber(item.areaWidthAdjustmentMm));
+    const heightAdjustmentMm = clampPositive(toNumber(item.areaHeightAdjustmentMm));
+
+    let adjustedWidthMm = clampPositive(widthMm);
+    let adjustedHeightMm = clampPositive(heightMm);
+    if (adjustmentType === "add") {
+      adjustedWidthMm += widthAdjustmentMm;
+      adjustedHeightMm += heightAdjustmentMm;
+    } else if (adjustmentType === "subtract") {
+      adjustedWidthMm = Math.max(0, adjustedWidthMm - widthAdjustmentMm);
+      adjustedHeightMm = Math.max(0, adjustedHeightMm - heightAdjustmentMm);
+    }
+
+    const areaM2 = round((adjustedWidthMm * adjustedHeightMm) / 1_000_000);
     const requiredQuantity = round(areaM2 * qty);
     const qtyLabel = Number.isInteger(qty) ? String(qty) : qty.toFixed(3).replace(/\.?0+$/, "").replace(".", ",");
+
+    let formulaLabel = qty === 1 ? "M² do vão" : `M² do vão | Qtd ${qtyLabel}`;
+    if (adjustmentType !== "none" && (widthAdjustmentMm > 0 || heightAdjustmentMm > 0)) {
+      const sign = adjustmentType === "add" ? "+" : "-";
+      const parts: string[] = [];
+      if (widthAdjustmentMm > 0) parts.push(`largura ${sign} ${widthAdjustmentMm}mm`);
+      if (heightAdjustmentMm > 0) parts.push(`altura ${sign} ${heightAdjustmentMm}mm`);
+      formulaLabel = `M² do vão (${parts.join(", ")})${qty === 1 ? "" : ` | Qtd ${qtyLabel}`}`;
+    }
+
     return {
       calculationUnit: material.unit,
       calculationUnitCost: round(unitCost),
@@ -266,7 +290,7 @@ const buildAreaBreakdown = (
       totalCost: round(requiredQuantity * unitCost),
       pieceCount: qty,
       pieceSizeMm: 0,
-      formulaLabel: qty === 1 ? "M² do vão" : `M² do vão | Qtd ${qtyLabel}`,
+      formulaLabel,
     } satisfies CompositionLineBreakdown;
   }
 
@@ -482,6 +506,31 @@ export const getCompositionLineBreakdown = (
   // Modo M²: largura × altura ÷ 1.000.000 × quantidade
   if ((item.applyOn as string) === "area") {
     return buildAreaBreakdown(material, safeUnitCost, item, widthMm, heightMm);
+  }
+
+  // Modo Tamanho Fixo: comprimento em mm digitado direto, sem depender do
+  // vão — ex.: kit pronto de perfil de alumínio vendido num tamanho fixo.
+  if ((item.applyOn as string) === "fixed_length") {
+    const pieceSizeMm = clampPositive(toNumber(item.fixedLengthMm));
+    const pieceCount = clampPositive(toNumber(item.quantity, 1), 1) || 1;
+    const requiredQuantity = round(
+      convertLengthMmToMaterialUnit(pieceSizeMm, material.unit) * pieceCount
+    );
+    const qtyLabel = Number.isInteger(pieceCount) ? String(pieceCount) : String(pieceCount).replace(".", ",");
+    return {
+      calculationUnit: material.unit,
+      calculationUnitCost: round(safeUnitCost),
+      baseUnit: material.unit,
+      baseUnitCost: round(safeUnitCost),
+      requiredQuantity,
+      totalCost: round(requiredQuantity * safeUnitCost),
+      pieceCount,
+      pieceSizeMm: round(pieceSizeMm),
+      formulaLabel:
+        pieceCount === 1
+          ? `Tamanho fixo ${pieceSizeMm}mm`
+          : `Tamanho fixo ${pieceSizeMm}mm | Qtd ${qtyLabel}`,
+    } satisfies CompositionLineBreakdown;
   }
 
   // Modo Acessório: usa apenas quantidade fixa, sem depender de medidas

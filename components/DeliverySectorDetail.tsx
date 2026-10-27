@@ -1,7 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { Icon } from "./icons/Icon";
-import { View, QuoteInternalStatus } from "../types";
-import { supabase } from "../services/supabase";
+import { View, QuoteInternalStatus, Quote, Client, Product } from "../types";
 import {
   DeliverySector,
   SECTOR_LABELS,
@@ -14,6 +13,13 @@ import { formatMoneyInputBR } from "../utils/money";
 interface DeliverySectorDetailProps {
   sector: DeliverySector;
   setActiveView: (view: View) => void;
+  onOpenQuote?: (quoteId: string) => void;
+  // Usa os dados já carregados no App (mesma fonte da Sales/Quotes) em vez
+  // de buscar tudo de novo no Supabase a cada clique num setor — a busca
+  // própria daqui era o motivo da demora pra abrir a página.
+  quotes: Quote[];
+  clients: Client[];
+  products: Product[];
 }
 
 const STATUS_STYLE: Record<QuoteInternalStatus, string> = {
@@ -24,31 +30,14 @@ const STATUS_STYLE: Record<QuoteInternalStatus, string> = {
   Entregue: "bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300",
 };
 
-const DeliverySectorDetail: React.FC<DeliverySectorDetailProps> = ({ sector, setActiveView }) => {
-  const [quotes, setQuotes] = useState<any[]>([]);
-  const [clients, setClients] = useState<any[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const loadAll = async () => {
-      setLoading(true);
-
-      const [quotesRes, clientsRes, productsRes] = await Promise.all([
-        supabase.from("quotes").select("*").is("deleted_at", null).order("date", { ascending: false }),
-        supabase.from("clients").select("*").is("deleted_at", null),
-        supabase.from("products").select("*"),
-      ]);
-
-      setQuotes(Array.isArray(quotesRes.data) ? quotesRes.data : []);
-      setClients(Array.isArray(clientsRes.data) ? clientsRes.data : []);
-      setProducts(Array.isArray(productsRes.data) ? productsRes.data : []);
-      setLoading(false);
-    };
-
-    loadAll();
-  }, []);
-
+const DeliverySectorDetail: React.FC<DeliverySectorDetailProps> = ({
+  sector,
+  setActiveView,
+  onOpenQuote,
+  quotes,
+  clients,
+  products,
+}) => {
   const entries = useMemo(() => {
     const buckets = buildDeliveryEntriesBySector(quotes, clients, products);
     return (buckets[sector] || []).filter((entry) => entry.isPending);
@@ -76,12 +65,7 @@ const DeliverySectorDetail: React.FC<DeliverySectorDetailProps> = ({ sector, set
         </button>
       </div>
 
-      {loading ? (
-        <div className="flex flex-col items-center justify-center h-64 gap-4">
-          <div className="w-12 h-12 rounded-full border-4 border-primary-200 border-t-primary-600 animate-spin" />
-          <p className="text-sm text-gray-400">Carregando entregas...</p>
-        </div>
-      ) : entries.length === 0 ? (
+      {entries.length === 0 ? (
         <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl shadow-md p-10 flex flex-col items-center justify-center text-center gap-2">
           <Icon className="w-10 h-10 text-gray-300 dark:text-gray-600">
             <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -95,24 +79,51 @@ const DeliverySectorDetail: React.FC<DeliverySectorDetailProps> = ({ sector, set
           </p>
         </div>
       ) : (
-        <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl shadow-md divide-y divide-gray-100 dark:divide-gray-700">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {entries.map((entry) => (
-            <div key={entry.id} className="p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-              <div className="flex-1 min-w-0">
+            <div
+              key={entry.id}
+              role={onOpenQuote && entry.quoteId ? "button" : undefined}
+              tabIndex={onOpenQuote && entry.quoteId ? 0 : undefined}
+              onClick={() => {
+                if (onOpenQuote && entry.quoteId) onOpenQuote(entry.quoteId);
+              }}
+              onKeyDown={(e) => {
+                if (!onOpenQuote || !entry.quoteId) return;
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onOpenQuote(entry.quoteId);
+                }
+              }}
+              className={`flex flex-col gap-3 rounded-xl border border-gray-100 bg-white p-4 shadow-md dark:border-gray-700 dark:bg-gray-800 ${
+                onOpenQuote && entry.quoteId
+                  ? "cursor-pointer hover:border-primary-300 hover:shadow-lg transition-all dark:hover:border-primary-600"
+                  : ""
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
                 <p className="text-sm font-semibold text-gray-800 dark:text-white truncate">
                   {entry.clientName}
                 </p>
-                {entry.clientPhone && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400">{entry.clientPhone}</p>
-                )}
-                {entry.productLabel && (
-                  <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">{entry.productLabel}</p>
-                )}
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{entry.clientAddress}</p>
+                <span
+                  className={`shrink-0 px-2 py-1 rounded-full text-[11px] font-semibold whitespace-nowrap ${
+                    STATUS_STYLE[(entry.internalStatus as QuoteInternalStatus) || "Pedido"] || STATUS_STYLE.Pedido
+                  }`}
+                >
+                  {entry.internalStatus || "Pedido"}
+                </span>
               </div>
 
-              <div className="flex items-center gap-4 md:gap-6 shrink-0">
-                <div className="text-right">
+              {entry.clientPhone && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">{entry.clientPhone}</p>
+              )}
+              {entry.productLabel && (
+                <p className="text-xs text-gray-600 dark:text-gray-300">{entry.productLabel}</p>
+              )}
+              <p className="text-xs text-gray-400 dark:text-gray-500">{entry.clientAddress}</p>
+
+              <div className="mt-auto flex items-center justify-between gap-3 border-t border-gray-100 pt-3 dark:border-gray-700">
+                <div>
                   <p className="text-[11px] uppercase text-gray-400 dark:text-gray-500">Previsão</p>
                   <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
                     {formatDateShort(entry.deliveryDate)}
@@ -125,14 +136,6 @@ const DeliverySectorDetail: React.FC<DeliverySectorDetailProps> = ({ sector, set
                     R$ {formatMoneyInputBR(entry.totalPrice)}
                   </p>
                 </div>
-
-                <span
-                  className={`px-2 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${
-                    STATUS_STYLE[(entry.internalStatus as QuoteInternalStatus) || "Pedido"] || STATUS_STYLE.Pedido
-                  }`}
-                >
-                  {entry.internalStatus || "Pedido"}
-                </span>
               </div>
             </div>
           ))}

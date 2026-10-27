@@ -212,6 +212,7 @@ const Products: React.FC<ProductsProps> = ({
         "fixed_sale_price_by_color",
         "pricePerSqmByColor",
         "price_per_sqm_by_color",
+        "unavailableColors",
         "referenceWidthMm",
         "reference_width_mm",
         "referenceHeightMm",
@@ -278,6 +279,9 @@ const Products: React.FC<ProductsProps> = ({
         : null,
       pricePerSqmByColor: productData.pricePerSqmByColor && Object.keys(productData.pricePerSqmByColor).length > 0
         ? productData.pricePerSqmByColor
+        : null,
+      unavailableColors: productData.unavailableColors && productData.unavailableColors.length > 0
+        ? productData.unavailableColors
         : null,
       laborCost: Number(productData.laborCost || 0),
       productionHours: Number(productData.productionHours || 0),

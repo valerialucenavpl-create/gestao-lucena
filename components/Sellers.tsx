@@ -214,23 +214,64 @@ const Sellers: React.FC<SellersProps> = ({ currentUser }) => {
     const loadCommissions = async () => {
       setCommissionLoading(true);
       const { start, end } = monthRange(commissionMonth);
+      // Compara só o dia (UTC, como a data é gravada) com o intervalo do mês.
+      const inMonth = (value: string | null | undefined) => {
+        const day = String(value || "").slice(0, 10);
+        return Boolean(day) && day >= start && day < end;
+      };
 
-      const { data, error } = await supabase
-        .from("quotes")
-        .select("id,quote_number,customer_name,salesperson,total_price,date")
-        .eq("status", "Aprovado")
-        .is("deleted_at", null)
-        .gte("date", start)
-        .lt("date", end);
+      // Mesma regra do Dashboard (Sua Meta) e da tela de Vendas: conta pela
+      // DATA DA VENDA — vendas geradas (tabela sales, sem as canceladas) +
+      // orçamentos aprovados que ainda não viraram linha em sales (pela data
+      // de aprovação). Antes contava orçamentos aprovados pela data de
+      // CRIAÇÃO do orçamento, então um orçamento de setembro fechado em
+      // outubro caía no mês errado e os números não batiam com a meta.
+      const [salesRes, quotesRes] = await Promise.all([
+        supabase.from("sales").select("id,quote_id,total,date,status").is("deleted_at", null),
+        supabase
+          .from("quotes")
+          .select("id,quote_number,customer_name,salesperson,total_price,date,approved_at,status")
+          .is("deleted_at", null),
+      ]);
 
-      if (error) {
-        console.error("Erro ao carregar vendas para comissão:", error);
+      if (salesRes.error || quotesRes.error) {
+        console.error("Erro ao carregar vendas para comissão:", salesRes.error || quotesRes.error);
         setCommissionQuotes([]);
         setCommissionLoading(false);
         return;
       }
 
-      setCommissionQuotes((data as ApprovedQuoteRow[]) ?? []);
+      const allSales = (salesRes.data ?? []) as any[];
+      const allQuotes = (quotesRes.data ?? []) as any[];
+      const quoteById = new Map(allQuotes.map((q) => [String(q.id), q]));
+      const quotesWithSale = new Set(allSales.map((s) => String(s.quote_id)));
+
+      const fromSales: ApprovedQuoteRow[] = allSales
+        .filter((s) => s.status !== "Cancelado" && inMonth(s.date))
+        .map((s) => {
+          const q = quoteById.get(String(s.quote_id));
+          return {
+            id: q?.id ?? `sale-${s.id}`,
+            quote_number: q?.quote_number ?? null,
+            customer_name: q?.customer_name ?? null,
+            salesperson: q?.salesperson ?? null,
+            total_price: Number(s.total ?? q?.total_price ?? 0),
+            date: s.date,
+          };
+        });
+
+      const fromApprovedQuotes: ApprovedQuoteRow[] = allQuotes
+        .filter((q) => q.status === "Aprovado" && !quotesWithSale.has(String(q.id)) && inMonth(q.approved_at || q.date))
+        .map((q) => ({
+          id: q.id,
+          quote_number: q.quote_number,
+          customer_name: q.customer_name,
+          salesperson: q.salesperson,
+          total_price: q.total_price,
+          date: q.approved_at || q.date,
+        }));
+
+      setCommissionQuotes([...fromSales, ...fromApprovedQuotes]);
       setCommissionLoading(false);
     };
 

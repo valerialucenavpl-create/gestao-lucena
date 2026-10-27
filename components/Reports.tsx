@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { CashFlowEntry, Product, Quote, Sale } from "../types";
 import { getCashFlow } from "../services/cashFlowServices";
+import Dre from "./Dre";
+import Dfc from "./Dfc";
+import SalesReport from "./SalesReport";
+import ProductionReport from "./ProductionReport";
 
 // ─── Helpers ────────────────────────────────────────────────
 const money = (v: number) =>
@@ -72,13 +76,21 @@ const inferSector = (item: any, byId: Record<string, any>): Sector => {
   return "MÁRMORE";
 };
 
-type Tab = "overview" | "revenue" | "expenses" | "profit" | "cashflow";
+type Tab = "overview" | "revenue" | "expenses" | "profit" | "cashflow" | "dre" | "dfc" | "vendas" | "producao" | "balanco";
+
+// Abas antigas (Visão Geral/Faturamento/Despesas/Lucro/Caixa) saem de
+// circulação com a DRE Gerencial, mas o código fica no projeto — partes
+// serão reaproveitadas no futuro relatório de Vendas (Top 5 clientes,
+// conversão de orçamentos, ticket médio). Muda pra true só se precisar
+// voltar a mostrar essas abas temporariamente.
+const RELATORIOS_LEGADO = false;
 
 interface Props {
   sales?: Sale[] | null;
   quotes?: Quote[] | null;
   cashFlow?: CashFlowEntry[] | null;
   products?: Product[] | null;
+  onUpdateQuote?: (u: any) => Promise<{ ok: boolean; error?: any }>;
 }
 
 // ─── Sub-components ─────────────────────────────────────────
@@ -105,16 +117,21 @@ const KpiCard = ({ label, value, sub, color, icon }: {
 );
 
 // ─── Main component ──────────────────────────────────────────
-const Reports: React.FC<Props> = ({ sales, quotes, cashFlow, products }) => {
+const Reports: React.FC<Props> = ({ sales, quotes, cashFlow, products, onUpdateQuote }) => {
   const now = new Date();
   const [fromDate, setFromDate] = useState(toISO(new Date(now.getFullYear(), now.getMonth(), 1)));
   const [toDate, setToDate] = useState(toISO(now));
-  const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [activeTab, setActiveTab] = useState<Tab>("dre");
   const [localCF, setLocalCF] = useState<CashFlowEntry[]>([]);
+
+  const refreshCashFlow = async () => {
+    const r = await getCashFlow();
+    if (r.ok) setLocalCF(r.data ?? []);
+  };
 
   // Carrega cashFlow direto do Supabase para garantir dados atualizados
   useEffect(() => {
-    getCashFlow().then((r) => { if (r.ok) setLocalCF(r.data ?? []); });
+    refreshCashFlow();
   }, []);
 
   const ss = Array.isArray(sales) ? sales : [];
@@ -312,12 +329,23 @@ const Reports: React.FC<Props> = ({ sales, quotes, cashFlow, products }) => {
     return list;
   }, [profit, revenue, margin, expenseGrowth, revenueGrowth, convRate, filtQuotes, approvedQuotes, expenses]);
 
+  // Ordem final prevista: DRE | DFC | Vendas | Balanço — Balanço entra
+  // quando for construído.
   const TABS: { key: Tab; label: string; icon: string }[] = [
-    { key: "overview", label: "Visão Geral", icon: "📊" },
-    { key: "revenue", label: "Faturamento", icon: "💰" },
-    { key: "expenses", label: "Despesas", icon: "💸" },
-    { key: "profit", label: "Lucro", icon: "📈" },
-    { key: "cashflow", label: "Caixa", icon: "🏦" },
+    { key: "dre", label: "DRE", icon: "🧾" },
+    { key: "dfc", label: "DFC", icon: "💧" },
+    { key: "vendas", label: "Vendas", icon: "🛒" },
+    { key: "producao", label: "Produção", icon: "🏭" },
+    // { key: "balanco", label: "Balanço", icon: "⚖️" },
+    ...(RELATORIOS_LEGADO
+      ? ([
+          { key: "overview", label: "Visão Geral", icon: "📊" },
+          { key: "revenue", label: "Faturamento", icon: "💰" },
+          { key: "expenses", label: "Despesas", icon: "💸" },
+          { key: "profit", label: "Lucro", icon: "📈" },
+          { key: "cashflow", label: "Caixa", icon: "🏦" },
+        ] as { key: Tab; label: string; icon: string }[])
+      : []),
   ];
 
   const goThisMonth = () => {
@@ -378,9 +406,37 @@ const Reports: React.FC<Props> = ({ sales, quotes, cashFlow, products }) => {
       </div>
 
       {/* ══════════════════════════════════════════════ */}
+      {/* ABA: DRE                                      */}
+      {/* ══════════════════════════════════════════════ */}
+      {activeTab === "dre" && (
+        <Dre
+          quotes={qs}
+          sales={ss}
+          cashFlow={cf}
+          products={ps}
+          onUpdateQuote={onUpdateQuote}
+          onCashFlowChanged={refreshCashFlow}
+          fromDate={fromDate}
+          toDate={toDate}
+        />
+      )}
+
+      {activeTab === "dfc" && (
+        <Dfc quotes={qs} sales={ss} cashFlow={cf} products={ps} fromDate={fromDate} toDate={toDate} />
+      )}
+
+      {activeTab === "vendas" && (
+        <SalesReport quotes={qs} sales={ss} products={ps} fromDate={fromDate} toDate={toDate} />
+      )}
+
+      {activeTab === "producao" && (
+        <ProductionReport quotes={qs} sales={ss} cashFlow={cf} products={ps} fromDate={fromDate} toDate={toDate} />
+      )}
+
+      {/* ══════════════════════════════════════════════ */}
       {/* ABA: VISÃO GERAL                              */}
       {/* ══════════════════════════════════════════════ */}
-      {activeTab === "overview" && (
+      {RELATORIOS_LEGADO && activeTab === "overview" && (
         <div className="space-y-4">
 
           {/* Alertas */}
@@ -483,7 +539,7 @@ const Reports: React.FC<Props> = ({ sales, quotes, cashFlow, products }) => {
       {/* ══════════════════════════════════════════════ */}
       {/* ABA: FATURAMENTO                              */}
       {/* ══════════════════════════════════════════════ */}
-      {activeTab === "revenue" && (
+      {RELATORIOS_LEGADO && activeTab === "revenue" && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <KpiCard label="Total Faturado" value={money(revenue)}
@@ -567,7 +623,7 @@ const Reports: React.FC<Props> = ({ sales, quotes, cashFlow, products }) => {
       {/* ══════════════════════════════════════════════ */}
       {/* ABA: DESPESAS                                 */}
       {/* ══════════════════════════════════════════════ */}
-      {activeTab === "expenses" && (
+      {RELATORIOS_LEGADO && activeTab === "expenses" && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <KpiCard label="Total Despesas" value={money(expenses)} color="#dc2626" icon="💸" />
@@ -632,7 +688,7 @@ const Reports: React.FC<Props> = ({ sales, quotes, cashFlow, products }) => {
       {/* ══════════════════════════════════════════════ */}
       {/* ABA: LUCRO                                    */}
       {/* ══════════════════════════════════════════════ */}
-      {activeTab === "profit" && (
+      {RELATORIOS_LEGADO && activeTab === "profit" && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <KpiCard label="Lucro Líquido" value={money(profit)}
@@ -736,7 +792,7 @@ const Reports: React.FC<Props> = ({ sales, quotes, cashFlow, products }) => {
       {/* ══════════════════════════════════════════════ */}
       {/* ABA: CAIXA                                    */}
       {/* ══════════════════════════════════════════════ */}
-      {activeTab === "cashflow" && (
+      {RELATORIOS_LEGADO && activeTab === "cashflow" && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <KpiCard label="Entradas no Período" value={money(revenue)} color="#16a34a" icon="⬆️" />

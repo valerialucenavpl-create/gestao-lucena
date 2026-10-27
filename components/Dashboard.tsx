@@ -3,6 +3,7 @@ import { Icon } from "./icons/Icon";
 import { View, User, Product } from "../types";
 import motivationalQuotes from "../data/motivationalQuotes";
 import { supabase } from "../services/supabase";
+import { fetchAllClients } from "../services/clientsServices";
 import {
   DeliverySector,
   SECTOR_LABELS,
@@ -11,6 +12,10 @@ import {
   parseDateFlexible,
 } from "../utils/deliveryEntries";
 import AgendaCard from "./agenda/AgendaCard";
+import AgendaReminderCard from "./agenda/AgendaReminderCard";
+import MetaCelebration from "./common/MetaCelebration";
+import { getReceivables } from "../services/receivablesServices";
+import { getCashFlow } from "../services/cashFlowServices";
 
 type SellerRow = {
   id: string | number;
@@ -126,6 +131,24 @@ function money(v: number) {
   return v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Data "pura" (YYYY-MM-DD, sem hora) — não usa fuso, só reorganiza os
+// componentes, então nunca bate um dia errado.
+function formatContactDate(value: unknown): string {
+  const str = String(value || "").slice(0, 10);
+  const [y, m, d] = str.split("-");
+  if (!y || !m || !d) return "—";
+  const todayISO = new Date().toISOString().slice(0, 10);
+  if (str === todayISO) return "Hoje";
+  if (str < todayISO) return `${d}/${m} · atrasado`;
+  return `${d}/${m}`;
+}
+
+function isContactDatePastOrToday(value: unknown): boolean {
+  const str = String(value || "").slice(0, 10);
+  const todayISO = new Date().toISOString().slice(0, 10);
+  return Boolean(str) && str <= todayISO;
+}
+
 function normalizeSale(row: SaleRowAny) {
   const saleDate = row?.saleDate ?? row?.sale_date ?? row?.date ?? null;
   return {
@@ -153,10 +176,74 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
   const [clients, setClients] = useState<ClientRowAny[]>([]);
   const [employees, setEmployees] = useState<EmployeeRowAny[]>([]);
   const [payables, setPayables] = useState<any[]>([]);
+  const [totalOverdueReceivables, setTotalOverdueReceivables] = useState(0);
+  const [customerCredits, setCustomerCredits] = useState<{ id: string; number: string; customer: string; credit: number }[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Total vencido de Contas a Receber — mesma lógica de Receivables.tsx
+  // (status calculado a partir do que já entrou no Caixa, não do campo salvo;
+  // títulos de vendas ainda "Aguardando" entrega não contam como vencidos).
+  useEffect(() => {
+    const loadOverdue = async () => {
+      const [recRes, cfRes, cancelledRes] = await Promise.all([
+        getReceivables(),
+        getCashFlow(),
+        supabase.from("sales").select("quote_id").eq("status", "Cancelado").is("deleted_at", null),
+      ]);
+      const receivables = recRes.ok && Array.isArray(recRes.data) ? recRes.data : [];
+      const cashFlowRows = cfRes.ok && Array.isArray(cfRes.data) ? cfRes.data : [];
+      // Venda cancelada não tem mais nada a receber.
+      const cancelledQuoteIds = new Set((cancelledRes.data ?? []).map((s: any) => String(s.quote_id)));
+      const today = new Date().toISOString().slice(0, 10);
+      let total = 0;
+      for (const r of receivables as any[]) {
+        if (cancelledQuoteIds.has(String(r.quoteId))) continue;
+        const q = quotes.find((qq: any) => String(qq.id) === String(r.quoteId));
+        const awaitingDelivery = q && q.status === "Aprovado" && !(q.sale_completed ?? q.saleCompleted) && !(q.delivered_at ?? q.deliveredAt);
+        if (awaitingDelivery) continue;
+        const payments = cashFlowRows.filter(
+          (e: any) => e.type === "Entrada" && (String(e.orcamentoId ?? "") === String(r.quoteId) || e.subcategory === `quote:${r.quoteId}`)
+        );
+        const totalPaid = payments.reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+        const remaining = Math.max(0, Number(r.amount || 0) - totalPaid);
+        if (remaining > 0.005 && r.dueDate && r.dueDate < today) total += remaining;
+      }
+      setTotalOverdueReceivables(total);
+
+      // Pedidos com crédito do cliente a devolver:
+      // saldo = valor do pedido − recebido + devolvido < 0
+      const byQuote = new Map<string, { received: number; refunded: number }>();
+      for (const e of cashFlowRows as any[]) {
+        const qid = e.orcamentoId != null ? String(e.orcamentoId) : "";
+        if (!qid || e.isTransfer) continue;
+        const acc = byQuote.get(qid) || { received: 0, refunded: 0 };
+        if (e.type === "Entrada") acc.received += Number(e.amount || 0);
+        else if (e.movementKind === "devolucao") acc.refunded += Number(e.amount || 0);
+        byQuote.set(qid, acc);
+      }
+      const credits: { id: string; number: string; customer: string; credit: number }[] = [];
+      for (const q of quotes as any[]) {
+        const acc = byQuote.get(String(q.id));
+        if (!acc) continue;
+        const saldo = Number(q.total_price ?? q.totalPrice ?? 0) - acc.received + acc.refunded;
+        // Menos de R$ 0,10 é arredondamento (valor do pedido com fração de
+        // centavo, ex.: 2.189,9941 pago com 2.190,00) — não é crédito real.
+        if (saldo < -0.1) {
+          credits.push({
+            id: String(q.id),
+            number: String(q.quote_number ?? q.quoteNumber ?? q.id),
+            customer: q.customer_name ?? q.customerName ?? "",
+            credit: -saldo,
+          });
+        }
+      }
+      setCustomerCredits(credits.sort((a, b) => b.credit - a.credit));
+    };
+    loadOverdue();
+  }, [quotes]);
+
   const loadEmployeesLite = useCallback(async () => {
-    const employeesRes = await supabase.from("employees").select("id,name,birth_date");
+    const employeesRes = await supabase.from("employees").select("id,name,birth_date").eq("active", true);
     const safeEmployees = Array.isArray(employeesRes.data) ? employeesRes.data : [];
     setEmployees(safeEmployees);
   }, []);
@@ -189,8 +276,8 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
           // base64 de cada produto (60+ MB no total) e deixava o painel
           // demorando muito pra carregar por causa só desse payload.
           supabase.from("products").select("id,name,productCategory"),
-          supabase.from("clients").select("*").is("deleted_at", null),
-          supabase.from("employees").select("id,name,birth_date"),
+          fetchAllClients(),
+          supabase.from("employees").select("id,name,birth_date").eq("active", true),
           supabase.from("payables").select("*").is("deleted_at", null).order("due_date", { ascending: true }),
         ]);
 
@@ -221,11 +308,28 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
         .map((q: any) => ({
           id: `quote-${q.id}`,
           amount: Number(q.totalPrice || q.total_price || 0),
-          saleDate: q.date || null,
+          // Data em que virou venda (aprovação), não a de criação do
+          // orçamento — mesma regra da tela de Vendas e de Minhas Comissões.
+          saleDate: q.approved_at || q.approvedAt || q.date || null,
           sellerId: null,
           salesperson: q.salesperson || "",
         }));
-      const finalSales = [...safeSalesRaw, ...virtualSales];
+
+      // Vendas reais (linha própria em "sales") nunca gravam seller_id nem
+      // nome da vendedora (createSale só manda quote_id/total/date) — sem
+      // isso, o painel "Metas de Vendedoras" não tinha como saber de quem
+      // era a venda assim que ela deixava de ser "virtual", e simplesmente
+      // sumia do cálculo por vendedora (a soma geral continuava certa, só
+      // o agrupamento por pessoa que ficava quebrado). Busca a vendedora no
+      // orçamento de origem, igual já é feito pras vendas virtuais.
+      const quoteById = new Map(safeQuotes.map((q: any) => [String(q.id), q]));
+      // Venda cancelada não conta pra meta nem pro total do mês.
+      const enrichedRealSales = safeSalesRaw.filter((s: any) => s.status !== "Cancelado").map((s: any) => {
+        const quote = quoteById.get(String(s.quote_id));
+        return { ...s, salesperson: quote?.salesperson || "" };
+      });
+
+      const finalSales = [...enrichedRealSales, ...virtualSales];
 
       setSellers(safeSellers);
       setSales(finalSales.map(normalizeSale));
@@ -398,8 +502,12 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
   const totalRemainingPreviousMonth = Math.max(totalGoal - totalSalesAmountPreviousMonth, 0);
 
   // ------------------ variação percentual vs. mês anterior ------------------
+  // Dados confiáveis só a partir de out/2026 — a primeira comparação que faz
+  // sentido é novembro (vs. outubro). Antes disso, não mostra variação.
+  const comparisonsEnabled = currentYear * 12 + currentMonth >= 2026 * 12 + 10;
+
   const computeChange = (current: number, previous: number) => {
-    if (!previous) return null;
+    if (!comparisonsEnabled || !previous) return null;
     return ((current - previous) / previous) * 100;
   };
 
@@ -434,6 +542,51 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
         )
       : activeSellersWithGoals;
 
+  // Vendedoras ativas SEM meta (ex.: Letícia) — aparecem no card só com o
+  // total vendido no mês, sem barra de progresso, e não entram na meta geral.
+  const sellersWithoutGoals = useMemo(() => {
+    const list = sellers.filter((s) => !(Number(s.monthly_target || 0) > 0));
+    return userRole === "Sales"
+      ? list.filter((s) => (s.name || "").toLowerCase().trim() === (currentUser.name || "").toLowerCase().trim())
+      : list;
+  }, [sellers, userRole, currentUser.name]);
+
+  // ------------------ comemoração de meta batida ------------------
+  // Quando uma vendedora chega a 100% da meta do mês, abre o card com
+  // confetes — uma vez por vendedora por mês neste navegador. Pra ver de
+  // novo/testar: ?testeMeta=Joyce na URL.
+  const [celebrationQueue, setCelebrationQueue] = useState<string[]>([]);
+
+  useEffect(() => {
+    const preview = new URLSearchParams(window.location.search).get("testeMeta");
+    if (preview) setCelebrationQueue([preview]);
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    const monthKey = `${currentYear}-${String(currentMonth + 1).padStart(2, "0")}`;
+    const reached: string[] = [];
+    displayableSellers.forEach((seller) => {
+      const goal = Number(seller.monthly_target || 0);
+      if (!(goal > 0)) return;
+      const stats =
+        salesBySeller[String(seller.id)] ?? salesBySeller[(seller.name || "").toLowerCase().trim()];
+      if (Number(stats?.total || 0) < goal) return;
+      const storageKey = `metaCelebrada_${seller.id}_${monthKey}`;
+      try {
+        if (localStorage.getItem(storageKey)) return;
+        localStorage.setItem(storageKey, "1");
+      } catch {
+        // sem localStorage: ainda mostra, só não lembra
+      }
+      reached.push(seller.name || "");
+    });
+    if (reached.length > 0) setCelebrationQueue((q) => [...q, ...reached]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, salesBySeller, displayableSellers.length]);
+
+  const closeCelebration = useCallback(() => setCelebrationQueue((q) => q.slice(1)), []);
+
   // ------------------ ranking mensal ------------------
   const ranking = useMemo(() => {
     const rows = activeSellersWithGoals.map((s) => {
@@ -457,6 +610,22 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
   const deliveryEntriesBySector = useMemo(() => {
     return buildDeliveryEntriesBySector(quotes, clients, productsCatalog);
   }, [clients, productsCatalog, quotes]);
+
+  // Orçamentos com data de "próximo contato" marcada — todas, não só
+  // hoje/atrasadas, pra servir de lista de prospecção. Vendedora só vê os
+  // dela; Admin/Finance vê de todo mundo.
+  const contactReminders = useMemo(() => {
+    return (Array.isArray(quotes) ? quotes : [])
+      .filter((q: any) => {
+        if (!q.next_contact_date) return false;
+        if (q.status === "Aprovado" || q.status === "Recusado") return false;
+        if (userRole === "Sales") {
+          return (q.salesperson || "").toLowerCase().trim() === (currentUser?.name || "").toLowerCase().trim();
+        }
+        return true;
+      })
+      .sort((a: any, b: any) => String(a.next_contact_date).localeCompare(String(b.next_contact_date)));
+  }, [quotes, userRole, currentUser?.name]);
 
   const upcomingBirthdays = useMemo(() => {
     const nowDate = new Date();
@@ -520,6 +689,15 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
 
   return (
     <div className="space-y-6">
+      {celebrationQueue.length > 0 && (
+        <MetaCelebration
+          key={celebrationQueue[0]}
+          sellerName={celebrationQueue[0]}
+          onClose={closeCelebration}
+        />
+      )}
+      <AgendaReminderCard />
+
       {/* MENSAGEM DO DIA */}
       <div className="flex items-center justify-between gap-3 bg-primary-50 dark:bg-primary-950/40 border border-primary-200 dark:border-primary-800/60 rounded-lg px-4 py-2">
         <p className="flex items-center gap-2 text-sm text-primary-900 dark:text-primary-100 italic truncate">
@@ -534,7 +712,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
       </div>
 
       {/* CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className={`grid grid-cols-1 sm:grid-cols-2 gap-6 ${userRole === "Admin" ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
         <DashboardCard
           title="Vendido no mês"
           value={`R$ ${money(totalSalesAmountCurrentMonth)}`}
@@ -590,6 +768,20 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
           invertChangeColor
           progressPercent={totalProgressPercent}
         />
+
+        {userRole === "Admin" && (
+          <DashboardCard
+            title="Vencido (a receber)"
+            value={`R$ ${money(totalOverdueReceivables)}`}
+            icon={
+              <Icon>
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 6v6l4 2" />
+              </Icon>
+            }
+            onClick={() => setActiveView("receivables" as any)}
+          />
+        )}
       </div>
 
       {/* ENTREGAS POR SETOR */}
@@ -597,7 +789,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
         <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-2">Entregas por setor</h3>
 
         <div className="divide-y divide-gray-100 dark:divide-gray-700">
-          {(["GRANITO", "VIDROS", "ALUMINIO", "PORTAO AUTOMATICO"] as DeliverySector[]).map((sector) => {
+          {(["GRANITO", "VIDROS", "ALUMINIO", "PORTAO AUTOMATICO", "PRODUTOS PRONTOS"] as DeliverySector[]).map((sector) => {
             const pendingCount = (deliveryEntriesBySector[sector] || []).filter((e) => e.isPending).length;
 
             return (
@@ -637,6 +829,52 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
 
       {/* AGENDA */}
       <AgendaCard />
+
+      {/* LEMBRETE DE CONTATO — orçamentos com "próximo contato" marcado pra
+          hoje ou atrasado. Só visualização, nenhuma ação aqui. */}
+      <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 dark:border-sky-800/60 dark:bg-sky-950/30">
+        <div className="mb-3 flex items-center gap-2">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-sky-100 text-sky-600 dark:bg-sky-900/50 dark:text-sky-300">
+            <Icon className="w-4 h-4">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </Icon>
+          </span>
+          <h3 className="text-sm font-bold text-sky-800 dark:text-sky-200">Lembrete de contato</h3>
+        </div>
+        {contactReminders.length === 0 ? (
+          <p className="text-sm text-sky-700/60 dark:text-sky-300/60">
+            Nenhum contato marcado pra hoje ou atrasado.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {contactReminders.map((q: any) => (
+              <div
+                key={q.id}
+                className="flex items-center justify-between gap-3 rounded-lg border border-sky-100 bg-white px-3 py-2 text-sm dark:border-sky-900/50 dark:bg-gray-800"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-gray-800 dark:text-white">
+                    {q.customer_name || "Cliente"}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    N° {q.quote_number ?? "—"}
+                    {userRole !== "Sales" && q.salesperson ? ` · ${q.salesperson}` : ""}
+                  </p>
+                </div>
+                <span
+                  className={`shrink-0 text-xs font-semibold ${
+                    isContactDatePastOrToday(q.next_contact_date)
+                      ? "text-red-600 dark:text-red-400"
+                      : "text-sky-700 dark:text-sky-300"
+                  }`}
+                >
+                  {formatContactDate(q.next_contact_date)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* META GERAL + METAS INDIVIDUAIS + ANIVERSARIANTES + CONTAS A PAGAR */}
       <div className={`grid grid-cols-1 gap-6 ${userRole === "Sales" ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
@@ -705,7 +943,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
             </div>
           </div>
 
-          <div className="space-y-3 max-h-[320px] overflow-y-auto pr-1">
+          <div className="space-y-2">
             {displayableSellers.map((seller) => {
               const keyId = String(seller.id);
               const keyName = (seller.name || "").toLowerCase().trim();
@@ -717,10 +955,10 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
               const remaining = Math.max(sellerGoal - sellerSales, 0);
 
               return (
-                <div key={keyId} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+                <div key={keyId} className="border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2.5">
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-700 dark:text-gray-200">
+                      <div className="w-7 h-7 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-700 dark:text-gray-200">
                         {getInitials(seller.name)}
                       </div>
                       <span className="text-sm font-semibold text-gray-800 dark:text-white">{seller.name}</span>
@@ -743,7 +981,31 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
               );
             })}
 
-            {!loading && displayableSellers.length === 0 && (
+            {sellersWithoutGoals.map((seller) => {
+              const keyId = String(seller.id);
+              const keyName = (seller.name || "").toLowerCase().trim();
+              const stats = salesBySeller[keyId] ?? salesBySeller[keyName] ?? { total: 0, count: 0 };
+              return (
+                <div key={keyId} className="border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-700 dark:text-gray-200">
+                        {getInitials(seller.name)}
+                      </div>
+                      <span className="text-sm font-semibold text-gray-800 dark:text-white">{seller.name}</span>
+                    </div>
+                    <span className="text-[10px] font-bold uppercase text-gray-400 dark:text-gray-500">Sem meta</span>
+                  </div>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1.5">
+                    Vendido no mês: <span className="font-semibold text-gray-800 dark:text-white">R$ {money(Number(stats.total || 0))}</span>
+                    {" · "}
+                    {stats.count} venda(s)
+                  </p>
+                </div>
+              );
+            })}
+
+            {!loading && displayableSellers.length === 0 && sellersWithoutGoals.length === 0 && (
               <p className="text-gray-500 dark:text-gray-400 text-sm text-center py-2">Nenhuma meta cadastrada.</p>
             )}
           </div>
@@ -769,6 +1031,29 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
             )}
           </div>
         </div>
+
+        {/* CRÉDITO A DEVOLVER — pedidos em que o cliente pagou a mais */}
+        {userRole !== "Sales" && customerCredits.length > 0 && (
+          <div className="bg-white dark:bg-gray-800 border border-amber-300 dark:border-amber-700 rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-semibold text-gray-800 dark:text-white">Crédito a devolver</h3>
+              <span className="text-sm font-bold text-amber-600">
+                R$ {money(customerCredits.reduce((s, c) => s + c.credit, 0))}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {customerCredits.slice(0, 8).map((c) => (
+                <div key={c.id} className="flex items-center justify-between border border-amber-100 dark:border-amber-900/40 rounded-lg p-3 bg-amber-50/60 dark:bg-amber-900/10">
+                  <div>
+                    <p className="text-xs font-mono text-primary-700 dark:text-primary-300 font-semibold">OS #{c.number}</p>
+                    <p className="text-sm font-semibold text-gray-800 dark:text-white">{c.customer || "—"}</p>
+                  </div>
+                  <p className="text-sm font-bold text-amber-600">R$ {money(c.credit)}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* CONTAS A PAGAR — oculto para vendedoras */}
         {userRole !== "Sales" && (

@@ -64,7 +64,8 @@ const SummaryTab: React.FC = () => {
       const [empRes, fixRes, varRes, partnersRes] = await Promise.all([
         supabase
           .from("employees")
-          .select("id, name, base_salary, total_monthly_cost"),
+          .select("id, name, base_salary, total_monthly_cost")
+          .eq("active", true),
 
         supabase.from("fixed_expenses").select("id, value"),
 

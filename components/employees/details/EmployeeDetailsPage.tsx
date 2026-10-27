@@ -6,6 +6,7 @@ import PagamentoTab from "./tabs/PagamentoTab";
 import FeriasTab from "./tabs/FeriasTab";
 import FaltasTab from "./tabs/FaltasTab";
 import UniformesTab from "./tabs/UniformesTab";
+import DateInputModal from "../../common/DateInputModal";
 
 type Props = {
   id: string;
@@ -19,6 +20,8 @@ type EmployeeSummary = {
   role: string | null;
   base_salary: number | null;
   admission_date: string | null;
+  active: boolean;
+  termination_date: string | null;
 };
 
 type TabKey = "resumo" | "jornada" | "pagamento" | "ferias" | "faltas" | "uniformes";
@@ -44,7 +47,7 @@ const EmployeeDetailsPage: React.FC<Props> = ({ id, currentUser, setActiveView }
       setLoading(true);
       const { data, error } = await supabase
         .from("employees")
-        .select("id, name, role, base_salary, admission_date")
+        .select("id, name, role, base_salary, admission_date, active, termination_date")
         .eq("id", funcionarioId)
         .single();
       if (error) console.error(error);
@@ -52,6 +55,39 @@ const EmployeeDetailsPage: React.FC<Props> = ({ id, currentUser, setActiveView }
       setLoading(false);
     })();
   }, [funcionarioId]);
+
+  const [togglingActive, setTogglingActive] = useState(false);
+  const [showTerminationModal, setShowTerminationModal] = useState(false);
+
+  const handleConfirmTermination = async (terminationDate: string) => {
+    if (!employee) return;
+    if (!window.confirm(`Desativar ${employee.name}? Ele some das listas ativas e as contas vinculadas a ele saem de Contas a Pagar, mas o histórico continua guardado.`)) return;
+    setTogglingActive(true);
+    const { error } = await supabase
+      .from("employees")
+      .update({ active: false, termination_date: terminationDate })
+      .eq("id", funcionarioId);
+    setTogglingActive(false);
+    if (error) return alert("Não foi possível desativar: " + error.message);
+    setEmployee({ ...employee, active: false, termination_date: terminationDate });
+  };
+
+  const handleToggleActive = async () => {
+    if (!employee) return;
+    if (employee.active) {
+      setShowTerminationModal(true);
+      return;
+    }
+    if (!window.confirm(`Reativar ${employee.name}?`)) return;
+    setTogglingActive(true);
+    const { error } = await supabase
+      .from("employees")
+      .update({ active: true, termination_date: null })
+      .eq("id", funcionarioId);
+    setTogglingActive(false);
+    if (error) return alert("Não foi possível reativar: " + error.message);
+    setEmployee({ ...employee, active: true, termination_date: null });
+  };
 
   const tabs = useMemo(
     () =>
@@ -98,8 +134,15 @@ const EmployeeDetailsPage: React.FC<Props> = ({ id, currentUser, setActiveView }
         <div className="w-12 h-12 rounded-full bg-primary-600 text-white flex items-center justify-center font-bold shrink-0">
           {initials(employee.name)}
         </div>
-        <div>
-          <h2 className="text-lg font-bold text-gray-900">{employee.name || "-"}</h2>
+        <div className="flex-1">
+          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            {employee.name || "-"}
+            {!employee.active && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 uppercase">
+                Desativado{employee.termination_date ? ` em ${new Date(employee.termination_date + "T12:00:00").toLocaleDateString("pt-BR")}` : ""}
+              </span>
+            )}
+          </h2>
           <p className="text-sm text-gray-500">
             {employee.role || "-"}
             {isManager && employee.base_salary != null && (
@@ -114,6 +157,20 @@ const EmployeeDetailsPage: React.FC<Props> = ({ id, currentUser, setActiveView }
             )}
           </p>
         </div>
+        {isManager && (
+          <button
+            type="button"
+            onClick={handleToggleActive}
+            disabled={togglingActive}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-60 ${
+              employee.active
+                ? "bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100"
+                : "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+            }`}
+          >
+            {togglingActive ? "Salvando..." : employee.active ? "Desativar" : "Reativar"}
+          </button>
+        )}
       </div>
 
       <div className="bg-white p-6 rounded-xl shadow">
@@ -152,6 +209,19 @@ const EmployeeDetailsPage: React.FC<Props> = ({ id, currentUser, setActiveView }
         {activeTab === "faltas" && <FaltasTab funcionarioId={funcionarioId} />}
         {activeTab === "uniformes" && <UniformesTab funcionarioId={funcionarioId} />}
       </div>
+
+      {showTerminationModal && (
+        <DateInputModal
+          title="Data de desligamento"
+          defaultValue={new Date().toISOString().slice(0, 10)}
+          confirmLabel="Desativar"
+          onConfirm={(date) => {
+            setShowTerminationModal(false);
+            handleConfirmTermination(date);
+          }}
+          onCancel={() => setShowTerminationModal(false)}
+        />
+      )}
     </div>
   );
 };

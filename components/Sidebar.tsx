@@ -11,7 +11,6 @@ import {
   TrendingUp,
   BarChart3,
   Settings,
-  Bot,
   ChevronLeft,
   ChevronRight,
   UserCheck,
@@ -45,7 +44,9 @@ const Sidebar: React.FC<Props> = ({
   currentUser,
 }) => {
   const [showDenied, setShowDenied] = useState(false);
-  const role = currentUser?.role ?? "Admin";
+  // Sem papel definido nunca libera tudo — cai no papel mais restrito,
+  // mesma regra do normalizeUserRole em App.tsx.
+  const role: User["role"] = currentUser?.role ?? "Sales";
 
   const isLocked = (view: string) => {
     if (role === "Admin") return false;
@@ -71,7 +72,9 @@ const Sidebar: React.FC<Props> = ({
     Icon: React.ElementType;
   }) => {
     const locked = isLocked(view as string);
-    const isActive = activeView === view && !locked;
+    // Funcionários fica dentro de Financeiro — as telas dele acendem esse item.
+    const isEmployeeView = String(activeView).startsWith("employee");
+    const isActive = (activeView === view || (view === "financials" && isEmployeeView)) && !locked;
 
     return (
       <button
@@ -144,27 +147,10 @@ const Sidebar: React.FC<Props> = ({
         <Item view="payables"   label="Contas a Pagar"   Icon={CreditCard} />
         <Item view="receivables" label="Contas a Receber" Icon={TrendingUp} />
         <Item view="financials" label="Financeiro"       Icon={BarChart3} />
-        <Item view="employees"  label="Funcionários"     Icon={Users} />
         <Item view="sellers"    label="Vendedoras"       Icon={UserCheck} />
         <Item view="reports"    label="Relatórios"       Icon={BarChart3} />
         <Item view="settings"   label="Configurações"    Icon={Settings} />
       </nav>
-
-      {/* ASSISTENTE IA */}
-      <div className="border-t border-blue-700" style={{ padding: "5px 6px" }}>
-        <button
-          onClick={() => setActiveView("assistant")}
-          style={{ fontSize: "13px", padding: "6px 10px", gap: "8px" }}
-          className={`flex items-center w-full rounded-lg font-medium transition ${
-            activeView === "assistant"
-              ? "bg-blue-600 text-white"
-              : "text-blue-100 hover:bg-blue-700/40"
-          }`}
-        >
-          <Bot size={15} />
-          {isSidebarOpen && <span>Assistente IA</span>}
-        </button>
-      </div>
 
       {/* TOAST: Acesso não permitido */}
       {showDenied && (

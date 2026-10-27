@@ -31,6 +31,20 @@ const mapRow = (r: DbRow): Receivable & { quoteNumber?: number } => ({
   createdAt: r.created_at ?? undefined,
 });
 
+// Ao marcar uma venda como entregue com saldo pendente, o título já existe
+// desde a aprovação — aqui só ajusta o vencimento (não cria um novo).
+export const updateReceivableDueDate = async (quoteId: string, dueDate: string) => {
+  const { data, error } = await supabase
+    .from(TABLE)
+    .update({ due_date: dueDate })
+    .eq("quote_id", Number(quoteId))
+    .is("deleted_at", null)
+    .select()
+    .maybeSingle();
+  if (error) return { ok: false as const, error };
+  return { ok: true as const, data: data ? mapRow(data as DbRow) : null };
+};
+
 export const getReceivables = async () => {
   const { data, error } = await supabase
     .from(TABLE)

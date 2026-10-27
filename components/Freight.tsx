@@ -22,6 +22,8 @@ const normalizeRow = (row: any): FreightRate => ({
 
 const Freight: React.FC<Props> = ({ freightRates, setFreightRates, freightConfig: freightConfigProp, currentUser, variableExpenses }) => {
   const isAdmin = currentUser?.role === "Admin";
+  // Vendedoras também cadastram/editam locais (só Admin exclui).
+  const canEdit = isAdmin || currentUser?.role === "Sales";
 
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -138,7 +140,7 @@ const Freight: React.FC<Props> = ({ freightRates, setFreightRates, freightConfig
 
   return (
     <div className="space-y-5">
-      {isAdmin && (
+      {canEdit && (
         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm p-6 space-y-4">
           <h2 className="text-lg font-bold text-gray-900 dark:text-white">
             {editingId ? "Editar local" : "Novo local"}
@@ -217,7 +219,7 @@ const Freight: React.FC<Props> = ({ freightRates, setFreightRates, freightConfig
                   <th className="px-3 py-2 text-right">KM</th>
                   <th className="px-3 py-2 text-right">Carro</th>
                   <th className="px-3 py-2 text-right">Moto</th>
-                  {isAdmin && <th className="px-3 py-2 text-center">Ações</th>}
+                  {canEdit && <th className="px-3 py-2 text-center">Ações</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -231,7 +233,7 @@ const Freight: React.FC<Props> = ({ freightRates, setFreightRates, freightConfig
                     <td className="px-3 py-2 text-right font-semibold text-gray-800 dark:text-white">
                       {money(calcValue(r.km, freightConfig.kmRateMoto))}
                     </td>
-                    {isAdmin && (
+                    {canEdit && (
                       <td className="px-3 py-2">
                         <div className="flex items-center justify-center gap-1">
                           <button
@@ -245,6 +247,7 @@ const Freight: React.FC<Props> = ({ freightRates, setFreightRates, freightConfig
                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                             </Icon>
                           </button>
+                          {isAdmin && (
                           <button
                             type="button"
                             onClick={() => handleDelete(r.id)}
@@ -259,6 +262,7 @@ const Freight: React.FC<Props> = ({ freightRates, setFreightRates, freightConfig
                               <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
                             </Icon>
                           </button>
+                          )}
                         </div>
                       </td>
                     )}

@@ -1,6 +1,6 @@
 import { Product, QuoteItem } from "../types";
 
-export type DeliverySector = "GRANITO" | "VIDROS" | "ALUMINIO" | "PORTAO AUTOMATICO";
+export type DeliverySector = "GRANITO" | "VIDROS" | "ALUMINIO" | "PORTAO AUTOMATICO" | "PRODUTOS PRONTOS";
 
 export type QuoteRowAny = any;
 export type ClientRowAny = any;
@@ -10,6 +10,7 @@ export const SECTOR_LABELS: Record<DeliverySector, string> = {
   VIDROS: "Vidros",
   ALUMINIO: "Alumínio",
   "PORTAO AUTOMATICO": "Portão Automático",
+  "PRODUTOS PRONTOS": "Produtos Prontos",
 };
 
 export const SECTOR_DOT_COLORS: Record<DeliverySector, string> = {
@@ -17,10 +18,12 @@ export const SECTOR_DOT_COLORS: Record<DeliverySector, string> = {
   VIDROS: "bg-sky-500",
   ALUMINIO: "bg-slate-400",
   "PORTAO AUTOMATICO": "bg-purple-500",
+  "PRODUTOS PRONTOS": "bg-emerald-500",
 };
 
 export type DeliveryEntry = {
   id: string;
+  quoteId: string;
   sector: DeliverySector;
   saleDate: string;
   deliveryDate: string;
@@ -183,13 +186,14 @@ export const inferSectorFromItem = (item: QuoteItem, productsMap: Record<string,
     (product as any)?.productCategory || product?.category || ""
   );
 
+  // Produtos prontos: itens sem medida do catálogo (controles, fechaduras,
+  // cremalheiras etc.) — setor próprio, não entram na equipe de alumínio.
+  if (category === "ACESSORIO DE MOTOR" || category.includes("PRODUTO PRONTO")) {
+    return "PRODUTOS PRONTOS";
+  }
   // Alumínio: portas, portões, grades e acessórios de alumínio, além de
   // motores residenciais (que ficam na mesma equipe/entrega de alumínio).
-  if (
-    category.includes("ALUMINIO") ||
-    category === "ACESSORIO DE MOTOR" ||
-    category === "MOTOR RESIDENCIAL"
-  ) {
+  if (category.includes("ALUMINIO") || category === "MOTOR RESIDENCIAL") {
     return "ALUMINIO";
   }
   if (category.includes("PORTAO")) return "PORTAO AUTOMATICO";
@@ -229,6 +233,7 @@ export const buildDeliveryEntriesBySector = (
     VIDROS: [],
     ALUMINIO: [],
     "PORTAO AUTOMATICO": [],
+    "PRODUTOS PRONTOS": [],
   };
 
   (Array.isArray(quotes) ? quotes : []).filter((q: any) => q.status === "Aprovado").forEach((quote) => {
@@ -250,7 +255,11 @@ export const buildDeliveryEntriesBySector = (
     const clientAddress = getClientAddressLabel(quoteClient);
     const clientPhone = String(quoteClient?.phone || "").trim();
     const internalStatus = String(quote?.internalStatus ?? quote?.internal_status ?? "Pedido");
-    const isPending = internalStatus !== "Entregue";
+    // "Concluindo" (marcação manual, ver Sales.tsx getComputedStatus) tira a
+    // venda do setor de entregas — já foi finalizada, não é mais pendente
+    // de produção/entrega pra equipe nenhuma.
+    const saleCompleted = Boolean(quote?.saleCompleted ?? quote?.sale_completed);
+    const isPending = internalStatus !== "Entregue" && !saleCompleted;
     const totalPrice = Number(quote?.totalPrice || quote?.total_price || 0);
 
     const itemsBySector = new Map<DeliverySector, Set<string>>();
@@ -267,6 +276,7 @@ export const buildDeliveryEntriesBySector = (
     itemsBySector.forEach((labels, sector) => {
       buckets[sector].push({
         id: `${quote?.id || Date.now()}-${sector}`,
+        quoteId: String(quote?.id ?? ""),
         sector,
         saleDate: saleDateISO,
         deliveryDate: deliveryDateISO,

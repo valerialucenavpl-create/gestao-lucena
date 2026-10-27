@@ -16,6 +16,7 @@ import {
   QuoteItemAssemblyLine,
   FreightRate,
   FreightConfig,
+  CashFlowEntry,
 } from "../types";
 import { generateQuotePDF, PDFOptions, cityFromAddress } from "../utils/generateQuotePDF";
 import { Icon } from "./icons/Icon";
@@ -29,12 +30,23 @@ import {
 import { resolveMaterialPurchaseLengthMeters } from "../utils/materialPurchaseLength";
 import { getCompositionLineBreakdown } from "../utils/productComposition";
 import { supabase } from "../services/supabase";
+import { createQuoteHistoryEntry } from "../services/quoteHistoryServices";
+import { getCashFlow, updateCashFlowEntry } from "../services/cashFlowServices";
 
 const normalizeText = (value: unknown) =>
   String(value ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toUpperCase();
+
+// Tira as cores que o produto marcou como "não tenho" (Produto → Cores
+// disponíveis). Se sobrar nenhuma, devolve a lista original.
+const filterProductAvailableColors = (product: Product | undefined, colors: string[]): string[] => {
+  const off = new Set((product?.unavailableColors || []).map((c) => normalizeText(c).trim()));
+  if (off.size === 0) return colors;
+  const kept = colors.filter((c) => !off.has(normalizeText(c).trim()));
+  return kept.length > 0 ? kept : colors;
+};
 
 const parseISODate = (value: string) => {
   if (!value) return null;
@@ -177,10 +189,12 @@ interface NewQuoteProps {
   variableExpenses: VariableExpense[];
   companySettings: CompanySettings;
   nextQuoteNumber: number;
-  onAddQuote: (quote: Quote) => Promise<void>;
+  onAddQuote: (quote: Quote) => Promise<Quote | void>;
   // Quando presente, a tela abre em modo de edição: carrega os itens/dados
   // desse orçamento já salvo, e o botão final atualiza em vez de criar novo.
   editingQuote?: Quote | null;
+  // Orçamento em edição já virou venda — o PDF sai como "Ordem de Serviço".
+  hasSale?: boolean;
   onUpdateQuote?: (quote: Quote) => Promise<void>;
   onAddNewClient: (client: Client) => void;
   onCancel: () => void;
@@ -234,6 +248,7 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   nextQuoteNumber,
   onAddQuote,
   editingQuote,
+  hasSale = false,
   onUpdateQuote,
   onAddNewClient,
   onCancel,
@@ -339,6 +354,16 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [clientSearch, setClientSearch] = useState<string>("");
   const [clientDropdownOpen, setClientDropdownOpen] = useState<boolean>(false);
   const [date, setDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [originLegacy, setOriginLegacy] = useState(false);
+  const [legacyAlreadyDelivered, setLegacyAlreadyDelivered] = useState(false);
+  const [legacyConcludedAt, setLegacyConcludedAt] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [legacyLinkCandidates, setLegacyLinkCandidates] = useState<CashFlowEntry[] | null>(null);
+  const [legacyLinkQuoteId, setLegacyLinkQuoteId] = useState<string | null>(null);
+  const [legacyLinkSelected, setLegacyLinkSelected] = useState<Set<string>>(new Set());
+  const [linkingLegacyPayments, setLinkingLegacyPayments] = useState(false);
+  // "Salvar e Fechar" com pagamentos antigos a vincular: fecha só depois
+  // que o usuário decidir no modal de vínculo.
+  const [closeAfterLegacyLink, setCloseAfterLegacyLink] = useState(false);
   const [deliveryLeadDays, setDeliveryLeadDays] = useState<number>(20);
   const [deliveryDate, setDeliveryDate] = useState<string>(
     calculateDeliveryDate(new Date().toISOString().split("T")[0], 20)
@@ -356,6 +381,13 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   // tanto na prévia da tela quanto no PDF. Se false, o frete aparece como
   // linha separada e os produtos mostram o valor "puro", sem frete embutido.
   const [dissolveFreight, setDissolveFreight] = useState<boolean>(true);
+  // "auto": cada item recebe uma fatia do frete proporcional ao seu preço
+  // (comportamento de sempre). "manual": a usuária define quanto de frete
+  // vai pra cada item — útil quando a distância/dificuldade de entrega varia
+  // muito entre os produtos do mesmo orçamento (ex.: um item mais longe).
+  const [freightSplitMode, setFreightSplitMode] = useState<"auto" | "manual">("auto");
+  const [freightManualByItem, setFreightManualByItem] = useState<Record<string, number>>({});
+  const [freightManualInputByItem, setFreightManualInputByItem] = useState<Record<string, string>>({});
   const [freightCityId, setFreightCityId] = useState<string>("");
   const [freightVehicle, setFreightVehicle] = useState<"Carro" | "Moto">("Carro");
   // Cada "Aplicar" vira um item aqui em vez de sobrescrever o frete — permite
@@ -365,10 +397,18 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     { id: string; cityName: string; vehicle: "Carro" | "Moto"; km: number; value: number }[]
   >([]);
   const [showAdicionaisSaved, setShowAdicionaisSaved] = useState(false);
+  const [savingAdicionais, setSavingAdicionais] = useState(false);
   const [installation, setInstallation] = useState<number>(0);
   const [installationInput, setInstallationInput] = useState<string>(formatMoneyInputBR(0));
   const [feedingCost, setFeedingCost] = useState<number>(0);
   const [feedingCostInput, setFeedingCostInput] = useState<string>(formatMoneyInputBR(0));
+  // Diferença do orçamento em nível de pedido (não por produto) — geralmente
+  // só dá pra calcular depois que os produtos já foram lançados e o valor
+  // final apareceu, então precisa poder ser adicionada a qualquer momento,
+  // igual Frete/Instalação/Alimentação, e não só durante a composição de um
+  // item de mármore. Soma no preço final como lucro (não mexe no custo).
+  const [priceDifference, setPriceDifference] = useState<number>(0);
+  const [priceDifferenceInput, setPriceDifferenceInput] = useState<string>(formatMoneyInputBR(0));
   const [installationCostItems, setInstallationCostItems] = useState<
     { id: string; name: string; value: number; valueInput: string }[]
   >([]);
@@ -378,10 +418,19 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [measurementNotes, setMeasurementNotes] = useState<string>("");
   const [assemblyNotes, setAssemblyNotes] = useState<string>("");
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  // Peças (comprimento x largura x qtd) sendo editadas do item de mármore
+  // aberto em editingItemId — cópia de trabalho, só grava no item ao clicar OK.
+  const [editingMarmorePieces, setEditingMarmorePieces] = useState<
+    { id: string; length: number; width: number; quantity: number }[]
+  >([]);
   const [globalFixedCostRate, setGlobalFixedCostRate] = useState<number>(20);
 
   // ── PDF states ──────────────────────────────────────────────────────────
   const [showPDFOptions, setShowPDFOptions] = useState(false);
+  const [missingItemsConfirm, setMissingItemsConfirm] = useState<{
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
   const [showPDFPreview, setShowPDFPreview] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedQuote, setSavedQuote] = useState<Quote | null>(null);
@@ -394,7 +443,17 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     if (!editingQuote || loadedEditingQuoteId.current === editingQuote.id) return;
     loadedEditingQuoteId.current = editingQuote.id;
 
-    setSelectedClientId(editingQuote.clientId || "");
+    // Preenche também o TEXTO do campo "Cliente" — antes só o id era
+    // carregado e o campo aparecia em branco na edição. Pedido antigo sem
+    // client_id: tenta achar o cadastro pelo nome que está no pedido.
+    const editClientId =
+      editingQuote.clientId ||
+      clients.find((c) => normalizeText(c.name) === normalizeText(editingQuote.customerName || ""))?.id ||
+      "";
+    setSelectedClientId(editClientId ? String(editClientId) : "");
+    setClientSearch(
+      clients.find((c) => String(c.id) === String(editClientId))?.name || editingQuote.customerName || ""
+    );
     setItems(Array.isArray(editingQuote.items) ? editingQuote.items : []);
     setDate(String(editingQuote.date || "").slice(0, 10) || new Date().toISOString().split("T")[0]);
     setPaymentMethod(editingQuote.paymentMethod || "Cartão");
@@ -402,10 +461,15 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     setFreightInput(formatMoneyInputBR(Number(editingQuote.freight || 0)));
     setFreightItems(Array.isArray(editingQuote.freightItems) ? editingQuote.freightItems : []);
     setDissolveFreight(editingQuote.dissolveFreight !== false);
+    const loadedFreightManual = editingQuote.freightManualByItem || {};
+    setFreightManualByItem(loadedFreightManual);
+    setFreightSplitMode(Object.keys(loadedFreightManual).length > 0 ? "manual" : "auto");
     setInstallation(Number(editingQuote.installation || 0));
     setInstallationInput(formatMoneyInputBR(Number(editingQuote.installation || 0)));
     setFeedingCost(Number(editingQuote.feedingCost || 0));
     setFeedingCostInput(formatMoneyInputBR(Number(editingQuote.feedingCost || 0)));
+    setPriceDifference(Number(editingQuote.priceDifference || 0));
+    setPriceDifferenceInput(formatMoneyInputBR(Number(editingQuote.priceDifference || 0)));
     setInstallationCostItems(
       (editingQuote.installationCostItems || []).map((item) => ({
         id: item.id,
@@ -443,7 +507,7 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     localStorage.getItem("quotePDFHideMeasures") === "true"
   );
   const [hideDetailedDescription, setHideDetailedDescription] = useState<boolean>(() =>
-    localStorage.getItem("quotePDFHideDetailedDesc") === "true"
+    localStorage.getItem("quotePDFHideDetailedDesc_v2") !== "false"
   );
 
   useEffect(() => {
@@ -544,6 +608,11 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [acQuantity, setAcQuantity] = useState<number>(1);
   const [acExtraService, setAcExtraService] = useState<number>(0);
   const [acExtraServiceInput, setAcExtraServiceInput] = useState<string>(formatMoneyInputBR(0));
+  // Montagem (Produtos Prontos): mesmo padrão da Montagem de Mármore — soma
+  // no valor do item, o nome nunca aparece pro cliente. Categoria
+  // "ProdutosProntos" filtra a lista.
+  const [acSelectedMontagemId, setAcSelectedMontagemId] = useState<string>("");
+  const [acMontagens, setAcMontagens] = useState<QuoteItemMontagem[]>([]);
 
   // PORTÃO
   const [poMaterialId, setPoMaterialId] = useState<string>("");
@@ -557,6 +626,13 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   // VIDROS (builder)
   const [gwSelectedProduct, setGwSelectedProduct] = useState<string>("");
   const [gwGlassTypeId, setGwGlassTypeId] = useState<string>("");
+  // Último tipo de vidro usado numa peça já adicionada a este orçamento —
+  // o campo "Tipo de vidro" não se limpa entre uma peça e outra (proposital,
+  // agiliza quando várias peças usam o mesmo vidro), mas isso deixou passar
+  // uma peça com o tipo errado sem ninguém perceber (ficou uma peça em 8mm
+  // no meio de um pedido todo em 10mm). Usado só pra avisar quando o tipo
+  // muda no meio do orçamento, não pra travar nada.
+  const [lastGwGlassTypeId, setLastGwGlassTypeId] = useState<string>("");
   const [gwProductSearch, setGwProductSearch] = useState<string>("");
   const [gwWidth, setGwWidth] = useState<number>(0);
   const [gwHeight, setGwHeight] = useState<number>(0);
@@ -587,6 +663,17 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [avExtraService, setAvExtraService] = useState<number>(0);
   const [avExtraServiceInput, setAvExtraServiceInput] = useState<string>(formatMoneyInputBR(0));
   const [avQuantity, setAvQuantity] = useState<number>(1);
+
+  // Composição do vidro: Estrutura de Alumínio e Acessório Vidro não viram
+  // itens separados no orçamento — mesmo padrão de Cuba/Montagem/Acessório
+  // de Mármore, entram somados no preço do vidro quando "Adicionar produto
+  // de vidro" é clicado.
+  const [gwEstruturas, setGwEstruturas] = useState<
+    { id: string; productId: string; name: string; width: number; height: number; color: string; quantity: number; price: number; cost: number }[]
+  >([]);
+  const [gwAcessoriosVidro, setGwAcessoriosVidro] = useState<
+    { id: string; productId: string; name: string; color: string; quantity: number; price: number; cost: number }[]
+  >([]);
 
  // ---------------------------
   // CORES POR CATEGORIA (BOTÕES)
@@ -677,14 +764,14 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const esColorOptions = useMemo(() => {
     const product = products.find((p) => p.id === esSelectedProduct);
     if (!product) return [];
-    return Array.from(
+    return filterProductAvailableColors(product, Array.from(
       new Set(
         product.composition.flatMap((c) => {
           const material = rawMaterials.find((m) => m.id === c.materialId);
           return getMaterialVariants(material).map((cv) => getVariantName(cv));
         })
       )
-    ).filter(Boolean) as string[];
+    ).filter(Boolean) as string[]);
   }, [esSelectedProduct, products, rawMaterials]);
 
   useEffect(() => {
@@ -707,14 +794,14 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const avColorOptions = useMemo(() => {
     const product = products.find((p) => p.id === avSelectedProduct);
     if (!product) return [];
-    return Array.from(
+    return filterProductAvailableColors(product, Array.from(
       new Set(
         product.composition.flatMap((c) => {
           const material = rawMaterials.find((m) => m.id === c.materialId);
           return getMaterialVariants(material).map((cv) => getVariantName(cv));
         })
       )
-    ).filter(Boolean) as string[];
+    ).filter(Boolean) as string[]);
   }, [avSelectedProduct, products, rawMaterials]);
 
   useEffect(() => {
@@ -734,7 +821,9 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   // Produtos cadastrados em Produtos com categoria "MARMORE" (ex.: Pia de
   // Cozinha) — é o que aparece pra escolher na aba Mármore do orçamento.
   const marmoreProducts = useMemo(() => {
-    return products.filter((product) => normalizeText(product.category || "").includes("MARMORE"));
+    // Exato, não .includes("MARMORE") — senão "ACESSORIO DE MARMORE" também
+    // entrava aqui (acessórios têm sua própria lista, ver linha ~634).
+    return products.filter((product) => normalizeText(product.category || "") === "MARMORE");
   }, [products]);
 
   const filteredMarmoreProducts = useMemo(() => {
@@ -801,7 +890,7 @@ const NewQuote: React.FC<NewQuoteProps> = ({
       .map((color) => color.trim())
       .filter(Boolean);
 
-    return Array.from(new Set(colors));
+    return filterProductAvailableColors(product, Array.from(new Set(colors)));
   };
 
   const alColorOptions = useMemo(() => {
@@ -994,7 +1083,6 @@ const NewQuote: React.FC<NewQuoteProps> = ({
 
     const effectiveWidth = width + (product.widthIncrement || 0);
     const effectiveHeight = height + (product.heightIncrement || 0);
-
     let rawMaterialCost = 0;
     const materialBreakdown: QuoteItemMaterialLine[] = [];
 
@@ -1048,9 +1136,27 @@ const NewQuote: React.FC<NewQuoteProps> = ({
       });
     });
 
+    // Mão de obra = pessoas × horas × valor da hora. No setor Mármore as horas
+    // do produto são POR m² — multiplicadas pela área da peça, então pedra
+    // menor custa menos e maior custa mais, proporcional à medida (ex.: 1
+    // pessoa, 1 h/m², R$ 10/h, peça de 0,50 m² → R$ 5,00). Vidro e demais
+    // setores: horas fixas por peça.
+    // O custo sai da MESMA conta do detalhamento (laborCostUnit abaixo) —
+    // antes o custo usava o valor cheio do cadastro por peça, sem a área, e
+    // "ver detalhamento" nunca batia (ex.: nicho em 5 peças cobrava 5× a
+    // hora cheia).
+    const effectiveWidth_m = effectiveWidth / 1000;
+    const effectiveHeight_m = effectiveHeight / 1000;
+    const pieceAreaM2 = effectiveWidth_m * effectiveHeight_m;
+    const laborHoursMultiplier =
+      product.laborSector === "MARMORE" && pieceAreaM2 > 0 ? pieceAreaM2 : 1;
+
     const laborBreakdown: QuoteItemLaborLine[] = [];
-    const pushLabor = (role: string, count: number, hours: number, rate: number) => {
-      if (count > 0 && hours > 0 && rate > 0) {
+    const pushLabor = (role: string, rawCount: number, rawHours: number, rate: number) => {
+      // Igual ao cadastro do produto: quantidade de pessoas em branco conta como 1.
+      const count = rawCount > 0 ? rawCount : 1;
+      const hours = rawHours * laborHoursMultiplier;
+      if (hours > 0 && rate > 0) {
         laborBreakdown.push({ role, count, hours, rate, total: count * hours * rate });
       }
     };
@@ -1058,8 +1164,16 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     pushLabor("Ajudante (produção)", Number(product.helperCount || 0), Number(product.helperHours || 0), Number(product.helperRate || 0));
     pushLabor("Profissional (instalação)", Number(product.instProfCount || 0), Number(product.instProfInstHours || 0), Number(product.instProfRate || 0));
     pushLabor("Ajudante (instalação)", Number(product.instHelpCount || 0), Number(product.instHelpInstHours || 0), Number(product.instHelpRate || 0));
+    // Produto cadastrado só com horas totais × valor/hora (sem detalhar
+    // profissional/ajudante) — vira uma linha única.
+    if (laborBreakdown.length === 0) {
+      const totalHours = Number(product.productionHours || 0) + Number(product.assemblyHours || 0);
+      pushLabor("Mão de obra", 1, totalHours, Number(product.hourlyRate || 0));
+    }
 
-    const laborCostUnit = (product.laborCost || 0);
+    const breakdownLaborCost = laborBreakdown.reduce((s, l) => s + l.total, 0);
+    const laborCostUnit =
+      breakdownLaborCost > 0 ? breakdownLaborCost : (product.laborCost || 0) * laborHoursMultiplier;
     const totalCostOfGoods = rawMaterialCost + laborCostUnit;
 
     // Margem por cor: se o produto tiver uma margem específica para a cor
@@ -1139,20 +1253,25 @@ const NewQuote: React.FC<NewQuoteProps> = ({
         quantity: line.quantity * quantity,
         totalCost: line.totalCost * quantity,
       })),
+      // Horas × quantidade, pra pessoas × horas × valor/hora fechar com o total.
       laborBreakdown: laborBreakdown.map((line) => ({
         ...line,
+        hours: line.hours * quantity,
         total: line.total * quantity,
       })),
     };
   };
 
-  // Soma o preço de cada medida (peça) lançada para o produto de mármore
-  // escolhido — uma pia em L, por exemplo, vira 2 (ou mais) retângulos que
-  // são calculados separadamente e somados num único total.
-  const getMarmoreCalculations = () => {
-    if (!mrSelectedProductId) return null;
-
-    const validPieces = mrPieces.filter((p) => p.length > 0 && p.width > 0 && p.quantity > 0);
+  // Soma o preço de cada medida (peça) — uma pia em L, por exemplo, vira 2
+  // (ou mais) retângulos que são calculados separadamente e somados num
+  // único total. Função pura (não depende do estado do formulário) pra dar
+  // pra recalcular também ao reeditar as peças de um item já adicionado.
+  const computeMarmorePieces = (
+    productId: string,
+    color: string,
+    pieces: { length: number; width: number; quantity: number }[]
+  ) => {
+    const validPieces = pieces.filter((p) => p.length > 0 && p.width > 0 && p.quantity > 0);
     if (validPieces.length === 0) return null;
 
     let totalPrice = 0;
@@ -1167,7 +1286,7 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     validPieces.forEach((piece) => {
       // piece.length/piece.width já vêm em milímetros.
       const { price, cost, materialCost, laborCost, fixedCostValue, materialBreakdown, laborBreakdown } =
-        calculateItemPrice(mrSelectedProductId, piece.width, piece.length, piece.quantity, selectedColor);
+        calculateItemPrice(productId, piece.width, piece.length, piece.quantity, color);
 
       totalPrice += price;
       totalCost += cost;
@@ -1190,11 +1309,9 @@ const NewQuote: React.FC<NewQuoteProps> = ({
       laborBreakdown.forEach((line) => {
         const existing = laborMap.get(line.role);
         if (existing) {
-          // Soma a quantidade de pessoas junto com o total — senão o total
-          // ficava somado de todas as peças, mas "horas" mostrava só da
-          // primeira peça, e pessoas × horas × valor/hora não batia com o
-          // total exibido.
-          existing.count += line.count;
+          // Soma as horas de cada peça junto com o total (mesma equipe, mais
+          // horas) — assim pessoas × horas × valor/hora fecha com o total.
+          existing.hours += line.hours;
           existing.total += line.total;
         } else {
           laborMap.set(line.role, { ...line });
@@ -1214,17 +1331,25 @@ const NewQuote: React.FC<NewQuoteProps> = ({
     };
   };
 
+  const getMarmoreCalculations = () => {
+    if (!mrSelectedProductId) return null;
+    return computeMarmorePieces(mrSelectedProductId, selectedColor, mrPieces);
+  };
+
   // Valor estimado em tempo real, conforme o usuário digita as medidas —
   // sem isso, só dava pra saber o preço depois de clicar em "Adicionar".
   const mrMontagemTotal = mrMontagens.reduce((s, m) => s + (Number(m.price) || 0), 0);
   const mrCubaTotal = mrCubas.reduce((s, c) => s + (Number(c.price) || 0), 0);
+  const gwEstruturaTotal = gwEstruturas.reduce((s, e) => s + (Number(e.price) || 0), 0);
+  const gwAcessorioVidroTotal = gwAcessoriosVidro.reduce((s, a) => s + (Number(a.price) || 0), 0);
+  const acMontagemTotal = acMontagens.reduce((s, m) => s + (Number(m.price) || 0), 0);
   const mrAccessoryTotal = mrAccessories.reduce((s, a) => s + (Number(a.price) || 0), 0);
 
   const mrLivePrice = useMemo(() => {
     const calc = getMarmoreCalculations();
     if (!calc) return null;
-    return calc.totalPrice + (Number(mrExtraService) || 0) + mrMontagemTotal + mrCubaTotal + mrAccessoryTotal;
-  }, [mrSelectedProductId, mrPieces, selectedColor, mrExtraService, products, rawMaterials, mrMontagemTotal, mrCubaTotal, mrAccessoryTotal]);
+    return calc.totalPrice + mrMontagemTotal + mrCubaTotal + mrAccessoryTotal;
+  }, [mrSelectedProductId, mrPieces, selectedColor, products, rawMaterials, mrMontagemTotal, mrCubaTotal, mrAccessoryTotal]);
 
   // ============================
 const categories = [
@@ -1390,10 +1515,58 @@ const categories = [
 
   // Montagem (Mármore): valor fixo somado ao preço da peça, sem o nome
   // aparecer pro cliente — só o insumo (custo) fica visível pro Admin.
+  // Se não tem peça de mármore em andamento (ex.: só instalação de pia
+  // avulsa), vira item próprio no orçamento em vez de ficar preso esperando
+  // uma peça que nunca vai ser adicionada.
   const addMrMontagem = () => {
     if (!mrSelectedMontagemId) return;
     const montagem = montagens.find((m) => m.id === mrSelectedMontagemId);
     if (!montagem) return;
+
+    if (!getMarmoreCalculations()) {
+      // Insumo vira "Custo matéria-prima" e mão de obra vira "Mão de obra"
+      // no detalhamento (Admin) — antes os dois entravam juntos só como
+      // laborCost, inflando "Mão de obra" com o valor do insumo E sem gerar
+      // nenhuma linha no "ver detalhamento" (que lê laborBreakdown, não
+      // existia aqui), fazendo o total não bater com a soma das linhas.
+      const materialBreakdown: QuoteItemMaterialLine[] = (montagem.insumos || []).map((insumo) => ({
+        name: insumo.name,
+        color: "Padrão",
+        unit: "un",
+        quantity: insumo.quantity ?? 1,
+        unitCost: insumo.unitValue ?? insumo.value,
+        totalCost: Number(insumo.value) || 0,
+      }));
+      const laborBreakdown: QuoteItemLaborLine[] = (montagem.labor || []).map((labor) => ({
+        role: labor.role,
+        count: labor.count,
+        hours: labor.hours,
+        rate: labor.rate,
+        total: Number(labor.total) || 0,
+      }));
+      const materialCost = materialBreakdown.reduce((s, l) => s + l.totalCost, 0);
+      const laborCost = laborBreakdown.reduce((s, l) => s + l.total, 0);
+      const newItem: QuoteItem = {
+        id: `qi-montagem-${Date.now()}`,
+        productId: montagem.id,
+        productName: montagem.name,
+        selectedColor: "",
+        description: "",
+        width: 0,
+        height: 0,
+        quantity: 1,
+        price: montagem.price,
+        cost: materialCost + laborCost,
+        materialCost,
+        materialBreakdown: materialBreakdown.length > 0 ? materialBreakdown : undefined,
+        laborCost,
+        laborBreakdown: laborBreakdown.length > 0 ? laborBreakdown : undefined,
+      };
+      setItems((prev) => [...prev, newItem]);
+      setMrSelectedMontagemId("");
+      return;
+    }
+
     setMrMontagens((prev) => [
       ...prev,
       { id: `mrm-${Date.now()}`, montagemId: montagem.id, name: montagem.name, price: montagem.price },
@@ -1413,6 +1586,27 @@ const categories = [
     if (!product) return;
     const qty = Math.max(1, Number(mrCubaQty) || 1);
     const { price, cost } = calculateItemPrice(mrSelectedCubaId, 1, 1, qty, "Padrão");
+
+    if (!getMarmoreCalculations()) {
+      const newItem: QuoteItem = {
+        id: `qi-cuba-${Date.now()}`,
+        productId: product.id,
+        productName: product.name,
+        selectedColor: "",
+        description: "",
+        width: 0,
+        height: 0,
+        quantity: qty,
+        price,
+        cost,
+        materialCost: cost,
+      };
+      setItems((prev) => [...prev, newItem]);
+      setMrSelectedCubaId("");
+      setMrCubaQty(1);
+      return;
+    }
+
     setMrCubas((prev) => [
       ...prev,
       { id: `mrc-${Date.now()}`, productId: product.id, name: product.name, quantity: qty, price, cost },
@@ -1425,6 +1619,23 @@ const categories = [
     setMrCubas((prev) => prev.filter((c) => c.id !== id));
   };
 
+  // Diferença do orçamento: soma direto no campo "Diferença (R$)" do
+  // orçamento (mesmo lugar de Frete/Instalação/Alimentação, mais abaixo na
+  // tela) — assim conta no total na hora, mesmo que o produto já tenha sido
+  // adicionado antes. Antes ficava presa numa lista local que só entrava no
+  // preço se o produto de mármore ainda fosse adicionado depois.
+  const addMrDiferenca = () => {
+    const value = Number(mrExtraService) || 0;
+    if (value <= 0) return;
+    setPriceDifference((prev) => {
+      const next = prev + value;
+      setPriceDifferenceInput(formatMoneyInputBR(next));
+      return next;
+    });
+    setMrExtraService(0);
+    setMrExtraServiceInput(formatMoneyInputBR(0));
+  };
+
   // Acessório de Mármore: mesmo padrão da Montagem (valor entra no preço da
   // peça, não vira linha separada pro cliente), mas calculado a partir de um
   // produto de verdade (categoria "ACESSORIO DE MARMORE"), não de um valor
@@ -1435,6 +1646,27 @@ const categories = [
     if (!product) return;
     const qty = Math.max(1, Number(mrAccessoryQty) || 1);
     const { price, cost } = calculateItemPrice(mrSelectedAccessoryId, 1, 1, qty, "Padrão");
+
+    if (!getMarmoreCalculations()) {
+      const newItem: QuoteItem = {
+        id: `qi-acessorio-${Date.now()}`,
+        productId: product.id,
+        productName: product.name,
+        selectedColor: "",
+        description: "",
+        width: 0,
+        height: 0,
+        quantity: qty,
+        price,
+        cost,
+        materialCost: cost,
+      };
+      setItems((prev) => [...prev, newItem]);
+      setMrSelectedAccessoryId("");
+      setMrAccessoryQty(1);
+      return;
+    }
+
     setMrAccessories((prev) => [
       ...prev,
       { id: `mra-${Date.now()}`, productId: product.id, name: product.name, quantity: qty, price, cost },
@@ -1506,7 +1738,25 @@ const categories = [
     const calc = getMarmoreCalculations();
     if (!calc) return alert("Adicione medidas válidas.");
 
-    const totalExtra = Number(mrExtraService) || 0;
+    const missingMr: string[] = [];
+    if (mrMontagens.length === 0) missingMr.push("Montagem");
+    if (mrCubas.length === 0) missingMr.push("Cuba");
+    if (mrAccessories.length === 0) missingMr.push("Acessório de Mármore");
+    if (missingMr.length > 0) {
+      setMissingItemsConfirm({
+        message: `Esta peça está sem: ${missingMr.join(", ")}.\nDeseja adicionar mesmo assim, sem esse(s) item(ns)?`,
+        onConfirm: () => addMarmoreItemCore(selectedProduct, calc),
+      });
+      return;
+    }
+
+    addMarmoreItemCore(selectedProduct, calc);
+  };
+
+  const addMarmoreItemCore = (
+    selectedProduct: Product,
+    calc: NonNullable<ReturnType<typeof getMarmoreCalculations>>
+  ) => {
     const montagemPriceTotal = mrMontagens.reduce((s, m) => s + (Number(m.price) || 0), 0);
     const assemblyBreakdown: QuoteItemAssemblyLine[] = mrMontagens.flatMap((m) => {
       const montagem = montagens.find((mm) => mm.id === m.montagemId);
@@ -1528,8 +1778,30 @@ const categories = [
     const accessoryPriceTotal = mrAccessories.reduce((s, a) => s + (Number(a.price) || 0), 0);
     const accessoryCostTotal = mrAccessories.reduce((s, a) => s + (Number(a.cost) || 0), 0);
 
-    const finalPrice = calc.totalPrice + totalExtra + montagemPriceTotal + cubaPriceTotal + accessoryPriceTotal;
-    const totalCost = calc.totalCost + totalExtra + assemblyCost + cubaCostTotal + accessoryCostTotal;
+    const finalPrice = calc.totalPrice + montagemPriceTotal + cubaPriceTotal + accessoryPriceTotal;
+    const totalCost = calc.totalCost + assemblyCost + cubaCostTotal + accessoryCostTotal;
+
+    // Cuba e Acessório de Mármore entram como linhas de "matéria-prima" no
+    // detalhamento (painel Admin) — antes só somavam no CMV total sem
+    // aparecer em lugar nenhum do "ver detalhamento", como se o custo
+    // tivesse vindo do nada.
+    const cubaMaterialLines: QuoteItemMaterialLine[] = mrCubas.map((c) => ({
+      name: c.name,
+      color: "Padrão",
+      unit: "un",
+      quantity: c.quantity,
+      unitCost: c.quantity > 0 ? c.cost / c.quantity : c.cost,
+      totalCost: c.cost,
+    }));
+    const accessoryMaterialLines: QuoteItemMaterialLine[] = mrAccessories.map((a) => ({
+      name: a.name,
+      color: "Padrão",
+      unit: "un",
+      quantity: a.quantity,
+      unitCost: a.quantity > 0 ? a.cost / a.quantity : a.cost,
+      totalCost: a.cost,
+    }));
+    const fullMaterialBreakdown = [...calc.materialBreakdown, ...cubaMaterialLines, ...accessoryMaterialLines];
 
     const validPieces = mrPieces.filter((p) => p.length > 0 && p.width > 0 && p.quantity > 0);
     // Só pra equipe ver depois (dentro do sistema) o que foi medido peça a
@@ -1537,9 +1809,6 @@ const categories = [
     const detalhamentoLines = validPieces.map(
       (p, idx) => `Peça ${idx + 1}: ${p.quantity}x (${p.length}mm x ${p.width}mm)`
     );
-    if (totalExtra > 0) {
-      detalhamentoLines.push(`Acréscimo por serviço: R$ ${totalExtra.toFixed(2)}`);
-    }
     mrCubas.forEach((c) => {
       detalhamentoLines.push(`Cuba: ${c.name} (${c.quantity}x) — R$ ${c.price.toFixed(2)}`);
     });
@@ -1554,7 +1823,6 @@ const categories = [
     const description = [
       `Cor: ${selectedColor || "Não informado"}`,
       `Área total: ${calc.totalAreaM2.toFixed(2)} m²`,
-      `Acréscimo por serviço: R$ ${totalExtra.toFixed(2)}`,
     ].join(" | ");
 
     const newItem: QuoteItem = {
@@ -1569,14 +1837,17 @@ const categories = [
       quantity: 1,
       price: finalPrice,
       cost: totalCost,
-      materialCost: calc.totalMaterialCost,
+      materialCost: calc.totalMaterialCost + cubaCostTotal + accessoryCostTotal,
       laborCost: calc.totalLaborCost,
       fixedCostValue: calc.totalFixedCostValue,
-      materialBreakdown: calc.materialBreakdown,
+      materialBreakdown: fullMaterialBreakdown,
       laborBreakdown: calc.laborBreakdown,
       montagens: mrMontagens.length > 0 ? mrMontagens : undefined,
       assemblyCost: assemblyCost > 0 ? assemblyCost : undefined,
       assemblyBreakdown: assemblyBreakdown.length > 0 ? assemblyBreakdown : undefined,
+      piecesBreakdown: validPieces,
+      extrasPriceTotal: montagemPriceTotal + cubaPriceTotal + accessoryPriceTotal,
+      extrasCostTotal: assemblyCost + cubaCostTotal + accessoryCostTotal,
     };
 
     setItems((prev) => [...prev, newItem]);
@@ -1615,13 +1886,34 @@ const categories = [
     } = calculateItemPrice(acSelectedProductId, 1, 1, acQuantity, selectedColor);
 
     const totalExtra = Number(acExtraService) || 0;
-    const finalPrice = basePrice + totalExtra;
-    const totalCost = baseCost + totalExtra;
+    const assemblyBreakdown: QuoteItemAssemblyLine[] = acMontagens.flatMap((m) => {
+      const montagem = montagens.find((mm) => mm.id === m.montagemId);
+      const insumoLines = (montagem?.insumos || []).map((insumo) => ({
+        montagemName: m.name,
+        insumoName: insumo.name,
+        value: Number(insumo.value) || 0,
+      }));
+      const laborLines = (montagem?.labor || []).map((labor) => ({
+        montagemName: m.name,
+        insumoName: `Mão de obra (${labor.role})`,
+        value: Number(labor.total) || 0,
+      }));
+      return [...insumoLines, ...laborLines];
+    });
+    const assemblyCost = assemblyBreakdown.reduce((s, l) => s + l.value, 0);
+    const finalPrice = basePrice + totalExtra + acMontagemTotal;
+    const totalCost = baseCost + totalExtra + assemblyCost;
 
     const description = [
       `Cor: ${selectedColor || "Não informado"}`,
       `Acréscimo por serviço: R$ ${totalExtra.toFixed(2)}`,
     ].join(" | ");
+
+    const detalhamentoLines: string[] = [];
+    acMontagens.forEach((m) => {
+      detalhamentoLines.push(`Montagem: ${m.name} — R$ ${m.price.toFixed(2)}`);
+    });
+    const internalDetail = detalhamentoLines.join("\n");
 
     const newItem: QuoteItem = {
       id: `qi-acessorio-${Date.now()}`,
@@ -1629,6 +1921,7 @@ const categories = [
       productName: selectedProduct.name,
       selectedColor,
       description,
+      internalDetail: internalDetail || undefined,
       width: 0,
       height: 0,
       quantity: acQuantity,
@@ -1639,12 +1932,35 @@ const categories = [
       fixedCostValue: baseFixed,
       materialBreakdown,
       laborBreakdown,
+      montagens: acMontagens.length > 0 ? acMontagens : undefined,
+      assemblyCost: assemblyCost > 0 ? assemblyCost : undefined,
+      assemblyBreakdown: assemblyBreakdown.length > 0 ? assemblyBreakdown : undefined,
     };
 
     setItems((prev) => [...prev, newItem]);
     setAcQuantity(1);
     setAcExtraService(0);
     setAcExtraServiceInput(formatMoneyInputBR(0));
+    setAcMontagens([]);
+  };
+
+  // Montagem (Produtos Prontos): mesmo padrão da Montagem de Mármore — não
+  // vira item separado, fica numa lista de composição até "Adicionar
+  // produto" somar tudo num único item.
+  const addAcMontagem = () => {
+    if (!acSelectedMontagemId) return;
+    const montagem = montagens.find((m) => m.id === acSelectedMontagemId);
+    if (!montagem) return;
+
+    setAcMontagens((prev) => [
+      ...prev,
+      { id: `acm-${Date.now()}`, montagemId: montagem.id, name: montagem.name, price: montagem.price },
+    ]);
+    setAcSelectedMontagemId("");
+  };
+
+  const removeAcMontagem = (id: string) => {
+    setAcMontagens((prev) => prev.filter((m) => m.id !== id));
   };
 
   const handleAddGlassItem = () => {
@@ -1659,6 +1975,35 @@ const categories = [
      const selectedProduct = products.find((p) => p.id === gwSelectedProduct);
     if (!selectedProduct) return;
 
+    if (lastGwGlassTypeId && lastGwGlassTypeId !== gwGlassTypeId) {
+      const lastName = glassTypeOptions.find((m) => String(m.id) === lastGwGlassTypeId)?.name || "outro tipo";
+      const currentName = selectedGlassType?.name || "este tipo";
+      setMissingItemsConfirm({
+        message: `A última peça deste orçamento usou "${lastName}", e esta está com "${currentName}".\nOs tipos de vidro são diferentes — confirma que é isso mesmo?`,
+        onConfirm: () => proceedAddGlassItem(selectedProduct),
+      });
+      return;
+    }
+
+    proceedAddGlassItem(selectedProduct);
+  };
+
+  const proceedAddGlassItem = (selectedProduct: Product) => {
+    const missingGw: string[] = [];
+    if (gwEstruturas.length === 0) missingGw.push("Estrutura de Alumínio");
+    if (gwAcessoriosVidro.length === 0) missingGw.push("Acessório Vidro");
+    if (missingGw.length > 0) {
+      setMissingItemsConfirm({
+        message: `Este produto está sem: ${missingGw.join(", ")}.\nDeseja adicionar mesmo assim, sem esse(s) item(ns)?`,
+        onConfirm: () => addGlassItemCore(selectedProduct),
+      });
+      return;
+    }
+
+    addGlassItemCore(selectedProduct);
+  };
+
+  const addGlassItemCore = (selectedProduct: Product) => {
     const { price: basePrice, cost: baseCost, materialCost: baseMat, laborCost: baseLab, fixedCostValue: baseFixed, materialBreakdown, laborBreakdown } = calculateItemPrice(
       gwSelectedProduct,
       gwWidth,
@@ -1677,8 +2022,10 @@ const categories = [
 
     const extrasPerUnit = jateadoCost + (Number(gwExtraService) || 0);
     const totalExtras = extrasPerUnit * gwQuantity;
-    const finalPrice = basePrice + totalExtras;
-    const totalCost = baseCost + totalExtras;
+    const estruturaCostTotal = gwEstruturas.reduce((s, e) => s + (Number(e.cost) || 0), 0);
+    const acessorioVidroCostTotal = gwAcessoriosVidro.reduce((s, a) => s + (Number(a.cost) || 0), 0);
+    const finalPrice = basePrice + totalExtras + gwEstruturaTotal + gwAcessorioVidroTotal;
+    const totalCost = baseCost + totalExtras + estruturaCostTotal + acessorioVidroCostTotal;
 
     const fullMaterialBreakdown = [...materialBreakdown];
     if (isJateado && jateadoTotalCost > 0) {
@@ -1691,6 +2038,30 @@ const categories = [
         totalCost: jateadoTotalCost,
       });
     }
+    // Estrutura de Alumínio e Acessório Vidro entram como linhas de
+    // "matéria-prima" no detalhamento (painel Admin) — mesmo ajuste feito
+    // pra Cuba/Acessório de Mármore, senão o custo delas some no CMV total
+    // sem aparecer em lugar nenhum do "ver detalhamento".
+    gwEstruturas.forEach((e) => {
+      fullMaterialBreakdown.push({
+        name: e.name,
+        color: e.color || "Padrão",
+        unit: "un",
+        quantity: e.quantity,
+        unitCost: e.quantity > 0 ? e.cost / e.quantity : e.cost,
+        totalCost: e.cost,
+      });
+    });
+    gwAcessoriosVidro.forEach((a) => {
+      fullMaterialBreakdown.push({
+        name: a.name,
+        color: a.color || "Padrão",
+        unit: "un",
+        quantity: a.quantity,
+        unitCost: a.quantity > 0 ? a.cost / a.quantity : a.cost,
+        totalCost: a.cost,
+      });
+    });
 
    const description = [
       `Tipo de vidro: ${selectedGlassType?.name || "Não informado"}`,
@@ -1700,18 +2071,32 @@ const categories = [
       `Acréscimo por serviço: R$ ${Number(gwExtraService || 0).toFixed(2)}`,
     ].join(" | ");
 
+    // Detalhamento interno da composição — só a equipe vê, nunca vai pro
+    // PDF/impressão do cliente (mesmo padrão do internalDetail do Mármore).
+    const detalhamentoLines: string[] = [];
+    gwEstruturas.forEach((e) => {
+      detalhamentoLines.push(
+        `Estrutura: ${e.name} (${e.width}mm x ${e.height}mm, ${e.quantity}x) — R$ ${e.price.toFixed(2)}`
+      );
+    });
+    gwAcessoriosVidro.forEach((a) => {
+      detalhamentoLines.push(`Acessório: ${a.name} (${a.quantity}x) — R$ ${a.price.toFixed(2)}`);
+    });
+    const internalDetail = detalhamentoLines.join("\n");
+
     const newItem: QuoteItem = {
       id: `qi-glass-${Date.now()}`,
       productId: selectedProduct.id,
       productName: isJateado ? `${selectedProduct.name} (Jateado)` : selectedProduct.name,
       selectedColor,
       description,
+      internalDetail: internalDetail || undefined,
       width: gwWidth,
       height: gwHeight,
       quantity: gwQuantity,
       price: finalPrice,
       cost: totalCost,
-      materialCost: baseMat + jateadoTotalCost,
+      materialCost: baseMat + jateadoTotalCost + estruturaCostTotal + acessorioVidroCostTotal,
       laborCost: baseLab,
       fixedCostValue: baseFixed,
       materialBreakdown: fullMaterialBreakdown,
@@ -1719,9 +2104,15 @@ const categories = [
     };
 
     setItems((prev) => [...prev, newItem]);
+    setGwEstruturas([]);
+    setGwAcessoriosVidro([]);
+    setLastGwGlassTypeId(gwGlassTypeId);
   };
 
-  const handleAddEstruturaItem = () => {
+  // Estrutura de Alumínio dentro do vidro: mesmo padrão de Cuba/Montagem no
+  // Mármore — não vira item separado, fica numa lista de composição até o
+  // "Adicionar produto de vidro" somar tudo num único item.
+  const addGwEstrutura = () => {
     if (!esSelectedProduct) return alert("Selecione um produto.");
     if (!esWidth || !esHeight) return alert("Informe altura e largura em milímetros.");
     if (esColorOptions.length > 0 && !esColor) return alert("Selecione a cor.");
@@ -1729,90 +2120,71 @@ const categories = [
     const selectedProduct = products.find((p) => p.id === esSelectedProduct);
     if (!selectedProduct) return;
 
-    const { price: basePrice, cost: baseCost, materialCost: baseMat, laborCost: baseLab, fixedCostValue: baseFixed, materialBreakdown, laborBreakdown } = calculateItemPrice(
-      esSelectedProduct,
-      esWidth,
-      esHeight,
-      esQuantity,
-      esColor
-    );
-
+    const { price, cost } = calculateItemPrice(esSelectedProduct, esWidth, esHeight, esQuantity, esColor);
     const totalExtras = (Number(esExtraService) || 0) * esQuantity;
-    const finalPrice = basePrice + totalExtras;
-    const totalCost = baseCost + totalExtras;
 
-    const description = [
-      `Cor: ${esColor || "Não informado"}`,
-      `Acréscimo por serviço: R$ ${Number(esExtraService || 0).toFixed(2)}`,
-    ].join(" | ");
+    setGwEstruturas((prev) => [
+      ...prev,
+      {
+        id: `gwe-${Date.now()}`,
+        productId: selectedProduct.id,
+        name: selectedProduct.name,
+        width: esWidth,
+        height: esHeight,
+        color: esColor,
+        quantity: esQuantity,
+        price: price + totalExtras,
+        cost: cost + totalExtras,
+      },
+    ]);
 
-    const newItem: QuoteItem = {
-      id: `qi-estrutura-${Date.now()}`,
-      productId: selectedProduct.id,
-      productName: selectedProduct.name,
-      selectedColor: esColor,
-      description,
-      width: esWidth,
-      height: esHeight,
-      quantity: esQuantity,
-      price: finalPrice,
-      cost: totalCost,
-      materialCost: baseMat,
-      laborCost: baseLab,
-      fixedCostValue: baseFixed,
-      materialBreakdown,
-      laborBreakdown,
-    };
-
-    setItems((prev) => [...prev, newItem]);
+    setEsSelectedProduct("");
+    setEsWidth(0);
+    setEsHeight(0);
+    setEsColor("");
+    setEsExtraService(0);
+    setEsExtraServiceInput(formatMoneyInputBR(0));
+    setEsQuantity(1);
   };
 
-  const handleAddAcessorioVidroItem = () => {
+  const removeGwEstrutura = (id: string) => {
+    setGwEstruturas((prev) => prev.filter((e) => e.id !== id));
+  };
+
+  // Acessório Vidro: mesmo padrão de Acessório de Mármore — soma no preço
+  // do vidro, não vira item separado.
+  const addGwAcessorioVidro = () => {
     if (!avSelectedProduct) return alert("Selecione um produto.");
     if (avColorOptions.length > 0 && !avColor) return alert("Selecione a cor.");
 
     const selectedProduct = products.find((p) => p.id === avSelectedProduct);
     if (!selectedProduct) return;
 
-    const { price: basePrice, cost: baseCost, materialCost: baseMat, laborCost: baseLab, fixedCostValue: baseFixed, materialBreakdown, laborBreakdown } = calculateItemPrice(
-      avSelectedProduct,
-      1,
-      1,
-      avQuantity,
-      avColor
-    );
-
+    const { price, cost } = calculateItemPrice(avSelectedProduct, 1, 1, avQuantity, avColor);
     const totalExtra = Number(avExtraService) || 0;
-    const finalPrice = basePrice + totalExtra;
-    const totalCost = baseCost + totalExtra;
 
-    const description = [
-      `Cor: ${avColor || "Não informado"}`,
-      `Acréscimo por serviço: R$ ${totalExtra.toFixed(2)}`,
-    ].join(" | ");
+    setGwAcessoriosVidro((prev) => [
+      ...prev,
+      {
+        id: `gwa-${Date.now()}`,
+        productId: selectedProduct.id,
+        name: selectedProduct.name,
+        color: avColor,
+        quantity: avQuantity,
+        price: price + totalExtra,
+        cost: cost + totalExtra,
+      },
+    ]);
 
-    const newItem: QuoteItem = {
-      id: `qi-acessoriovidro-${Date.now()}`,
-      productId: selectedProduct.id,
-      productName: selectedProduct.name,
-      selectedColor: avColor,
-      description,
-      width: 0,
-      height: 0,
-      quantity: avQuantity,
-      price: finalPrice,
-      cost: totalCost,
-      materialCost: baseMat,
-      laborCost: baseLab,
-      fixedCostValue: baseFixed,
-      materialBreakdown,
-      laborBreakdown,
-    };
-
-    setItems((prev) => [...prev, newItem]);
+    setAvSelectedProduct("");
+    setAvColor("");
     setAvQuantity(1);
     setAvExtraService(0);
     setAvExtraServiceInput(formatMoneyInputBR(0));
+  };
+
+  const removeGwAcessorioVidro = (id: string) => {
+    setGwAcessoriosVidro((prev) => prev.filter((a) => a.id !== id));
   };
 
   // ============================
@@ -1867,14 +2239,14 @@ const categories = [
           if (product) {
             if (field === "productId") {
               updatedItem.productName = product.name;
-              const availableColors = Array.from(
+              const availableColors = filterProductAvailableColors(product, Array.from(
                 new Set(
                   product.composition.flatMap((c) => {
                     const material = rawMaterials.find((m) => m.id === c.materialId);
                     return getMaterialVariants(material).map((cv) => getVariantName(cv));
                   })
                 )
-              );
+              ) as string[]);
               updatedItem.selectedColor = availableColors.length > 0 ? (availableColors[0] as string) : "Padrão";
             }
 
@@ -1906,16 +2278,100 @@ const categories = [
     );
   };
 
-  const subtotal = items.reduce((sum, item) => sum + item.price, 0);
+  const addEditingPiece = () => {
+    setEditingMarmorePieces((prev) => [
+      ...prev,
+      { id: `${Date.now()}-${prev.length}`, length: 0, width: 0, quantity: 1 },
+    ]);
+  };
+
+  const removeEditingPiece = (id: string) => {
+    setEditingMarmorePieces((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  const updateEditingPiece = (id: string, field: "length" | "width" | "quantity", value: number) => {
+    setEditingMarmorePieces((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
+  };
+
+  // Recalcula o preço do item de mármore a partir das peças editadas,
+  // preservando o que já estava embutido de montagem/cuba/acessório/diferença
+  // (extrasPriceTotal/extrasCostTotal, guardados na criação do item).
+  const handleSaveMarmorePiecesEdit = (item: QuoteItem) => {
+    const calc = computeMarmorePieces(item.productId, item.selectedColor, editingMarmorePieces);
+    if (!calc) return alert("Adicione ao menos uma peça com medidas válidas.");
+
+    const extrasPrice = item.extrasPriceTotal || 0;
+    const extrasCost = item.extrasCostTotal || 0;
+    const validPieces = editingMarmorePieces.filter((p) => p.length > 0 && p.width > 0 && p.quantity > 0);
+
+    // Refaz os textos que mostram as medidas — antes só preço/peças mudavam e
+    // o "Detalhamento interno" (Peça 1, Peça 2…) e a "Área total" da descrição
+    // continuavam com as medidas antigas, parecendo que a edição não salvou.
+    // Mantém as demais linhas (cuba, acessório, observação) como estavam.
+    const pieceLines = validPieces.map(
+      (p, idx) => `Peça ${idx + 1}: ${p.quantity}x (${p.length}mm x ${p.width}mm)`
+    );
+    const otherDetailLines = String(item.internalDetail || "")
+      .split("\n")
+      .filter((line) => line.trim() && !/^Peça \d+:/.test(line.trim()));
+    const internalDetail = [...pieceLines, ...otherDetailLines].join("\n");
+
+    const areaText = `Área total: ${calc.totalAreaM2.toFixed(2)} m²`;
+    const description = /Área total: [\d.,]+ m²/.test(item.description || "")
+      ? String(item.description).replace(/Área total: [\d.,]+ m²/, areaText)
+      : [item.description, areaText].filter(Boolean).join(" | ");
+
+    setItems((prev) =>
+      prev.map((it) =>
+        it.id !== item.id
+          ? it
+          : {
+              ...it,
+              price: calc.totalPrice + extrasPrice,
+              cost: calc.totalCost + extrasCost,
+              // extrasCost já inclui cuba/montagem/acessório — soma aqui pra
+              // "Custo matéria-prima" continuar batendo com o CMV total
+              // depois de reeditar as peças (o detalhamento por linha de
+              // cuba/acessório específico não sobrevive à reedição).
+              materialCost: calc.totalMaterialCost + extrasCost,
+              laborCost: calc.totalLaborCost,
+              fixedCostValue: calc.totalFixedCostValue,
+              materialBreakdown: calc.materialBreakdown,
+              laborBreakdown: calc.laborBreakdown,
+              piecesBreakdown: validPieces,
+              description,
+              internalDetail: internalDetail || undefined,
+            }
+      )
+    );
+    setEditingItemId(null);
+  };
+
+  // Cada item é somado já arredondado em centavos — o preço calculado pode
+  // ter casas escondidas (ex.: 130,9749 aparece como 130,98) e, sem isso, o
+  // desconto em R$ era abatido do valor "cheio" e o total saía 1 centavo a
+  // menos do que a conta feita em cima do que está na tela.
+  const roundCents = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
+  const subtotal = roundCents(items.reduce((sum, item) => sum + roundCents(item.price), 0));
 
   // Preço do item já com a fatia proporcional do frete embutida — mesma
   // conta usada no PDF (utils/generateQuotePDF.ts), só que também na tela
   // antes de salvar, pra usuária ver como vai ficar sem precisar imprimir.
   const getDisplayedItemPrice = (item: QuoteItem) => {
     if (!dissolveFreight || freight <= 0 || subtotal <= 0) return item.price;
-    const share = item.price / subtotal;
-    return item.price + share * freight;
+    const itemFreight = freightSplitMode === "manual"
+      ? Number(freightManualByItem[item.id] || 0)
+      : (item.price / subtotal) * freight;
+    return item.price + itemFreight;
   };
+
+  // Soma do frete já distribuído manualmente — usado pra mostrar quanto
+  // ainda falta encaixar (ou se passou do total) enquanto a usuária digita.
+  const freightManualTotal = Object.keys(freightManualByItem).reduce(
+    (s, id) => s + (Number(freightManualByItem[id]) || 0),
+    0
+  );
+  const freightManualRemaining = freight - freightManualTotal;
 
   const totalMaterialCost = items.reduce((sum, item) => sum + (item.materialCost ?? 0), 0);
   const totalLaborCost = items.reduce((sum, item) => sum + (item.laborCost ?? 0), 0);
@@ -1976,8 +2432,9 @@ const categories = [
     0
   );
 
-// Valor bruto antes do desconto
-const grossTotal = subtotal + freight + installation;
+// Valor bruto antes do desconto — priceDifference soma direto como lucro
+// (não tem custo associado, então já entra puro na margem).
+const grossTotal = roundCents(subtotal + freight + installation + feedingCost + priceDifference);
 
 // Desconto
 const discountPercent = discountMode === "percent" ? Number(discountInput) || 0 : 0;
@@ -1986,21 +2443,23 @@ const discountFixed  = discountMode === "fixed"   ? discount : 0;
 // Os dois modos reduzem o total que o cliente vê — % calcula em cima do
 // valor bruto, R$ é abatido direto (limitado ao valor bruto, pra não gerar
 // total negativo).
-const discountValue  = discountMode === "percent"
+const discountValue  = roundCents(discountMode === "percent"
   ? grossTotal * (discountPercent / 100)
-  : Math.min(discountFixed, grossTotal);
+  : Math.min(discountFixed, grossTotal));
 
-// Base do orçamento (antes da comissão de indicação)
-const baseTotal = grossTotal - discountValue;
-
-// Comissão de indicação (% em cima do valor do orçamento)
+// Comissão de indicação (% em cima do valor bruto, antes do desconto) — se
+// calculada em cima do total já descontado, o desconto digitado (ex.:
+// R$96,32) acabava reduzindo o total em menos do que o valor digitado
+// (porque a comissão também caía junto), confundindo quem estava tentando
+// fechar num valor redondo específico.
 const referralCommissionValue =
   referralCommissionRate > 0
-    ? baseTotal * (referralCommissionRate / 100)
+    ? grossTotal * (referralCommissionRate / 100)
     : 0;
 
-// TOTAL FINAL
-const totalPrice = baseTotal + referralCommissionValue;
+// TOTAL FINAL — desconto abatido por último, sempre reduz o total exatamente
+// pelo valor digitado.
+const totalPrice = roundCents(grossTotal + referralCommissionValue - discountValue);
 
 const totalCostOfGoods =
   items.reduce((sum, item) => sum + item.cost, 0);
@@ -2042,16 +2501,21 @@ const cardRate =
 
 // Taxa de cartão reduzida pelo desconto (desconto sempre vem da taxa do cartão)
 // % mode: taxa efetiva = cardRate - discountPercent
-// R$ mode: valor bruto da taxa - desconto em R$
 const effectiveCardRate = discountMode === "percent"
   ? Math.max(0, cardRate - discountPercent)
   : cardRate;
 
 const commissionValue = totalPrice * (commissionRate / 100);
 const taxValue = totalPrice * (taxRate / 100);
-// Taxa de cartão sempre calculada (visível independente da forma de pagamento),
-// sobre o total já com desconto aplicado.
-const cardValue = totalPrice * (effectiveCardRate / 100);
+// Taxa de cartão sempre calculada (visível independente da forma de pagamento).
+// % mode: já reduzida pelo effectiveCardRate acima, sobre o total com desconto.
+// R$ mode: o comentário original já dizia "valor bruto da taxa - desconto em R$",
+// mas isso nunca tinha sido implementado — o desconto fixo só encolhia
+// proporcionalmente com o total (mesma taxa %), sem tirar nada da taxa de
+// cartão de fato, então ele saía inteiro do lucro em vez de vir da maquininha.
+const cardValue = discountMode === "percent"
+  ? totalPrice * (effectiveCardRate / 100)
+  : Math.max(0, grossTotal * (cardRate / 100) - discountValue);
 
 // Custo fixo real embutido no preço de cada item (usa o % de custo fixo
 // específico do produto, não um % global genérico, para a margem bater
@@ -2080,18 +2544,40 @@ const fmt = (v: number) =>
   v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // ── PDF preview computed values ──────────────────────────────────────────
-const pdfExtraTotal =
-  (savedQuote?.freight || 0) +
-  (savedQuote?.installation || 0) +
-  (savedQuote?.referralCommissionValue || 0);
+// Tudo que não é o preço "puro" do produto (frete, instalação, alimentação,
+// diferença, comissão de indicação, desconto) precisa ser diluído nos itens
+// — senão a soma das linhas da tabela não bate com o Total mostrado embaixo.
+// pdfExtraTotal = totalPrice - subtotal em vez de somar campo por campo:
+// somar campo por campo esquecia a Alimentação e o Desconto (mesmo bug já
+// corrigido em utils/generateQuotePDF.ts) — esse cálculo cobre qualquer
+// campo que afete o total, existente ou futuro, sem precisar listar todos.
 const pdfSubtotal = savedQuote?.subtotal || 0;
+// Rateio manual de frete por item (quando a usuária optou por definir na
+// mão em vez do proporcional automático) — some do pdfExtraTotal genérico
+// e é aplicado à parte por item, igual em utils/generateQuotePDF.ts.
+const pdfFreightManualByItem = savedQuote?.freightManualByItem || {};
+const pdfHasManualFreight = Object.keys(pdfFreightManualByItem).length > 0;
+// O desconto NÃO é diluído nos itens: cada produto mostra o valor cheio e o
+// desconto aparece separado embaixo (Subtotal → Desconto → Total). Antes ele
+// era diluído E mostrado na linha "Desconto", parecendo descontado duas vezes.
+const pdfDiscount = savedQuote?.discount || 0;
+const pdfExtraTotal =
+  (savedQuote?.totalPrice || 0) + pdfDiscount - pdfSubtotal - (pdfHasManualFreight ? (savedQuote?.freight || 0) : 0);
+// item.price já é o TOTAL da linha (preço unitário × quantidade) — não um
+// valor por unidade. Multiplicar por item.quantity de novo aqui (e outra
+// vez na hora de exibir displayedPrice * quantity) inflava o total exibido
+// no PDF (ex.: 2un a R$75 cada = R$150 virava R$150 "por unidade" e
+// R$300 de total). Mesmo ajuste já feito em utils/generateQuotePDF.ts.
 const dissolvedPDFItems = (savedQuote?.items || []).map((item) => {
-  const share = pdfSubtotal > 0 ? (item.price * item.quantity) / pdfSubtotal : 0;
-  const extraPerUnit = item.quantity > 0 ? (share * pdfExtraTotal) / item.quantity : 0;
-  return { ...item, displayedPrice: item.price + extraPerUnit };
+  const share = pdfSubtotal > 0 ? item.price / pdfSubtotal : 0;
+  const itemFreight = pdfHasManualFreight ? Number(pdfFreightManualByItem[item.id] || 0) : 0;
+  const extraShareForLine = itemFreight + share * pdfExtraTotal;
+  const displayedTotal = item.price + extraShareForLine;
+  const displayedUnitPrice = item.quantity > 0 ? displayedTotal / item.quantity : displayedTotal;
+  return { ...item, displayedTotal, displayedUnitPrice };
 });
 const dissolvedSubtotalPDF = dissolvedPDFItems.reduce(
-  (s, i) => s + i.displayedPrice * i.quantity,
+  (s, i) => s + i.displayedTotal,
   0
 );
 const cleanNotesForPDF = (q: Quote) =>
@@ -2109,15 +2595,53 @@ const cityPDF = cityFromAddress(companySettings.address || "");
   // ============================
   //          SALVAR
   // ============================
+// Cliente escolhido — compara como TEXTO dos dois lados: o cliente criado
+// pelo "+ Novo cliente" daqui fica com id "123" (texto), e quando a lista é
+// recarregada do banco o mesmo cliente volta com id 123 (número). Com "==="
+// direto os dois nunca batiam e o pedido era salvo como "Cliente
+// Desconhecido" — sumindo da busca pelo nome (caso do orçamento nº 387 da Sônia).
+const findSelectedClient = () => clients.find((c) => String(c.id) === String(selectedClientId));
+
+// Nome do cliente pra gravar no pedido: o do cadastro; se o cadastro não
+// estiver na lista carregada, mantém o nome que o pedido JÁ tinha (edição do
+// mesmo cliente) — nunca troca por "Cliente Desconhecido".
+const resolveCustomerName = (): string | null => {
+  const c = findSelectedClient();
+  if (c?.name) return c.name;
+  if (editingQuote && String(editingQuote.clientId ?? "") === String(selectedClientId) && editingQuote.customerName) {
+    return editingQuote.customerName;
+  }
+  return null;
+};
+
 const handleSave = () => {
   if (!selectedClientId) return alert("Selecione um cliente.");
+  if (!resolveCustomerName()) {
+    return alert(
+      "O cliente selecionado não foi encontrado na lista de clientes (pode ter sido recém-cadastrado ou a lista ainda está carregando).\n\n" +
+      "Selecione o cliente de novo antes de salvar — assim o pedido não fica sem nome."
+    );
+  }
   if (items.length === 0) return alert("Adicione pelo menos um item.");
   if (!deliveryDate) return alert("Informe uma data de entrega válida.");
+
+  const missingTotals: string[] = [];
+  if (!freight) missingTotals.push("Frete");
+  if (!installation) missingTotals.push("Instalação");
+  if (!feedingCost) missingTotals.push("Alimentação");
+  if (!referralCommissionValue) missingTotals.push("Comissão de Indicação");
+  if (missingTotals.length > 0) {
+    setMissingItemsConfirm({
+      message: `Este orçamento está sem: ${missingTotals.join(", ")}.\nDeseja salvar mesmo assim, sem esse(s) item(ns)?`,
+      onConfirm: () => setShowPDFOptions(true),
+    });
+    return;
+  }
+
   setShowPDFOptions(true);
 };
 
 const buildQuoteObject = (): Quote => {
-  const selectedClient = clients.find((c) => c.id === selectedClientId);
   const cleanMeasurementNotes = stripDeliveryMetaFromNotes(measurementNotes);
   const finalMeasurementNotes = [
     `Prazo de entrega: ${Math.max(0, Math.floor(Number(deliveryLeadDays) || 0))} dias`,
@@ -2131,25 +2655,32 @@ const buildQuoteObject = (): Quote => {
     id: editingQuote?.id ?? `q${Date.now()}`,
     quoteNumber: editingQuote?.quoteNumber ?? nextQuoteNumber,
     clientId: selectedClientId,
-    customerName: selectedClient ? selectedClient.name : "Cliente Desconhecido",
+    // handleSave já bloqueia o salvamento quando não há nome — o fallback
+    // aqui só existe por segurança e nunca deve ser usado.
+    customerName: resolveCustomerName() ?? editingQuote?.customerName ?? "Cliente Desconhecido",
     items,
     subtotal,
     discount: discountValue,
     freight,
     freightItems: freightItems.length > 0 ? freightItems : undefined,
     dissolveFreight,
+    // Manda {} (não undefined) quando volta pra automático — undefined some
+    // do payload de update e deixaria um rateio manual antigo "grudado" no
+    // banco mesmo depois de a usuária trocar de volta pra automático.
+    freightManualByItem: freightSplitMode === "manual" ? freightManualByItem : {},
     installation,
     installationCostItems:
       installationCostItems.length > 0
         ? installationCostItems.map(({ id, name, value }) => ({ id, name, value }))
         : undefined,
     feedingCost,
+    priceDifference,
     totalPrice,
     paymentMethod,
     assemblyNotes,
     measurementNotes: finalMeasurementNotes,
     date,
-    status: editingQuote?.status ?? "Pendente",
+    status: originLegacy && legacyAlreadyDelivered ? "Aprovado" : editingQuote?.status ?? "Pendente",
     salesperson: editingQuote?.salesperson ?? currentUser.name,
     costOfGoods: totalCostOfGoods,
     fixedCosts: fixedCostValue,
@@ -2157,25 +2688,94 @@ const buildQuoteObject = (): Quote => {
     taxes: taxValue,
     referralCommissionRate,
     referralCommissionValue,
+    originLegacy: originLegacy || undefined,
+    saleCompleted: originLegacy && legacyAlreadyDelivered ? true : (editingQuote?.saleCompleted ?? false),
+    concludedAt: originLegacy && legacyAlreadyDelivered ? legacyConcludedAt : editingQuote?.concludedAt,
+    approvedAt: originLegacy && legacyAlreadyDelivered ? date : editingQuote?.approvedAt,
   };
 };
 
-const handleConfirmAndSave = async () => {
+const handleConfirmAndSave = async (openPreview = true) => {
   localStorage.setItem("quotePDFHidePrice", String(hidePrice));
   localStorage.setItem("quotePDFHideMeasures", String(hideMeasures));
-  localStorage.setItem("quotePDFHideDetailedDesc", String(hideDetailedDescription));
+  localStorage.setItem("quotePDFHideDetailedDesc_v2", String(hideDetailedDescription));
 
   const newQuote = buildQuoteObject();
   setIsSaving(true);
+  let savedRealQuote: Quote | void | undefined;
   if (editingQuote && onUpdateQuote) {
     await onUpdateQuote(newQuote);
+    // Snapshot da venda/orçamento nesse exato momento — só aqui, no salvar
+    // do formulário completo de edição (não nos salvamentos rápidos de
+    // status/frete/etc.), pra não poluir o histórico com toda mudancinha.
+    createQuoteHistoryEntry(String(newQuote.id), newQuote).catch((err) =>
+      console.error("Erro ao registrar histórico:", err)
+    );
   } else {
-    await onAddQuote(newQuote);
+    savedRealQuote = await onAddQuote(newQuote);
+    // Venda do sistema antigo já entregue nasce "Concluída" — registra quem fez.
+    if (savedRealQuote && originLegacy && legacyAlreadyDelivered) {
+      createQuoteHistoryEntry(String((savedRealQuote as Quote).id), savedRealQuote as Quote, "venda_gerada", "Venda gerada", {
+        description: "Lançada como venda do sistema antigo JÁ ENTREGUE (concluída)",
+        userName: currentUser?.name || "",
+      }).catch(() => {});
+    }
   }
   setIsSaving(false);
-  setSavedQuote(newQuote);
+  // O número definitivo da OS é o que o banco gravou (o gatilho pula números
+  // de orçamentos excluídos), não o previsto na tela — o PDF usa esse.
+  const savedNumber = (savedRealQuote as Quote | undefined)?.quoteNumber;
+  setSavedQuote(savedNumber != null ? { ...newQuote, quoteNumber: savedNumber } : newQuote);
   setShowPDFOptions(false);
-  setShowPDFPreview(true);
+  if (openPreview) setShowPDFPreview(true);
+
+  let hasLegacyCandidates = false;
+  // Venda do sistema antigo: procura no Caixa pagamentos desse mesmo
+  // cliente que ainda não têm orcamento_id, pra oferecer vincular.
+  if (originLegacy && savedRealQuote && !editingQuote) {
+    const realId = String((savedRealQuote as Quote).id);
+    const clientName = newQuote.customerName.trim().toLowerCase();
+    const res = await getCashFlow();
+    if (res.ok) {
+      const candidates = (res.data ?? []).filter(
+        (e) =>
+          e.type === "Entrada" &&
+          !e.orcamentoId &&
+          !e.isTransfer &&
+          clientName &&
+          (e.description || "").toLowerCase().includes(clientName)
+      );
+      if (candidates.length > 0) {
+        setLegacyLinkCandidates(candidates);
+        setLegacyLinkQuoteId(realId);
+        setLegacyLinkSelected(new Set(candidates.map((c) => c.id)));
+        hasLegacyCandidates = true;
+      }
+    }
+  }
+
+  if (!openPreview) {
+    if (hasLegacyCandidates) setCloseAfterLegacyLink(true);
+    else onCancel();
+  }
+};
+
+const handleConfirmLegacyLink = async () => {
+  if (!legacyLinkQuoteId || !legacyLinkCandidates) return;
+  setLinkingLegacyPayments(true);
+  try {
+    const toLink = legacyLinkCandidates.filter((c) => legacyLinkSelected.has(c.id));
+    for (const entry of toLink) {
+      const { id, ...rest } = entry;
+      await updateCashFlowEntry(id, { ...rest, orcamentoId: legacyLinkQuoteId });
+    }
+    setLegacyLinkCandidates(null);
+    setLegacyLinkQuoteId(null);
+    alert(`${toLink.length} pagamento(s) vinculado(s) a esta venda ✅`);
+    if (closeAfterLegacyLink) onCancel();
+  } finally {
+    setLinkingLegacyPayments(false);
+  }
 };
 
 const handlePrint = () => {
@@ -2198,10 +2798,12 @@ const handlePrint = () => {
 
 const handleSavePDF = async () => {
   if (!savedQuote) return;
-  const pdfOptions: PDFOptions = { hidePrice, hideMeasures, hideDetailedDescription };
+  // Venda já gerada (ou lançada direto como venda do sistema antigo) → OS.
+  const isServiceOrder = hasSale || (originLegacy && !editingQuote);
+  const pdfOptions: PDFOptions = { hidePrice, hideMeasures, hideDetailedDescription, isServiceOrder };
   const doc = await generateQuotePDF(savedQuote, companySettings, pdfOptions);
   const num = savedQuote.quoteNumber ?? savedQuote.id;
-  doc.save(`Orcamento_${num}_${savedQuote.date ?? ""}.pdf`);
+  doc.save(`${isServiceOrder ? "OrdemServico" : "Orcamento"}_${num}_${savedQuote.date ?? ""}.pdf`);
 };
 
 
@@ -2261,6 +2863,7 @@ const handleSavePDF = async () => {
 
     onAddNewClient(newClient);
     setSelectedClientId(clientId);
+    setClientSearch(newClientName);
 
     setIsClientModalOpen(false);
     setNewClientName("");
@@ -2365,7 +2968,7 @@ const handleSavePDF = async () => {
                             setClientDropdownOpen(false);
                           }}
                           className={`w-full text-left px-4 py-2.5 text-sm hover:bg-blue-50 hover:text-blue-700 transition-colors ${
-                            c.id === selectedClientId ? "bg-blue-50 text-blue-700 font-semibold" : "text-gray-800"
+                            String(c.id) === String(selectedClientId) ? "bg-blue-50 text-blue-700 font-semibold" : "text-gray-800"
                           }`}
                         >
                           {c.name}
@@ -2462,6 +3065,49 @@ const handleSavePDF = async () => {
             Se cair no fim de semana, o sistema ajusta para o próximo dia útil.
           </p>
         </div>
+
+        {!editingQuote && (
+          // Discreto enquanto desmarcado (raramente usado); ganha destaque
+          // âmbar só quando marcado, pra deixar claro que é cadastro retroativo.
+          <div className={originLegacy ? "mt-5 bg-amber-50 border border-amber-200 rounded-lg p-4" : "mt-3"}>
+            <label
+              className={`inline-flex items-center gap-2 cursor-pointer select-none ${
+                originLegacy ? "text-sm font-semibold text-amber-800" : "text-xs text-gray-400 hover:text-gray-600"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={originLegacy}
+                onChange={(e) => setOriginLegacy(e.target.checked)}
+                className="w-3.5 h-3.5 shrink-0"
+              />
+              <span>Venda vinda do sistema antigo (cadastro retroativo)</span>
+            </label>
+            {originLegacy && (
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label className="flex items-center gap-2 text-sm text-amber-800">
+                  <input
+                    type="checkbox"
+                    checked={legacyAlreadyDelivered}
+                    onChange={(e) => setLegacyAlreadyDelivered(e.target.checked)}
+                  />
+                  Já foi entregue
+                </label>
+                {legacyAlreadyDelivered && (
+                  <div>
+                    <label className="block text-xs font-medium text-amber-700">Data real da entrega</label>
+                    <input
+                      type="date"
+                      value={legacyConcludedAt}
+                      onChange={(e) => setLegacyConcludedAt(e.target.value)}
+                      className="mt-1 block w-full px-3 py-2 bg-white border border-amber-300 rounded-md shadow-sm text-gray-900"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-5">
           <div>
@@ -2593,6 +3239,25 @@ const handleSavePDF = async () => {
           </div>
 
           <div>
+            <label className="block text-sm font-medium text-gray-700">Diferença (R$)</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={priceDifferenceInput}
+              onChange={(e) => {
+                const rawValue = sanitizeMoneyInputBR(e.target.value);
+                setPriceDifferenceInput(rawValue);
+                setPriceDifference(parseMoneyInputBR(rawValue));
+              }}
+              onBlur={() => setPriceDifferenceInput(formatMoneyInputBR(priceDifference))}
+              className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-gray-900"
+            />
+            <p className="text-[11px] text-gray-400 mt-1">
+              Ajuste do orçamento — soma no total como lucro. Pode ser lançado a qualquer momento, mesmo depois dos produtos.
+            </p>
+          </div>
+
+          <div>
             <label className="block text-sm font-medium text-gray-700">Comissão de Indicação (%)</label>
             <input
               type="number"
@@ -2606,23 +3271,146 @@ const handleSavePDF = async () => {
           </div>
         </div>
 
+        {dissolveFreight && freight > 0 && items.length > 0 && (
+          <div className="mt-4 border border-gray-200 rounded-lg p-4 bg-gray-50">
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+              <span className="text-sm font-semibold text-gray-700">Como distribuir o frete entre os produtos?</span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFreightSplitMode("auto");
+                    setFreightManualByItem({});
+                    setFreightManualInputByItem({});
+                  }}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md border ${
+                    freightSplitMode === "auto"
+                      ? "bg-primary-600 text-white border-primary-600"
+                      : "bg-white text-gray-600 border-gray-300"
+                  }`}
+                >
+                  Diluir automático (proporcional)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFreightSplitMode("manual");
+                    setFreightManualByItem((prev) => {
+                      if (Object.keys(prev).length > 0) return prev;
+                      const initial: Record<string, number> = {};
+                      items.forEach((item) => {
+                        initial[item.id] =
+                          subtotal > 0 ? Number(((item.price / subtotal) * freight).toFixed(2)) : 0;
+                      });
+                      setFreightManualInputByItem(
+                        Object.fromEntries(
+                          Object.entries(initial).map(([id, v]) => [id, formatMoneyInputBR(v)])
+                        )
+                      );
+                      return initial;
+                    });
+                  }}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md border ${
+                    freightSplitMode === "manual"
+                      ? "bg-primary-600 text-white border-primary-600"
+                      : "bg-white text-gray-600 border-gray-300"
+                  }`}
+                >
+                  Definir valor por produto
+                </button>
+              </div>
+            </div>
+
+            {freightSplitMode === "manual" && (
+              <div className="space-y-2">
+                {items.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-3 bg-white border border-gray-200 rounded-md px-3 py-2"
+                  >
+                    <span className="text-sm text-gray-700 truncate">{item.productName}</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={
+                        freightManualInputByItem[item.id] ??
+                        formatMoneyInputBR(freightManualByItem[item.id] || 0)
+                      }
+                      onChange={(e) => {
+                        const raw = sanitizeMoneyInputBR(e.target.value);
+                        setFreightManualInputByItem((prev) => ({ ...prev, [item.id]: raw }));
+                        setFreightManualByItem((prev) => ({ ...prev, [item.id]: parseMoneyInputBR(raw) }));
+                      }}
+                      onBlur={() =>
+                        setFreightManualInputByItem((prev) => ({
+                          ...prev,
+                          [item.id]: formatMoneyInputBR(freightManualByItem[item.id] || 0),
+                        }))
+                      }
+                      className="w-28 px-2 py-1 border border-gray-300 rounded text-sm text-right text-gray-900"
+                    />
+                  </div>
+                ))}
+                <div
+                  className={`text-xs font-semibold mt-1 ${
+                    Math.abs(freightManualRemaining) < 0.01 ? "text-green-600" : "text-amber-600"
+                  }`}
+                >
+                  {Math.abs(freightManualRemaining) < 0.01
+                    ? "Valores batem com o frete total."
+                    : freightManualRemaining > 0
+                    ? `Falta distribuir R$ ${freightManualRemaining.toFixed(2).replace(".", ",")}`
+                    : `Passou do total em R$ ${Math.abs(freightManualRemaining).toFixed(2).replace(".", ",")}`}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center gap-3 mt-3">
           <button
             type="button"
-            onClick={() => {
-              setShowAdicionaisSaved(true);
-              setTimeout(() => setShowAdicionaisSaved(false), 2500);
+            disabled={savingAdicionais}
+            onClick={async () => {
+              // Num orçamento já existente esses valores (frete, instalação,
+              // alimentação, comissão) ficavam só no estado local até o
+              // usuário passar pelo fluxo inteiro de "Salvar" (que exige
+              // reabrir a tela de PDF) — então o botão mostrava "Salvo" mas
+              // nada ia pro banco, e mudanças feitas só nessa seção se
+              // perdiam. Agora, se já existe um orçamento salvo, persiste
+              // direto no Supabase.
+              if (editingQuote && onUpdateQuote) {
+                setSavingAdicionais(true);
+                try {
+                  const result: any = await onUpdateQuote(buildQuoteObject());
+                  if (result && result.ok === false) {
+                    alert(
+                      "Não foi possível salvar no banco: " +
+                        (result.error?.message || "erro desconhecido") +
+                        "\n\nOs valores ficaram só nesta tela — tente novamente."
+                    );
+                    return;
+                  }
+                  setShowAdicionaisSaved(true);
+                  setTimeout(() => setShowAdicionaisSaved(false), 2500);
+                } finally {
+                  setSavingAdicionais(false);
+                }
+              } else {
+                setShowAdicionaisSaved(true);
+                setTimeout(() => setShowAdicionaisSaved(false), 2500);
+              }
             }}
-            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-bold rounded-lg flex items-center gap-2"
+            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-bold rounded-lg flex items-center gap-2 disabled:opacity-60"
           >
             <Icon className="w-4 h-4">
               <polyline points="20 6 9 17 4 12"></polyline>
             </Icon>
-            Salvar Frete / Instalação / Comissão
+            {savingAdicionais ? "Salvando..." : "Salvar"}
           </button>
           {showAdicionaisSaved && (
             <span className="text-sm text-green-700 font-semibold">
-              Salvo — já vai junto com os produtos no orçamento.
+              {editingQuote ? "Salvo no orçamento." : "Salvo — já vai junto com os produtos no orçamento."}
             </span>
           )}
         </div>
@@ -2924,18 +3712,39 @@ const handleSavePDF = async () => {
                 <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">
                   Acréscimo (R$)
                 </label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={mrExtraServiceInput}
-                  onChange={(e) => {
-                    const rawValue = sanitizeMoneyInputBR(e.target.value);
-                    setMrExtraServiceInput(rawValue);
-                    setMrExtraService(parseMoneyInputBR(rawValue));
-                  }}
-                  onBlur={() => setMrExtraServiceInput(formatMoneyInputBR(mrExtraService))}
-                  className="w-full h-11 px-3 border rounded-lg text-gray-900"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={mrExtraServiceInput}
+                    onChange={(e) => {
+                      const rawValue = sanitizeMoneyInputBR(e.target.value);
+                      setMrExtraServiceInput(rawValue);
+                      setMrExtraService(parseMoneyInputBR(rawValue));
+                    }}
+                    onBlur={() => setMrExtraServiceInput(formatMoneyInputBR(mrExtraService))}
+                    className="w-full h-11 px-3 border rounded-lg text-gray-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={addMrDiferenca}
+                    disabled={!(Number(mrExtraService) > 0)}
+                    className="px-4 h-11 bg-primary-600 text-white text-sm font-bold rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 shrink-0"
+                  >
+                    + Adicionar
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Soma direto no campo "Diferença (R$)" do orçamento (mais abaixo, junto do Frete)
+                  — conta no total na hora, mesmo que o produto já tenha sido adicionado.
+                  {priceDifference > 0 && (
+                    <span className="block font-semibold text-gray-600 mt-1">
+                      Diferença atual do orçamento: R${" "}
+                      {priceDifference.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  )}
+                </p>
               </div>
             </div>
 
@@ -3013,7 +3822,9 @@ const handleSavePDF = async () => {
                 </div>
               )}
               <p className="text-[11px] text-gray-400 mt-1">
-                O valor da cuba entra dentro do valor da peça — aparece só no detalhamento interno, o cliente não vê separado.
+                {getMarmoreCalculations()
+                  ? "O valor da cuba entra dentro do valor da peça — aparece só no detalhamento interno, o cliente não vê separado."
+                  : "Sem uma peça de mármore selecionada acima, a cuba entra como item avulso no orçamento (nome e valor próprios)."}
               </p>
             </div>
 
@@ -3026,11 +3837,13 @@ const handleSavePDF = async () => {
                   className="flex-1 h-11 px-3 border rounded-lg text-gray-900"
                 >
                   <option value="">Selecione uma montagem (opcional)</option>
-                  {montagens.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name} — R$ {m.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </option>
-                  ))}
+                  {montagens
+                    .filter((m) => m.categoria === "Marmore")
+                    .map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} — R$ {m.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </option>
+                    ))}
                 </select>
                 <button
                   type="button"
@@ -3078,7 +3891,9 @@ const handleSavePDF = async () => {
                 </div>
               )}
               <p className="text-[11px] text-gray-400 mt-1">
-                O valor da montagem entra dentro do valor da peça — o cliente não vê esse nome.
+                {getMarmoreCalculations()
+                  ? "O valor da montagem entra dentro do valor da peça — o cliente não vê esse nome."
+                  : "Sem uma peça de mármore selecionada acima, a montagem entra como item avulso no orçamento (ex.: só a instalação de uma pia)."}
               </p>
             </div>
 
@@ -3284,6 +4099,73 @@ const handleSavePDF = async () => {
                   className="w-full h-11 px-3 border rounded-lg text-gray-900"
                 />
               </div>
+            </div>
+
+            <div className="pt-5 border-t border-blue-100">
+              <h4 className="text-sm font-bold text-gray-700 uppercase mb-3">Montagem</h4>
+              <div className="flex gap-2">
+                <select
+                  value={acSelectedMontagemId}
+                  onChange={(e) => setAcSelectedMontagemId(e.target.value)}
+                  className="flex-1 h-11 px-3 border rounded-lg text-gray-900"
+                >
+                  <option value="">Selecione uma montagem (opcional)</option>
+                  {montagens
+                    .filter((m) => m.categoria === "ProdutosProntos")
+                    .map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} — R$ {m.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </option>
+                    ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={addAcMontagem}
+                  disabled={!acSelectedMontagemId}
+                  className="px-4 h-11 bg-primary-600 text-white text-sm font-bold rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
+                >
+                  + Adicionar
+                </button>
+              </div>
+
+              {acMontagens.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {acMontagens.map((m) => (
+                    <div
+                      key={m.id}
+                      className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                    >
+                      <span className="text-gray-700">{m.name}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="font-semibold text-gray-900">
+                          R$ {m.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeAcMontagem(m.id)}
+                          className="text-red-500 hover:text-red-700"
+                          title="Remover"
+                        >
+                          <Icon className="w-4 h-4">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                          </Icon>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex justify-between text-xs font-bold text-gray-500 pt-1">
+                    <span>Total montagem (soma no valor do item):</span>
+                    <span>
+                      R${" "}
+                      {acMontagemTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              )}
+              <p className="text-[11px] text-gray-400 mt-1">
+                O valor da montagem entra dentro do valor do item — aparece só no detalhamento interno, o cliente não vê separado.
+              </p>
             </div>
 
             <div className="flex justify-end">
@@ -3689,12 +4571,54 @@ const handleSavePDF = async () => {
               <div className="flex justify-end mt-3">
                 <button
                   type="button"
-                  onClick={handleAddEstruturaItem}
-                  className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg"
+                  onClick={addGwEstrutura}
+                  disabled={!esSelectedProduct}
+                  className="px-4 h-11 bg-primary-600 text-white text-sm font-bold rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
                 >
-                  Adicionar estrutura de alumínio
+                  + Adicionar
                 </button>
               </div>
+
+              {gwEstruturas.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {gwEstruturas.map((e) => (
+                    <div
+                      key={e.id}
+                      className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                    >
+                      <span className="text-gray-700">
+                        {e.name} ({e.width}mm x {e.height}mm, {e.quantity}x)
+                      </span>
+                      <div className="flex items-center gap-3">
+                        <span className="font-semibold text-gray-900">
+                          R$ {e.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeGwEstrutura(e.id)}
+                          className="text-red-500 hover:text-red-700"
+                          title="Remover"
+                        >
+                          <Icon className="w-4 h-4">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                          </Icon>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex justify-between text-xs font-bold text-gray-500 pt-1">
+                    <span>Total estrutura (soma no valor da peça):</span>
+                    <span>
+                      R${" "}
+                      {gwEstruturaTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              )}
+              <p className="text-[11px] text-gray-400 mt-1">
+                O valor da estrutura entra dentro do valor da peça — aparece só no detalhamento interno, o cliente não vê separado.
+              </p>
             </div>
 
             <div className="pt-5 border-t border-blue-100">
@@ -3779,17 +4703,57 @@ const handleSavePDF = async () => {
               <div className="flex justify-end mt-3">
                 <button
                   type="button"
-                  onClick={handleAddAcessorioVidroItem}
-                  className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg"
+                  onClick={addGwAcessorioVidro}
+                  disabled={!avSelectedProduct}
+                  className="px-4 h-11 bg-primary-600 text-white text-sm font-bold rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
                 >
-                  Adicionar acessório vidro
+                  + Adicionar
                 </button>
               </div>
+
+              {gwAcessoriosVidro.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {gwAcessoriosVidro.map((a) => (
+                    <div
+                      key={a.id}
+                      className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                    >
+                      <span className="text-gray-700">{a.name} ({a.quantity}x)</span>
+                      <div className="flex items-center gap-3">
+                        <span className="font-semibold text-gray-900">
+                          R$ {a.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeGwAcessorioVidro(a.id)}
+                          className="text-red-500 hover:text-red-700"
+                          title="Remover"
+                        >
+                          <Icon className="w-4 h-4">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                          </Icon>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex justify-between text-xs font-bold text-gray-500 pt-1">
+                    <span>Total acessório (soma no valor da peça):</span>
+                    <span>
+                      R${" "}
+                      {gwAcessorioVidroTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              )}
+              <p className="text-[11px] text-gray-400 mt-1">
+                O valor do acessório entra dentro do valor da peça — aparece só no detalhamento interno, o cliente não vê separado.
+              </p>
             </div>
           </div>
         )}
         </div>
-        
+
       {/* Lista de itens adicionados */}
       {items.length > 0 && (
         <div className="bg-white p-6 rounded-xl shadow-md">
@@ -3815,54 +4779,129 @@ const handleSavePDF = async () => {
               <tbody>
                 {items.map((item) =>
                   editingItemId === item.id ? (
-                    <tr key={item.id} className="border-t bg-blue-50">
-                      <td className="px-3 py-2 font-medium text-gray-800">{item.productName}</td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="text"
-                          value={item.selectedColor}
-                          onChange={(e) => handleItemChange(item.id, "selectedColor", e.target.value)}
-                          className="w-24 border rounded px-2 py-1 text-sm text-gray-900"
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          value={item.height}
-                          onChange={(e) => handleItemChange(item.id, "height", Number(e.target.value) || 0)}
-                          className="w-20 border rounded px-2 py-1 text-sm text-gray-900 text-center"
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          value={item.width}
-                          onChange={(e) => handleItemChange(item.id, "width", Number(e.target.value) || 0)}
-                          className="w-20 border rounded px-2 py-1 text-sm text-gray-900 text-center"
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          min={1}
-                          value={item.quantity}
-                          onChange={(e) => handleItemChange(item.id, "quantity", Number(e.target.value) || 1)}
-                          className="w-16 border rounded px-2 py-1 text-sm text-gray-900 text-center"
-                        />
-                      </td>
-                      <td className="px-3 py-2 text-right font-semibold text-gray-800">
-                        R$ {getDisplayedItemPrice(item).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() => setEditingItemId(null)}
-                          className="px-3 py-1 bg-green-600 text-white rounded text-xs font-semibold hover:bg-green-700"
-                        >
-                          OK
-                        </button>
-                      </td>
-                    </tr>
+                    item.piecesBreakdown ? (
+                      <tr key={item.id} className="border-t bg-blue-50">
+                        <td colSpan={7} className="px-3 py-3">
+                          <p className="text-xs font-bold text-gray-600 uppercase mb-2">
+                            {item.productName} — Peças (comprimento x largura x qtd)
+                          </p>
+                          <div className="space-y-2">
+                            {editingMarmorePieces.map((piece) => (
+                              <div key={piece.id} className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  placeholder="Compr. (mm)"
+                                  value={piece.length || ""}
+                                  onChange={(e) => updateEditingPiece(piece.id, "length", Number(e.target.value) || 0)}
+                                  className="w-28 border rounded px-2 py-1 text-sm text-gray-900"
+                                />
+                                <span className="text-gray-400">x</span>
+                                <input
+                                  type="number"
+                                  placeholder="Larg. (mm)"
+                                  value={piece.width || ""}
+                                  onChange={(e) => updateEditingPiece(piece.id, "width", Number(e.target.value) || 0)}
+                                  className="w-28 border rounded px-2 py-1 text-sm text-gray-900"
+                                />
+                                <input
+                                  type="number"
+                                  min={1}
+                                  placeholder="Qtd"
+                                  value={piece.quantity}
+                                  onChange={(e) => updateEditingPiece(piece.id, "quantity", Number(e.target.value) || 1)}
+                                  className="w-16 border rounded px-2 py-1 text-sm text-gray-900 text-center"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => removeEditingPiece(piece.id)}
+                                  className="text-red-500 hover:text-red-700"
+                                  title="Remover peça"
+                                >
+                                  <Icon className="w-4 h-4">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                  </Icon>
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="flex items-center justify-between mt-3">
+                            <button
+                              type="button"
+                              onClick={addEditingPiece}
+                              className="px-3 py-1.5 bg-primary-600 text-white text-xs font-bold rounded-lg hover:bg-primary-700"
+                            >
+                              + Adicionar peça
+                            </button>
+                            <div className="flex items-center gap-3">
+                              <button
+                                type="button"
+                                onClick={() => setEditingItemId(null)}
+                                className="px-3 py-1 border border-gray-300 text-gray-600 rounded text-xs font-semibold hover:bg-gray-50"
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSaveMarmorePiecesEdit(item)}
+                                className="px-3 py-1 bg-green-600 text-white rounded text-xs font-semibold hover:bg-green-700"
+                              >
+                                OK
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr key={item.id} className="border-t bg-blue-50">
+                        <td className="px-3 py-2 font-medium text-gray-800">{item.productName}</td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="text"
+                            value={item.selectedColor}
+                            onChange={(e) => handleItemChange(item.id, "selectedColor", e.target.value)}
+                            className="w-24 border rounded px-2 py-1 text-sm text-gray-900"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="number"
+                            value={item.height}
+                            onChange={(e) => handleItemChange(item.id, "height", Number(e.target.value) || 0)}
+                            className="w-20 border rounded px-2 py-1 text-sm text-gray-900 text-center"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="number"
+                            value={item.width}
+                            onChange={(e) => handleItemChange(item.id, "width", Number(e.target.value) || 0)}
+                            className="w-20 border rounded px-2 py-1 text-sm text-gray-900 text-center"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="number"
+                            min={1}
+                            value={item.quantity}
+                            onChange={(e) => handleItemChange(item.id, "quantity", Number(e.target.value) || 1)}
+                            className="w-16 border rounded px-2 py-1 text-sm text-gray-900 text-center"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-right font-semibold text-gray-800">
+                          R$ {getDisplayedItemPrice(item).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setEditingItemId(null)}
+                            className="px-3 py-1 bg-green-600 text-white rounded text-xs font-semibold hover:bg-green-700"
+                          >
+                            OK
+                          </button>
+                        </td>
+                      </tr>
+                    )
                   ) : (
                     <tr key={item.id} className="border-t hover:bg-gray-50">
                       <td className="px-3 py-2 font-medium text-gray-800">{item.productName}</td>
@@ -3876,7 +4915,14 @@ const handleSavePDF = async () => {
                       <td className="px-3 py-2 text-center space-x-1">
                         <button
                           type="button"
-                          onClick={() => setEditingItemId(item.id)}
+                          onClick={() => {
+                            setEditingItemId(item.id);
+                            setEditingMarmorePieces(
+                              item.piecesBreakdown
+                                ? item.piecesBreakdown.map((p) => ({ ...p }))
+                                : []
+                            );
+                          }}
                           className="px-2 py-1 border border-blue-200 text-blue-700 rounded text-xs hover:bg-blue-50"
                         >
                           Editar
@@ -3904,7 +4950,7 @@ const handleSavePDF = async () => {
       {/* Totais e forma de pagamento */}
       <div className="bg-white p-6 rounded-xl shadow-md">
         {/* Resumo de adicionais — visível para todos */}
-        {(freight > 0 || installation > 0 || referralCommissionRate > 0) && (
+        {(freight > 0 || installation > 0 || feedingCost > 0 || priceDifference > 0 || referralCommissionRate > 0) && (
           <div className="mb-4 space-y-1 text-sm text-gray-700 border-b pb-4">
             {freight > 0 && (
               <div className="flex justify-between">
@@ -3922,6 +4968,18 @@ const handleSavePDF = async () => {
               <div className="flex justify-between">
                 <span>Instalação:</span>
                 <span>R$ {installation.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+            )}
+            {feedingCost > 0 && (
+              <div className="flex justify-between">
+                <span>Alimentação:</span>
+                <span>R$ {feedingCost.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+            )}
+            {priceDifference > 0 && (
+              <div className="flex justify-between">
+                <span>Diferença:</span>
+                <span>R$ {priceDifference.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
             )}
             {referralCommissionRate > 0 && (
@@ -4345,6 +5403,108 @@ const handleSavePDF = async () => {
         </div>
       </div>
 
+      {/* ── MODAL: CONFIRMAÇÃO DE ITEM FALTANTE ── */}
+      {missingItemsConfirm && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <svg width="20" height="20" fill="none" stroke="#d97706" strokeWidth="2" viewBox="0 0 24 24">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900">Confirmar item incompleto</h3>
+                <p className="text-sm text-gray-600 mt-1 whitespace-pre-line">{missingItemsConfirm.message}</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-2">
+              <button
+                onClick={() => setMissingItemsConfirm(null)}
+                className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-100 text-sm font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  // Fecha ANTES de chamar onConfirm — se onConfirm() abrir um
+                  // segundo aviso encadeado (ex.: tipo de vidro diferente →
+                  // depois Estrutura/Acessório faltando), fechar depois
+                  // apagava esse segundo aviso assim que ele aparecia, e o
+                  // item nunca chegava a ser adicionado de fato.
+                  const confirm = missingItemsConfirm.onConfirm;
+                  setMissingItemsConfirm(null);
+                  confirm();
+                }}
+                className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-semibold text-sm"
+              >
+                Continuar assim mesmo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: VINCULAR PAGAMENTOS ANTIGOS ── */}
+      {legacyLinkCandidates && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-lg">
+            <h3 className="text-lg font-bold text-gray-900 mb-1">Vincular pagamentos a esta venda?</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Encontrei {legacyLinkCandidates.length} lançamento(s) no Caixa desse cliente sem vínculo com nenhum pedido. Marque os que são dessa venda:
+            </p>
+            <div className="space-y-2 max-h-72 overflow-y-auto mb-5">
+              {legacyLinkCandidates.map((c) => (
+                <label key={c.id} className="flex items-center gap-3 p-2 border rounded-lg cursor-pointer hover:bg-gray-50">
+                  <input
+                    type="checkbox"
+                    checked={legacyLinkSelected.has(c.id)}
+                    onChange={(e) =>
+                      setLegacyLinkSelected((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(c.id);
+                        else next.delete(c.id);
+                        return next;
+                      })
+                    }
+                  />
+                  <div className="flex-1 text-sm">
+                    <p className="text-gray-800">{c.description || "-"}</p>
+                    <p className="text-xs text-gray-400">{c.date}</p>
+                  </div>
+                  <span className="font-semibold text-sm text-gray-700">
+                    {Number(c.amount || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setLegacyLinkCandidates(null);
+                  setLegacyLinkQuoteId(null);
+                  if (closeAfterLegacyLink) onCancel();
+                }}
+                className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Não vincular
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmLegacyLink}
+                disabled={linkingLegacyPayments || legacyLinkSelected.size === 0}
+                className="px-4 py-2 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-60"
+              >
+                {linkingLegacyPayments ? "Vinculando..." : `Vincular ${legacyLinkSelected.size} selecionado(s)`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── MODAL: OPÇÕES DE PDF ── */}
       {showPDFOptions && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
@@ -4384,7 +5544,14 @@ const handleSavePDF = async () => {
                 Cancelar
               </button>
               <button
-                onClick={handleConfirmAndSave}
+                onClick={() => handleConfirmAndSave(false)}
+                disabled={isSaving}
+                className="px-4 py-2 text-primary-700 border border-primary-600 rounded-lg hover:bg-primary-50 font-semibold text-sm disabled:opacity-60"
+              >
+                Salvar e Fechar
+              </button>
+              <button
+                onClick={() => handleConfirmAndSave(true)}
                 disabled={isSaving}
                 className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 font-semibold text-sm disabled:opacity-60 flex items-center gap-2"
               >
@@ -4597,14 +5764,14 @@ const handleSavePDF = async () => {
                         </td>
                         {!hidePrice && (
                           <td style={{ textAlign: "right", padding: "10px 12px", color: "#3d4166", fontWeight: 500, whiteSpace: "nowrap" }}>
-                            R$ {fmt(item.displayedPrice)}
+                            R$ {fmt(item.displayedUnitPrice)}
                           </td>
                         )}
                         <td style={{ textAlign: "center", padding: "10px 12px", color: "#8892b0", fontSize: 12 }}>und</td>
                         <td style={{ textAlign: "center", padding: "10px 12px", color: "#1a1f36", fontWeight: 600 }}>{item.quantity}</td>
                         {!hidePrice && (
                           <td style={{ textAlign: "right", padding: "10px 12px", color: "#1a1f36", fontWeight: 700, whiteSpace: "nowrap" }}>
-                            R$ {fmt(item.displayedPrice * item.quantity)}
+                            R$ {fmt(item.displayedTotal)}
                           </td>
                         )}
                       </tr>
@@ -4614,29 +5781,35 @@ const handleSavePDF = async () => {
               </table>
             </div>
 
-            {/* Totals */}
-            {!hidePrice && (
-              <div className="px-10 py-6">
-                <div className="flex justify-end">
-                  <div style={{ width: 280 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, color: "#636b85", borderBottom: "1px solid #eef0f7" }}>
-                      <span>Subtotal</span>
-                      <span>R$ {fmt(dissolvedSubtotalPDF)}</span>
-                    </div>
-                    {(savedQuote.discount || 0) > 0 && (
+            {/* Totals — mostrado mesmo com "ocultar preço" marcado: essa opção
+                esconde o preço POR ITEM na tabela, não o total do orçamento. */}
+            <div className="px-10 py-6">
+              <div className="flex justify-end">
+                <div style={{ width: 280 }}>
+                  {/* Frete/Instalação/Alimentação/Diferença/Comissão não aparecem
+                      aqui — só dentro do sistema (tela de detalhe do orçamento).
+                      No PDF eles continuam diluídos dentro do preço de cada
+                      produto na tabela acima, então a soma ainda bate com o Total.
+                      Subtotal só aparece quando há desconto (senão é igual ao Total). */}
+                  {(savedQuote.discount || 0) > 0 && (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, color: "#6b7280", borderBottom: "1px solid #eef0f7" }}>
+                        <span>Subtotal (produtos)</span>
+                        <span>R$ {fmt(dissolvedSubtotalPDF)}</span>
+                      </div>
                       <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, color: "#22c55e", borderBottom: "1px solid #eef0f7" }}>
                         <span>Desconto</span>
                         <span>-R$ {fmt(savedQuote.discount || 0)}</span>
                       </div>
-                    )}
-                    <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, padding: "11px 14px", background: "#1e2130", borderRadius: 8, color: "#fff" }}>
-                      <span style={{ fontWeight: 600, fontSize: 14 }}>Total</span>
-                      <span style={{ fontWeight: 700, fontSize: 16, color: "#8faff7" }}>R$ {fmt(savedQuote.totalPrice || 0)}</span>
-                    </div>
+                    </>
+                  )}
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, padding: "11px 14px", background: "#1e2130", borderRadius: 8, color: "#fff" }}>
+                    <span style={{ fontWeight: 600, fontSize: 14 }}>Total</span>
+                    <span style={{ fontWeight: 700, fontSize: 16, color: "#8faff7" }}>R$ {fmt(savedQuote.totalPrice || 0)}</span>
                   </div>
                 </div>
               </div>
-            )}
+            </div>
 
             {/* Divider */}
             <div style={{ height: 1, background: "#eef0f7", margin: "0 40px" }} />

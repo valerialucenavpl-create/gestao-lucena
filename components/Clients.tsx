@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "../services/supabase";
+import { fetchAllClients } from "../services/clientsServices";
 
 type Client = {
   id: string;
   name: string;
   phone: string | null;
   email: string | null;
+  cpf?: string | null;
   address: string | null;
   street?: string | null;
   number?: string | null;
@@ -27,11 +29,28 @@ const emptyForm: Omit<Client, "id"> = {
   name: "",
   phone: "",
   email: "",
+  cpf: "",
   address: "",
   street: "",
   number: "",
   neighborhood: "",
   city: "",
+};
+
+// Máscara de CPF (11 dígitos) ou CNPJ (14 dígitos), conforme o que foi digitado.
+const formatCpfCnpj = (value: string): string => {
+  const d = value.replace(/\D/g, "").slice(0, 14);
+  if (d.length <= 11) {
+    return d
+      .replace(/(\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+  }
+  return d
+    .replace(/(\d{2})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d)/, "$1/$2")
+    .replace(/(\d{4})(\d{1,2})$/, "$1-$2");
 };
 
 // A tabela só tem uma coluna de endereço (sem rua/número/bairro separados),
@@ -52,23 +71,22 @@ const buildAddress = (parts: {
     .join(" | ");
 };
 
-const Clients: React.FC = () => {
+type Props = {
+  onOpenClient?: (client: { id: string; name: string; phone?: string | null; address?: string | null }) => void;
+};
+
+const Clients: React.FC<Props> = ({ onOpenClient }) => {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
   const [form, setForm] = useState<Omit<Client, "id">>(emptyForm);
   const [notesInput, setNotesInput] = useState("");
-  const [importing, setImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
 
   const loadClients = async () => {
     setLoading(true);
 
-    const { data, error } = await supabase
-      .from(CLIENTS_TABLE)
-      .select("*")
-      .is("deleted_at", null);
+    const { data, error } = await fetchAllClients();
 
     if (error) {
       console.error("Erro ao carregar clientes:", error);
@@ -131,6 +149,9 @@ const Clients: React.FC = () => {
       name: form.name,
       phone: form.phone,
       email: form.email,
+      // Só manda o CPF quando há algo pra gravar — assim o cadastro continua
+      // salvando mesmo antes de rodar supabase/2026-10-15_cpf_clientes.sql.
+      ...(form.cpf?.trim() || editing?.cpf ? { cpf: form.cpf?.trim() || null } : {}),
       street: form.street || "",
       number: form.number || "",
       neighborhood: form.neighborhood || "",
@@ -153,6 +174,18 @@ const Clients: React.FC = () => {
         console.error(error);
         alert(`Erro ao atualizar cliente: ${error.message}`);
         return;
+      }
+      // O nome do cliente fica gravado em cada orçamento/venda (customer_name);
+      // o endereço já é lido ao vivo do cadastro. Se o nome mudou, propaga.
+      if (form.name.trim() !== (editing.name || "").trim()) {
+        const { error: quotesError } = await supabase
+          .from("quotes")
+          .update({ customer_name: form.name.trim() })
+          .eq("client_id", editing.id);
+        if (quotesError) {
+          console.error(quotesError);
+          alert(`Cliente salvo, mas não foi possível atualizar o nome nas vendas: ${quotesError.message}`);
+        }
       }
     } else {
       const { error } = await supabase.from(CLIENTS_TABLE).insert(basePayload);
@@ -206,6 +239,7 @@ const Clients: React.FC = () => {
       name: c.name,
       phone: c.phone || "",
       email: c.email || "",
+      cpf: c.cpf || "",
       address: c.address || "",
       street: c.street || "",
       number: c.number || "",
@@ -214,158 +248,6 @@ const Clients: React.FC = () => {
     });
     setNotesInput("");
     setIsModalOpen(true);
-  };
-
-  const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = "";
-
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      let text = ev.target?.result as string;
-      if (!text) return;
-
-      // Remove BOM (Byte Order Mark) que o Excel insere no início de arquivos UTF-8
-      text = text.replace(/^﻿/, "");
-
-      // Detecta separador (ponto-e-vírgula ou vírgula ou tab)
-      const firstLine = text.split(/\r?\n/)[0] || "";
-      const sep = firstLine.indexOf(";") !== -1 ? ";" : firstLine.indexOf("\t") !== -1 ? "\t" : ",";
-
-      const lines = text.split(/\r?\n/).filter((l) => l.trim());
-      if (lines.length < 2) { alert("Arquivo vazio ou sem dados."); return; }
-
-      // Normaliza texto para comparação (remove acentos, BOM, aspas, espaços)
-      const norm = (s: string) => s.trim()
-        .replace(/^﻿/, "")
-        .toLowerCase()
-        .normalize("NFD").replace(/[̀-ͯ]/g, "")
-        .replace(/['"]/g, "")
-        .trim();
-
-      // Mapeia colunas pelo cabeçalho
-      const headers = lines[0].split(sep).map(norm);
-
-      const col = (h: string) => {
-        const aliases: Record<string, string[]> = {
-          name:         ["nome", "name", "cliente"],
-          street:       ["rua", "street", "logradouro", "endereco", "endereo"],
-          number:       ["numero", "num", "number"],
-          neighborhood: ["bairro", "neighborhood"],
-          complement:   ["complemento", "complement"],
-          phone:        ["telefone", "phone", "celular", "fone"],
-          email:        ["email", "e-mail"],
-          notes:        ["observacao", "notes", "obs", "cpf", "cnpj"],
-          city:         ["cidade", "city"],
-          date:         ["data", "date", "datacadastro"],
-        };
-        const list = aliases[h] ?? [h];
-        for (const alias of list) {
-          const idx = headers.findIndex((hh) => hh === alias || hh.startsWith(alias));
-          if (idx !== -1) return idx;
-        }
-        return -1;
-      };
-
-      const nameIdx         = col("name");
-      const streetIdx       = col("street");
-      const numberIdx       = col("number");
-      const neighborhoodIdx = col("neighborhood");
-      const complementIdx   = col("complement");
-      const phoneIdx        = col("phone");
-      const emailIdx        = col("email");
-      const notesIdx        = col("notes");
-      const cityIdx         = col("city");
-
-      if (nameIdx === -1) {
-        alert(`Coluna 'Nome' não encontrada.\n\nCabeçalho detectado:\n${headers.join(" | ")}\n\nCertifique-se que a 1ª linha tem 'Nome' e salve como CSV (separado por ponto-e-vírgula).`);
-        return;
-      }
-
-      const parseRow = (line: string): string[] => {
-        // Suporta campos entre aspas com separadores internos
-        const result: string[] = [];
-        let cur = ""; let inQ = false;
-        for (let i = 0; i < line.length; i++) {
-          const ch = line[i];
-          if (ch === '"') { inQ = !inQ; continue; }
-          if (ch === sep && !inQ) { result.push(cur.trim()); cur = ""; }
-          else cur += ch;
-        }
-        result.push(cur.trim());
-        return result;
-      };
-
-      const rows = lines.slice(1).map(parseRow).filter((r) => r[nameIdx]?.trim());
-      if (rows.length === 0) { alert("Nenhum cliente encontrado no arquivo."); return; }
-
-      const confirmMsg = `Importar ${rows.length} clientes? Clientes já existentes NÃO serão duplicados (verificação por nome).`;
-      if (!window.confirm(confirmMsg)) return;
-
-      setImporting(true);
-      setImportProgress({ done: 0, total: rows.length });
-
-      // Carrega nomes existentes para evitar duplicatas
-      const { data: existing } = await supabase.from("clients").select("name");
-      const existingNames = new Set((existing ?? []).map((c: any) => String(c.name ?? "").toLowerCase().trim()));
-
-      const BATCH = 50;
-      let done = 0;
-      let skipped = 0;
-      let failed = 0;
-      let firstError = "";
-
-      for (let i = 0; i < rows.length; i += BATCH) {
-        const batch = rows.slice(i, i + BATCH);
-        const toInsert = batch
-          .filter((r) => {
-            const name = r[nameIdx]?.trim();
-            if (!name || existingNames.has(name.toLowerCase())) { skipped++; return false; }
-            return true;
-          })
-          .map((r) => {
-            const street = streetIdx !== -1 ? r[streetIdx]?.trim() : undefined;
-            const number = numberIdx !== -1 ? r[numberIdx]?.trim() : undefined;
-            const neighborhood = neighborhoodIdx !== -1 ? r[neighborhoodIdx]?.trim() : undefined;
-            const complement = complementIdx !== -1 ? r[complementIdx]?.trim() : undefined;
-            const city = cityIdx !== -1 ? r[cityIdx]?.trim() : undefined;
-            const notes = notesIdx !== -1 ? r[notesIdx]?.trim() : undefined;
-            return {
-              name:  r[nameIdx]?.trim() || "",
-              phone: phoneIdx !== -1 ? r[phoneIdx]?.trim() : "",
-              email: emailIdx !== -1 ? r[emailIdx]?.trim() : "",
-              street: street || "",
-              number: number || "",
-              neighborhood: neighborhood || "",
-              city: city || "",
-              address: buildAddress({ street, number, neighborhood, complement, city, notes }),
-            };
-          });
-
-        if (toInsert.length > 0) {
-          const { error } = await supabase.from("clients").insert(toInsert);
-          if (error) {
-            console.error("Erro ao inserir lote:", error);
-            if (!firstError) firstError = error.message || "";
-            failed += toInsert.length;
-          } else {
-            done += toInsert.length;
-          }
-        }
-
-        setImportProgress({ done: Math.min(i + BATCH, rows.length), total: rows.length });
-      }
-
-      setImporting(false);
-      setImportProgress(null);
-      const errorLine = firstError ? `\n\nErro: ${firstError}` : "";
-      alert(`✅ Importação concluída!\n• Inseridos: ${done}\n• Ignorados (já existiam): ${skipped}\n• Com erro: ${failed}${errorLine}`);
-      loadClients();
-    };
-
-    // Tenta UTF-8 primeiro; se falhar em detectar a coluna Nome, tenta Windows-1252
-    reader.readAsText(file, "UTF-8");
   };
 
   return (
@@ -381,18 +263,6 @@ const Clients: React.FC = () => {
               <span className="font-bold text-primary-700">{newThisMonthCount}</span>{" "}
               <span className="text-slate-600">cliente{newThisMonthCount === 1 ? "" : "s"} novo{newThisMonthCount === 1 ? "" : "s"} este mês</span>
             </div>
-            <label className={`rounded-xl px-4 py-2.5 font-semibold text-white transition cursor-pointer ${importing ? "bg-gray-400" : "bg-green-600 hover:bg-green-700"}`}>
-              {importing && importProgress
-                ? `Importando... ${importProgress.done}/${importProgress.total}`
-                : "⬆ Importar CSV"}
-              <input
-                type="file"
-                accept=".csv,.txt"
-                className="hidden"
-                disabled={importing}
-                onChange={handleImportCSV}
-              />
-            </label>
             <button
               onClick={openNew}
               className="rounded-xl bg-primary-700 px-4 py-2.5 font-semibold text-white transition hover:bg-primary-800"
@@ -437,7 +307,19 @@ const Clients: React.FC = () => {
               ) : (
                 filteredClients.map((c) => (
                   <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50/60">
-                    <td className="p-3 font-medium text-slate-800">{c.name}</td>
+                    <td className="p-3 font-medium text-slate-800">
+                      {onOpenClient ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenClient({ id: c.id, name: c.name, phone: c.phone, address: c.address })}
+                          className="text-primary-700 hover:underline text-left"
+                        >
+                          {c.name}
+                        </button>
+                      ) : (
+                        c.name
+                      )}
+                    </td>
                     <td className="p-3 text-slate-700">{c.phone || "-"}</td>
                     <td className="p-3 text-slate-700">{c.address || "-"}</td>
                     <td className="p-3 text-slate-700">{c.city || "-"}</td>
@@ -477,6 +359,17 @@ const Clients: React.FC = () => {
                   />
                 </div>
               ))}
+
+              <div>
+                <label className="mb-1.5 block text-sm font-semibold text-slate-700">CPF / CNPJ</label>
+                <input
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-200"
+                  inputMode="numeric"
+                  placeholder="000.000.000-00"
+                  value={form.cpf || ""}
+                  onChange={(e) => setForm({ ...form, cpf: formatCpfCnpj(e.target.value) })}
+                />
+              </div>
 
               {editing?.address && !form.street && (
                 <div className="md:col-span-2 rounded-xl bg-slate-50 border border-slate-200 px-4 py-2.5 text-sm text-slate-500">

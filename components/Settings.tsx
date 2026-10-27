@@ -1,16 +1,20 @@
-import React, { useMemo, useState } from "react";
-import { User, CompanySettings } from "../types";
+import React, { useEffect, useMemo, useState } from "react";
+import { User, CompanySettings, BankAccount, CashFlowCategory, DreGroup, DfcGroup, DRE_GROUP_LABELS, DFC_GROUP_LABELS } from "../types";
 import {
   uploadCompanyLogo,
   saveCompanySettings,
 } from "../services/companySettingsServices";
 import { createUser, uploadUserAvatar, updateUserProfile } from "../services/userService";
+import { getBankAccounts, createBankAccount, updateBankAccount } from "../services/bankAccountsServices";
+import { getCashFlowCategories, createCashFlowCategory, updateCashFlowCategory } from "../services/cashflowCategoriesServices";
+import { getCashFlowSettings, saveCashFlowSettings } from "../services/cashflowSettingsServices";
 import {
   formatMoneyInputBR,
   parseMoneyInputBR,
   sanitizeMoneyInputBR,
 } from "../utils/money";
 import { supabase } from "../services/supabase";
+import { DEFAULT_RELIABLE_START, SECTORS, SECTOR_LABELS } from "../utils/salesReport";
 
 interface SettingsProps {
   companySettings: CompanySettings;
@@ -34,9 +38,168 @@ const Settings: React.FC<SettingsProps> = ({
 }) => {
   const isAdmin = currentUser.role === "Admin";
 
-  const [activeTab, setActiveTab] = useState<"company" | "users" | "profile">(
+  const [activeTab, setActiveTab] = useState<"company" | "cashflow" | "users" | "profile">(
     isAdmin ? "company" : "profile"
   );
+
+  // ================== PLANO DE CONTAS / CONTAS BANCÁRIAS ==================
+  const [accounts, setAccounts] = useState<BankAccount[]>([]);
+  const [categories, setCategories] = useState<CashFlowCategory[]>([]);
+  const [defaultAccountDinheiro, setDefaultAccountDinheiro] = useState("");
+  const [defaultAccountPix, setDefaultAccountPix] = useState("");
+  const [saleRecognitionDate, setSaleRecognitionDate] = useState<"delivery" | "approval">("delivery");
+  const [targetNetMargin, setTargetNetMargin] = useState("");
+  const [materialCostMode, setMaterialCostMode] = useState<"budgeted" | "cashflow">("budgeted");
+  const [reliableDataStart, setReliableDataStart] = useState(DEFAULT_RELIABLE_START);
+  const [minMarginBySector, setMinMarginBySector] = useState<Record<string, string>>({});
+  const [loadingCashflowConfig, setLoadingCashflowConfig] = useState(false);
+  const [savingCashflowDefaults, setSavingCashflowDefaults] = useState(false);
+
+  const [newAccountName, setNewAccountName] = useState("");
+  const [newAccountBalance, setNewAccountBalance] = useState(0);
+  const [newAccountBalanceInput, setNewAccountBalanceInput] = useState(formatMoneyInputBR(0));
+  const [newAccountDate, setNewAccountDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [newAccountType, setNewAccountType] = useState<"movimento" | "reserva">("movimento");
+  const [savingAccount, setSavingAccount] = useState(false);
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  const [editAccountBalanceInput, setEditAccountBalanceInput] = useState<Record<string, string>>({});
+  const [editAccountDate, setEditAccountDate] = useState<Record<string, string>>({});
+  const [savingAccountEditId, setSavingAccountEditId] = useState<string | null>(null);
+
+  const [newCatType, setNewCatType] = useState<"Entrada" | "Saída">("Saída");
+  const [newCatCategory, setNewCatCategory] = useState("");
+  const [newCatGroupTitle, setNewCatGroupTitle] = useState("");
+  const [newCatSubcategory, setNewCatSubcategory] = useState("");
+  const [newCatDre, setNewCatDre] = useState<DreGroup | "">("");
+  const [newCatDfc, setNewCatDfc] = useState<DfcGroup | "">("");
+  const [savingCategory, setSavingCategory] = useState(false);
+
+  const loadCashflowConfig = async () => {
+    setLoadingCashflowConfig(true);
+    const [accRes, catRes, settingsRes] = await Promise.all([
+      getBankAccounts(),
+      getCashFlowCategories(),
+      getCashFlowSettings(),
+    ]);
+    if (accRes.ok) setAccounts(accRes.data);
+    if (catRes.ok) setCategories(catRes.data);
+    if (settingsRes.ok) {
+      setDefaultAccountDinheiro(settingsRes.data.defaultAccountDinheiro || "");
+      setDefaultAccountPix(settingsRes.data.defaultAccountPix || "");
+      setSaleRecognitionDate(settingsRes.data.saleRecognitionDate || "delivery");
+      setTargetNetMargin(settingsRes.data.targetNetMargin != null ? String(settingsRes.data.targetNetMargin) : "");
+      setMaterialCostMode(settingsRes.data.materialCostMode || "budgeted");
+      setReliableDataStart(settingsRes.data.reliableDataStart || DEFAULT_RELIABLE_START);
+      const mm = settingsRes.data.minMarginBySector || {};
+      setMinMarginBySector(Object.fromEntries(Object.entries(mm).map(([k, v]) => [k, String(v)])));
+    }
+    setLoadingCashflowConfig(false);
+  };
+
+  useEffect(() => {
+    if (activeTab === "cashflow" && isAdmin) loadCashflowConfig();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  const handleSaveDefaults = async () => {
+    setSavingCashflowDefaults(true);
+    const r = await saveCashFlowSettings({
+      defaultAccountDinheiro: defaultAccountDinheiro || undefined,
+      defaultAccountPix: defaultAccountPix || undefined,
+      saleRecognitionDate,
+      targetNetMargin: targetNetMargin.trim() ? Number(targetNetMargin.replace(",", ".")) : undefined,
+      materialCostMode,
+      reliableDataStart: reliableDataStart || DEFAULT_RELIABLE_START,
+      minMarginBySector: Object.fromEntries(
+        (Object.entries(minMarginBySector) as [string, string][])
+          .filter(([, v]) => v.trim() !== "")
+          .map(([k, v]) => [k, Number(v.replace(",", "."))])
+      ),
+    });
+    setSavingCashflowDefaults(false);
+    if (!r.ok) alert("Não foi possível salvar: " + (r.error?.message ?? "erro desconhecido"));
+  };
+
+  const handleAddAccount = async () => {
+    if (!newAccountName.trim()) return alert("Informe o nome da conta.");
+    setSavingAccount(true);
+    const r = await createBankAccount({
+      name: newAccountName,
+      initialBalance: newAccountBalance,
+      initialBalanceDate: newAccountDate,
+      accountType: newAccountType,
+    });
+    setSavingAccount(false);
+    if (!r.ok || !r.data) {
+      alert("Não foi possível criar a conta: " + (r.error?.message ?? "erro desconhecido"));
+      return;
+    }
+    setAccounts((prev) => [...prev, r.data as BankAccount].sort((a, b) => a.name.localeCompare(b.name, "pt-BR")));
+    setNewAccountName("");
+    setNewAccountBalance(0);
+    setNewAccountBalanceInput(formatMoneyInputBR(0));
+  };
+
+  const handleToggleAccountActive = async (acc: BankAccount) => {
+    const r = await updateBankAccount(acc.id, { active: !acc.active });
+    if (!r.ok || !r.data) return alert("Não foi possível atualizar a conta.");
+    setAccounts((prev) => prev.map((a) => (a.id === acc.id ? (r.data as BankAccount) : a)));
+  };
+
+  const handleSaveAccountBalance = async (acc: BankAccount) => {
+    const raw = editAccountBalanceInput[acc.id];
+    const dateVal = editAccountDate[acc.id] || acc.initialBalanceDate;
+    const balanceVal = raw !== undefined ? parseMoneyInputBR(raw) : acc.initialBalance;
+    setSavingAccountEditId(acc.id);
+    const r = await updateBankAccount(acc.id, { initialBalance: balanceVal, initialBalanceDate: dateVal });
+    setSavingAccountEditId(null);
+    if (!r.ok || !r.data) return alert("Não foi possível salvar o saldo.");
+    setAccounts((prev) => prev.map((a) => (a.id === acc.id ? (r.data as BankAccount) : a)));
+    setEditingAccountId(null);
+  };
+
+  const handleAddCategory = async () => {
+    if (!newCatCategory.trim() || !newCatGroupTitle.trim() || !newCatSubcategory.trim()) {
+      return alert("Preencha categoria, grupo e subcategoria.");
+    }
+    if (!newCatDre || !newCatDfc) {
+      return alert("Selecione o grupo_dre e o grupo_dfc — nenhuma subcategoria pode ser criada sem essa classificação.");
+    }
+    setSavingCategory(true);
+    const r = await createCashFlowCategory({
+      type: newCatType,
+      category: newCatCategory,
+      groupTitle: newCatGroupTitle,
+      subcategory: newCatSubcategory,
+      grupoDre: newCatDre,
+      grupoDfc: newCatDfc,
+    });
+    setSavingCategory(false);
+    if (!r.ok || !r.data) {
+      alert("Não foi possível criar: " + (r.error?.message ?? "já existe ou erro desconhecido"));
+      return;
+    }
+    setCategories((prev) => [...prev, r.data as CashFlowCategory]);
+    setNewCatCategory("");
+    setNewCatGroupTitle("");
+    setNewCatSubcategory("");
+  };
+
+  const handleUpdateCategoryGroup = async (cat: CashFlowCategory, field: "grupoDre" | "grupoDfc", value: string) => {
+    const r = await updateCashFlowCategory(cat.id, { [field]: value } as any);
+    if (!r.ok || !r.data) return alert("Não foi possível atualizar.");
+    setCategories((prev) => prev.map((c) => (c.id === cat.id ? (r.data as CashFlowCategory) : c)));
+  };
+
+  const categoriesByTypeAndCategory = useMemo(() => {
+    const map = new Map<string, CashFlowCategory[]>();
+    categories.forEach((c) => {
+      const key = `${c.type}||${c.category}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(c);
+    });
+    return map;
+  }, [categories]);
 
   // ================== EDITAR USUÁRIA ==================
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -313,6 +476,19 @@ const Settings: React.FC<SettingsProps> = ({
         {isAdmin && (
           <button
             className={`pb-2 font-medium ${
+              activeTab === "cashflow"
+                ? "border-b-2 border-primary-600 text-primary-600"
+                : "text-gray-500"
+            }`}
+            onClick={() => setActiveTab("cashflow")}
+          >
+            Plano de Contas
+          </button>
+        )}
+
+        {isAdmin && (
+          <button
+            className={`pb-2 font-medium ${
               activeTab === "users"
                 ? "border-b-2 border-primary-600 text-primary-600"
                 : "text-gray-500"
@@ -422,6 +598,382 @@ const Settings: React.FC<SettingsProps> = ({
               onChange={(e) => handleChange("address", e.target.value)}
             />
           </div>
+        </div>
+      )}
+
+      {/* ================= PLANO DE CONTAS / CONTAS BANCÁRIAS ================= */}
+      {activeTab === "cashflow" && isAdmin && (
+        <div className="max-w-4xl space-y-8">
+          {loadingCashflowConfig ? (
+            <p className="text-sm text-gray-400">Carregando...</p>
+          ) : (
+            <>
+              {/* Contas bancárias */}
+              <div>
+                <h2 className="text-xl font-semibold mb-3">Contas bancárias</h2>
+                <div className="space-y-2 mb-4">
+                  {accounts.map((acc) =>
+                    editingAccountId === acc.id ? (
+                      <div key={acc.id} className="rounded-lg border border-primary-300 bg-primary-50 px-3 py-2">
+                        <p className="text-sm font-semibold text-gray-800 mb-2">{acc.name}</p>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-500 mb-1">Saldo inicial</label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              className={inputClass}
+                              value={editAccountBalanceInput[acc.id] ?? formatMoneyInputBR(acc.initialBalance)}
+                              onChange={(e) =>
+                                setEditAccountBalanceInput((prev) => ({
+                                  ...prev,
+                                  [acc.id]: sanitizeMoneyInputBR(e.target.value),
+                                }))
+                              }
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-500 mb-1">Data do saldo inicial</label>
+                            <input
+                              type="date"
+                              className={inputClass}
+                              value={editAccountDate[acc.id] ?? acc.initialBalanceDate ?? ""}
+                              onChange={(e) => setEditAccountDate((prev) => ({ ...prev, [acc.id]: e.target.value }))}
+                            />
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleSaveAccountBalance(acc)}
+                              disabled={savingAccountEditId === acc.id}
+                              className="text-xs font-semibold px-3 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60"
+                            >
+                              {savingAccountEditId === acc.id ? "Salvando..." : "Salvar"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingAccountId(null)}
+                              className="text-xs font-semibold px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-100"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        key={acc.id}
+                        className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 ${
+                          acc.active ? "border-gray-200 bg-white" : "border-gray-100 bg-gray-50 opacity-60"
+                        }`}
+                      >
+                        <div>
+                          <p className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                            {acc.name}
+                            {acc.accountType === "reserva" && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 uppercase">Reserva</span>
+                            )}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            Saldo inicial: R$ {formatMoneyInputBR(acc.initialBalance)} em{" "}
+                            {acc.initialBalanceDate ? new Date(acc.initialBalanceDate + "T12:00:00").toLocaleDateString("pt-BR") : "—"}
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingAccountId(acc.id);
+                              setEditAccountBalanceInput((prev) => ({ ...prev, [acc.id]: formatMoneyInputBR(acc.initialBalance) }));
+                              setEditAccountDate((prev) => ({ ...prev, [acc.id]: acc.initialBalanceDate || "" }));
+                            }}
+                            className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleAccountActive(acc)}
+                            className={`text-xs font-semibold px-3 py-1.5 rounded-lg border ${
+                              acc.active
+                                ? "border-rose-200 text-rose-700 hover:bg-rose-50"
+                                : "border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                            }`}
+                          >
+                            {acc.active ? "Desativar" : "Ativar"}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end border-t pt-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Nome da conta</label>
+                    <input
+                      type="text"
+                      value={newAccountName}
+                      onChange={(e) => setNewAccountName(e.target.value)}
+                      placeholder="Ex.: Nubank PJ"
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Saldo inicial (R$)</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={newAccountBalanceInput}
+                      onChange={(e) => {
+                        const raw = sanitizeMoneyInputBR(e.target.value);
+                        setNewAccountBalanceInput(raw);
+                        setNewAccountBalance(parseMoneyInputBR(raw));
+                      }}
+                      onBlur={() => setNewAccountBalanceInput(formatMoneyInputBR(newAccountBalance))}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Data do saldo inicial</label>
+                    <input
+                      type="date"
+                      value={newAccountDate}
+                      onChange={(e) => setNewAccountDate(e.target.value)}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Tipo de conta</label>
+                    <select value={newAccountType} onChange={(e) => setNewAccountType(e.target.value as "movimento" | "reserva")} className={inputClass}>
+                      <option value="movimento">Movimento</option>
+                      <option value="reserva">Reserva/Investimento</option>
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddAccount}
+                    disabled={savingAccount}
+                    className="bg-primary-600 hover:bg-primary-700 text-white font-semibold rounded-lg px-4 py-2 disabled:opacity-50"
+                  >
+                    {savingAccount ? "Salvando..." : "+ Adicionar conta"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Conta padrão por forma de pagamento */}
+              <div className="border-t pt-6">
+                <h2 className="text-xl font-semibold mb-1">Conta padrão por forma de pagamento</h2>
+                <p className="text-xs text-gray-500 mb-3">
+                  Usada pra pré-preencher a conta ao registrar um recebimento de venda. Cartão não tem padrão fixo —
+                  sempre pergunta qual maquininha foi usada.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-md">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Dinheiro</label>
+                    <select
+                      value={defaultAccountDinheiro}
+                      onChange={(e) => setDefaultAccountDinheiro(e.target.value)}
+                      className={inputClass}
+                    >
+                      <option value="">Sem padrão</option>
+                      {accounts.filter((a) => a.active).map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">PIX</label>
+                    <select
+                      value={defaultAccountPix}
+                      onChange={(e) => setDefaultAccountPix(e.target.value)}
+                      className={inputClass}
+                    >
+                      <option value="">Sem padrão</option>
+                      {accounts.filter((a) => a.active).map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSaveDefaults}
+                  disabled={savingCashflowDefaults}
+                  className="mt-3 bg-primary-600 hover:bg-primary-700 text-white font-semibold rounded-lg px-4 py-2 disabled:opacity-50"
+                >
+                  {savingCashflowDefaults ? "Salvando..." : "Salvar padrões"}
+                </button>
+              </div>
+
+              {/* DRE — reconhecimento de receita e meta de margem */}
+              <div className="border-t pt-6">
+                <h2 className="text-xl font-semibold mb-1">DRE</h2>
+                <p className="text-xs text-gray-500 mb-3">
+                  Regra de reconhecimento de receita e meta única de margem líquida, usada em todos os alertas do sistema.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-md">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Data de reconhecimento da venda</label>
+                    <select
+                      value={saleRecognitionDate}
+                      onChange={(e) => setSaleRecognitionDate(e.target.value as "delivery" | "approval")}
+                      className={inputClass}
+                    >
+                      <option value="delivery">Entrega</option>
+                      <option value="approval">Aprovação do orçamento</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Meta de margem líquida (%)</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={targetNetMargin}
+                      onChange={(e) => setTargetNetMargin(e.target.value.replace(/[^0-9,.]/g, ""))}
+                      placeholder="Ex: 20"
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Custo de material na DRE</label>
+                    <select
+                      value={materialCostMode}
+                      onChange={(e) => setMaterialCostMode(e.target.value as "budgeted" | "cashflow")}
+                      className={inputClass}
+                    >
+                      <option value="budgeted">Custo orçado dos pedidos concluídos</option>
+                      <option value="cashflow">Compras lançadas no Caixa</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Início dos dados confiáveis</label>
+                    <input
+                      type="date"
+                      value={reliableDataStart}
+                      onChange={(e) => setReliableDataStart(e.target.value)}
+                      className={inputClass}
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1">Períodos antes dessa data aparecem como "não conferido" em DRE, DFC e Vendas.</p>
+                  </div>
+                </div>
+
+                <h3 className="text-sm font-semibold text-gray-700 mt-5 mb-1">Margem mínima por setor (%)</h3>
+                <p className="text-xs text-gray-500 mb-2">
+                  Em Relatórios → Vendas, produtos com margem sobre o custo orçado abaixo desse valor ficam em vermelho ("preço abaixo do mínimo").
+                </p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-2xl">
+                  {SECTORS.map((sec) => (
+                    <div key={sec}>
+                      <label className="block text-xs font-semibold text-gray-500 mb-1">{SECTOR_LABELS[sec]}</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={minMarginBySector[sec] ?? ""}
+                        onChange={(e) =>
+                          setMinMarginBySector((prev) => ({ ...prev, [sec]: e.target.value.replace(/[^0-9,.]/g, "") }))
+                        }
+                        placeholder="Ex: 30"
+                        className={inputClass}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSaveDefaults}
+                  disabled={savingCashflowDefaults}
+                  className="mt-3 bg-primary-600 hover:bg-primary-700 text-white font-semibold rounded-lg px-4 py-2 disabled:opacity-50"
+                >
+                  {savingCashflowDefaults ? "Salvando..." : "Salvar"}
+                </button>
+              </div>
+
+              {/* Plano de contas */}
+              <div className="border-t pt-6">
+                <h2 className="text-xl font-semibold mb-1">Plano de contas</h2>
+                <p className="text-xs text-gray-500 mb-3">
+                  Classificação de cada subcategoria pro DRE e pro DFC — editável aqui, sem mexer em relatório nenhum.
+                </p>
+
+                {(["Entrada", "Saída"] as const).map((t) => (
+                  <div key={t} className="mb-6">
+                    <h3 className="text-sm font-bold uppercase text-gray-600 mb-2">{t}</h3>
+                    {Array.from(categoriesByTypeAndCategory.entries())
+                      .filter(([key]) => key.startsWith(`${t}||`))
+                      .map(([key, items]) => {
+                        const categoryName = key.split("||")[1];
+                        return (
+                          <div key={key} className="mb-4">
+                            <p className="text-xs font-semibold text-gray-500 uppercase mb-1">{categoryName}</p>
+                            <div className="divide-y divide-gray-100 border border-gray-200 rounded-lg overflow-hidden">
+                              {items
+                                .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+                                .map((cat) => (
+                                  <div key={cat.id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm bg-white">
+                                    <span className="flex-1 min-w-[160px] text-gray-700">{cat.subcategory}</span>
+                                    <select
+                                      value={cat.grupoDre}
+                                      onChange={(e) => handleUpdateCategoryGroup(cat, "grupoDre", e.target.value)}
+                                      className="text-xs border border-gray-300 rounded px-2 py-1"
+                                    >
+                                      {Object.entries(DRE_GROUP_LABELS).map(([k, label]) => (
+                                        <option key={k} value={k}>{label}</option>
+                                      ))}
+                                    </select>
+                                    <select
+                                      value={cat.grupoDfc}
+                                      onChange={(e) => handleUpdateCategoryGroup(cat, "grupoDfc", e.target.value)}
+                                      className="text-xs border border-gray-300 rounded px-2 py-1"
+                                    >
+                                      {Object.entries(DFC_GROUP_LABELS).map(([k, label]) => (
+                                        <option key={k} value={k}>{label}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                ))}
+
+                <div className="border-t pt-4 mt-4">
+                  <p className="text-sm font-semibold text-gray-700 mb-2">+ Adicionar subcategoria</p>
+                  <div className="grid grid-cols-1 md:grid-cols-6 gap-2 items-end">
+                    <select value={newCatType} onChange={(e) => setNewCatType(e.target.value as any)} className={inputClass}>
+                      <option value="Entrada">Entrada</option>
+                      <option value="Saída">Saída</option>
+                    </select>
+                    <input type="text" placeholder="Categoria" value={newCatCategory} onChange={(e) => setNewCatCategory(e.target.value)} className={inputClass} />
+                    <input type="text" placeholder="Grupo" value={newCatGroupTitle} onChange={(e) => setNewCatGroupTitle(e.target.value)} className={inputClass} />
+                    <input type="text" placeholder="Subcategoria" value={newCatSubcategory} onChange={(e) => setNewCatSubcategory(e.target.value)} className={inputClass} />
+                    <select value={newCatDre} onChange={(e) => setNewCatDre(e.target.value as DreGroup)} className="text-xs border border-gray-300 rounded px-2 py-2">
+                      <option value="">grupo_dre...</option>
+                      {Object.entries(DRE_GROUP_LABELS).map(([k, label]) => (
+                        <option key={k} value={k}>{label}</option>
+                      ))}
+                    </select>
+                    <select value={newCatDfc} onChange={(e) => setNewCatDfc(e.target.value as DfcGroup)} className="text-xs border border-gray-300 rounded px-2 py-2">
+                      <option value="">grupo_dfc...</option>
+                      {Object.entries(DFC_GROUP_LABELS).map(([k, label]) => (
+                        <option key={k} value={k}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddCategory}
+                    disabled={savingCategory}
+                    className="mt-3 bg-primary-600 hover:bg-primary-700 text-white font-semibold rounded-lg px-4 py-2 disabled:opacity-50"
+                  >
+                    {savingCategory ? "Salvando..." : "+ Adicionar"}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 

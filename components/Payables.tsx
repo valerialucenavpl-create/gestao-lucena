@@ -62,6 +62,15 @@ const formatBR = (ymd?: string) => {
   return `${d}/${m}/${y}`;
 };
 
+// Soma meses a uma data YYYY-MM-DD mantendo o dia; se o mês não tiver esse
+// dia (ex.: 31 em fevereiro), usa o último dia do mês.
+const addMonthsYMD = (ymd: string, months: number) => {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const target = new Date(y, m - 1 + months, 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}-${String(Math.min(d, lastDay)).padStart(2, "0")}`;
+};
+
 const money = (n: number) =>
   Number(n || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -76,18 +85,35 @@ const normalizeRow = (row: any): Payable => ({
   installments: Array.isArray(row.installments) ? row.installments : [],
   notes: row.notes || "",
   status: (row.status || "pending") as Payable["status"],
+  employeeId: row.employee_id != null ? Number(row.employee_id) : null,
+  paidDate: row.paid_date ? String(row.paid_date).split("T")[0] : undefined,
+  paymentMethod: row.payment_method || undefined,
   createdAt: row.created_at,
 });
+
+type EmployeeOption = { id: number; name: string; active: boolean };
+
+type PayableRow = {
+  key: string;
+  payable: Payable;
+  installment?: PayableInstallment;
+  installmentLabel?: string;
+  amount: number;
+  dueDate: string;
+  status: "overdue" | "pending" | "partial" | "paid";
+};
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 const Payables: React.FC = () => {
   const [payables, setPayables] = useState<Payable[]>([]);
   const [loading, setLoading] = useState(true);
   const [materialCategories, setMaterialCategories] = useState<string[]>([]);
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingPayable, setEditingPayable] = useState<Payable | null>(null);
   const [showPayment, setShowPayment] = useState(false);
   const [payingPayable, setPayingPayable] = useState<Payable | null>(null);
+  const [payingInstallmentId, setPayingInstallmentId] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<"all" | "pending" | "paid">("all");
   const [filterMonth, setFilterMonth] = useState<string>(getCurrentMonthStr());
   const [showAllPeriods, setShowAllPeriods] = useState(false);
@@ -95,7 +121,13 @@ const Payables: React.FC = () => {
   useEffect(() => {
     loadPayables();
     loadCategories();
+    loadEmployees();
   }, []);
+
+  const loadEmployees = async () => {
+    const { data } = await supabase.from("employees").select("id, name, active").order("name");
+    if (data) setEmployees(data.map((e: any) => ({ id: Number(e.id), name: e.name || "", active: e.active !== false })));
+  };
 
   const loadPayables = async (showLoader = true) => {
     if (showLoader) setLoading(true);
@@ -116,7 +148,11 @@ const Payables: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Excluir esta conta a pagar?")) return;
+    const hasInstallments = (payables.find((p) => p.id === id)?.installments.length ?? 0) > 0;
+    const msg = hasInstallments
+      ? "Excluir esta conta a pagar? Todas as parcelas dela serão excluídas."
+      : "Excluir esta conta a pagar?";
+    if (!window.confirm(msg)) return;
     const { data: authData } = await supabase.auth.getUser();
     if (!authData.user) return;
     // Exclusão reversível — marca deleted_at, não apaga a linha.
@@ -156,37 +192,68 @@ const Payables: React.FC = () => {
     return               { label: "A Vencer", cls: "bg-blue-100 text-blue-700" };
   };
 
-  // Contas sem data de vencimento não têm como ser classificadas num mês —
+  // Conta parcelada vira uma linha por parcela, cada uma no seu vencimento;
+  // conta à vista continua sendo uma linha só.
+  // Conta de funcionário desativado sai da lista (volta se ele for reativado).
+  const inactiveEmployeeIds = useMemo(
+    () => new Set(employees.filter((e) => !e.active).map((e) => e.id)),
+    [employees]
+  );
+
+  const rows = useMemo<PayableRow[]>(() =>
+    payables
+      .filter((p) => p.employeeId == null || !inactiveEmployeeIds.has(p.employeeId))
+      .flatMap((p): PayableRow[] => {
+      if (p.installments.length === 0) {
+        return [{ key: p.id, payable: p, amount: p.amount, dueDate: p.dueDate, status: getStatus(p) }];
+      }
+      const total = p.installments.length;
+      return p.installments.map((inst, idx) => {
+        const dueDate = inst.dueDate || p.dueDate;
+        const paid = inst.paid || p.status === "paid";
+        return {
+          key: `${p.id}-${inst.id}`,
+          payable: p,
+          installment: inst,
+          installmentLabel: `${idx + 1}/${total}`,
+          amount: Number(inst.amount || 0) || p.amount / total,
+          dueDate,
+          status: paid ? "paid" : dueDate && dueDate < today ? "overdue" : "pending",
+        };
+      });
+    }),
+  [payables, inactiveEmployeeIds, today]);
+
+  // Linhas sem data de vencimento não têm como ser classificadas num mês —
   // ficam sempre visíveis, em vez de simplesmente sumir do filtro.
   const monthFiltered = useMemo(() => {
-    if (showAllPeriods) return payables;
-    return payables.filter((p) => !p.dueDate || p.dueDate.startsWith(filterMonth));
-  }, [payables, filterMonth, showAllPeriods]);
+    if (showAllPeriods) return rows;
+    return rows.filter((r) => !r.dueDate || r.dueDate.startsWith(filterMonth));
+  }, [rows, filterMonth, showAllPeriods]);
 
   const filtered = useMemo(() => {
-    const base = monthFiltered.filter((p) => {
-      const s = getStatus(p);
-      if (filterStatus === "pending") return s !== "paid";
-      if (filterStatus === "paid")    return s === "paid";
+    const base = monthFiltered.filter((r) => {
+      if (filterStatus === "pending") return r.status !== "paid";
+      if (filterStatus === "paid")    return r.status === "paid";
       return true;
     });
 
     // Vencidas/a vencer primeiro (por ordem de vencimento); pagas vão pro final.
     return [...base].sort((a, b) => {
-      const aPaid = getStatus(a) === "paid";
-      const bPaid = getStatus(b) === "paid";
+      const aPaid = a.status === "paid";
+      const bPaid = b.status === "paid";
       if (aPaid !== bPaid) return aPaid ? 1 : -1;
       return (a.dueDate || "").localeCompare(b.dueDate || "");
     });
-  }, [monthFiltered, filterStatus, today]);
+  }, [monthFiltered, filterStatus]);
 
   // Os totais acompanham o período selecionado (mês atual por padrão);
   // só refletem tudo quando "Ver todo o período" está marcado.
   const stats = useMemo(() => ({
-    pending: monthFiltered.filter((p) => getStatus(p) !== "paid").reduce((s, p) => s + p.amount, 0),
-    overdue: monthFiltered.filter((p) => getStatus(p) === "overdue").reduce((s, p) => s + p.amount, 0),
-    paid:    monthFiltered.filter((p) => getStatus(p) === "paid").reduce((s, p) => s + p.amount, 0),
-  }), [monthFiltered, today]);
+    pending: monthFiltered.filter((r) => r.status !== "paid").reduce((s, r) => s + r.amount, 0),
+    overdue: monthFiltered.filter((r) => r.status === "overdue").reduce((s, r) => s + r.amount, 0),
+    paid:    monthFiltered.filter((r) => r.status === "paid").reduce((s, r) => s + r.amount, 0),
+  }), [monthFiltered]);
 
   return (
     <div className="bg-white p-6 rounded-xl shadow-md">
@@ -273,7 +340,8 @@ const Payables: React.FC = () => {
                 <th className="p-3 text-left">Nome</th>
                 <th className="p-3 text-left">Fornecedor</th>
                 <th className="p-3 text-left">Categoria</th>
-                <th className="p-3 text-right">Valor</th>
+                <th className="p-3 text-right">Valor parcela</th>
+                <th className="p-3 text-right">Valor total</th>
                 <th className="p-3 text-center">Vencimento</th>
                 <th className="p-3 text-center">Parcelas</th>
                 <th className="p-3 text-center">Status</th>
@@ -282,21 +350,21 @@ const Payables: React.FC = () => {
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={8} className="p-6 text-center text-gray-500">Nenhuma conta cadastrada.</td></tr>
-              ) : filtered.map((p) => {
-                const s = getStatus(p);
+                <tr><td colSpan={9} className="p-6 text-center text-gray-500">Nenhuma conta cadastrada.</td></tr>
+              ) : filtered.map((r) => {
+                const p = r.payable;
+                const s = r.status;
                 const { label, cls } = statusBadge(s);
                 return (
-                  <tr key={p.id} className="border-t hover:bg-gray-50">
+                  <tr key={r.key} className="border-t hover:bg-gray-50">
                     <td className="p-3 font-medium">{p.name}</td>
                     <td className="p-3 text-gray-600">{p.supplier || "-"}</td>
                     <td className="p-3 text-gray-600">{p.payableCategory || "-"}{p.productCategory ? ` / ${p.productCategory}` : ""}</td>
-                    <td className="p-3 text-right font-semibold">{money(p.amount)}</td>
-                    <td className="p-3 text-center">{formatBR(p.dueDate)}</td>
+                    <td className="p-3 text-right font-semibold">{money(r.amount)}</td>
+                    <td className="p-3 text-right text-gray-600">{money(p.amount)}</td>
+                    <td className="p-3 text-center">{formatBR(r.dueDate)}</td>
                     <td className="p-3 text-center text-xs text-gray-500">
-                      {p.installments.length > 0
-                        ? `${p.installments.filter((i) => i.paid).length}/${p.installments.length} pagas`
-                        : "À vista"}
+                      {r.installmentLabel ? `Parcela ${r.installmentLabel}` : "À vista"}
                     </td>
                     <td className="p-3 text-center">
                       <span className={`px-2 py-1 rounded-full text-xs font-semibold ${cls}`}>{label}</span>
@@ -313,7 +381,7 @@ const Payables: React.FC = () => {
                         >Excluir</button>
                         {s !== "paid" && (
                           <button
-                            onClick={() => { setPayingPayable(p); setShowPayment(true); }}
+                            onClick={() => { setPayingPayable(p); setPayingInstallmentId(r.installment?.id ?? null); setShowPayment(true); }}
                             className="px-2 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 font-semibold"
                           >Pagar</button>
                         )}
@@ -331,11 +399,14 @@ const Payables: React.FC = () => {
         <PayableFormModal
           payable={editingPayable}
           materialCategories={materialCategories}
+          employees={employees}
+          existingPayables={payables}
           onClose={() => setShowForm(false)}
-          onSave={(p) => {
-            setPayables((prev) =>
-              editingPayable ? prev.map((x) => (x.id === p.id ? p : x)) : [p, ...prev]
-            );
+          onSave={(p, recurringCopies = []) => {
+            setPayables((prev) => [
+              ...recurringCopies,
+              ...(editingPayable ? prev.map((x) => (x.id === p.id ? p : x)) : [p, ...prev]),
+            ]);
             setShowForm(false);
           }}
         />
@@ -344,6 +415,7 @@ const Payables: React.FC = () => {
       {showPayment && payingPayable && (
         <PaymentModal
           payable={payingPayable}
+          initialInstallmentId={payingInstallmentId}
           onClose={() => setShowPayment(false)}
           onPaid={(updated) => {
             setPayables((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
@@ -360,9 +432,12 @@ const Payables: React.FC = () => {
 const PayableFormModal: React.FC<{
   payable: Payable | null;
   materialCategories: string[];
+  employees: EmployeeOption[];
+  existingPayables: Payable[];
   onClose: () => void;
-  onSave: (p: Payable) => void;
-}> = ({ payable, materialCategories, onClose, onSave }) => {
+  onSave: (p: Payable, recurringCopies?: Payable[]) => void;
+}> = ({ payable, materialCategories, employees, existingPayables, onClose, onSave }) => {
+  const [employeeId, setEmployeeId] = useState<number | null>(payable?.employeeId ?? null);
   const [name, setName] = useState(payable?.name || "");
   const [supplier, setSupplier] = useState(payable?.supplier || "");
   const [amount, setAmount] = useState(payable?.amount || 0);
@@ -373,6 +448,10 @@ const PayableFormModal: React.FC<{
   const [notes, setNotes] = useState(payable?.notes || "");
   const [installments, setInstallments] = useState<PayableInstallment[]>(payable?.installments || []);
   const [saving, setSaving] = useState(false);
+  // Conta recorrente (gasto fixo): além desta, cria uma cópia independente
+  // em cada um dos meses seguintes — cada mês é pago/ajustado separado.
+  const [recurring, setRecurring] = useState(false);
+  const [recurringMonths, setRecurringMonths] = useState(12);
 
   const subcategoryOptions = useMemo(
     () => [...materialCategories, ...EXTRA_SUBCATEGORIES],
@@ -393,6 +472,8 @@ const PayableFormModal: React.FC<{
   const handleSubmit = async () => {
     if (!name.trim()) return alert("Nome é obrigatório.");
     if (amount <= 0) return alert("Valor precisa ser maior que 0.");
+    if (recurring && !dueDate) return alert("Conta recorrente precisa da Data de Vencimento.");
+    if (recurring && installments.length > 0) return alert("Conta recorrente não pode ter parcelas — cada mês já vira uma conta.");
     setSaving(true);
     try {
       const { data: authData } = await supabase.auth.getUser();
@@ -408,16 +489,39 @@ const PayableFormModal: React.FC<{
         installments,
         notes: notes.trim(),
         status: payable?.status || "pending",
+        employee_id: employeeId,
       };
+      let saved: Payable;
       if (payable) {
         const { data, error } = await supabase.from("payables").update(payload).eq("id", payable.id).select().single();
         if (error) { alert(`Erro: ${error.message}`); return; }
-        onSave(normalizeRow(data));
+        saved = normalizeRow(data);
       } else {
         const { data, error } = await supabase.from("payables").insert(payload).select().single();
         if (error) { alert(`Erro: ${error.message}`); return; }
-        onSave(normalizeRow(data));
+        saved = normalizeRow(data);
       }
+
+      let copies: Payable[] = [];
+      if (recurring && dueDate) {
+        // Pula meses que já têm conta com o mesmo nome — marcar "recorrente"
+        // de novo numa conta já repetida não duplica nada.
+        const sameName = (n: string) => n.trim().toLowerCase() === name.trim().toLowerCase();
+        const takenMonths = new Set(
+          existingPayables.filter((p) => sameName(p.name) && p.dueDate).map((p) => p.dueDate.slice(0, 7))
+        );
+        const copyRows = Array.from({ length: Math.max(0, recurringMonths - 1) }, (_, i) =>
+          addMonthsYMD(dueDate, i + 1)
+        )
+          .filter((d) => !takenMonths.has(d.slice(0, 7)))
+          .map((d) => ({ ...payload, due_date: d, installments: [], status: "pending" }));
+        if (copyRows.length > 0) {
+          const { data, error } = await supabase.from("payables").insert(copyRows).select();
+          if (error) alert(`Conta salva, mas não foi possível criar os meses seguintes: ${error.message}`);
+          else copies = (data || []).map(normalizeRow);
+        }
+      }
+      onSave(saved, copies);
     } finally {
       setSaving(false);
     }
@@ -435,6 +539,33 @@ const PayableFormModal: React.FC<{
           <div className="md:col-span-2">
             <label className="block text-sm font-medium mb-1">Nome da Conta *</label>
             <input className={cls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Compra de alumínio — Fornecedor X" />
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium mb-1">Funcionário (opcional)</label>
+            <select
+              className={cls}
+              value={employeeId ?? ""}
+              onChange={(e) => {
+                const id = e.target.value ? Number(e.target.value) : null;
+                setEmployeeId(id);
+                const emp = employees.find((x) => x.id === id);
+                if (emp) {
+                  if (!supplier.trim()) setSupplier(emp.name.split(/\s+/)[0].toUpperCase());
+                  if (!payableCategory) setPayableCategory("FUNCIONARIO");
+                }
+              }}
+            >
+              <option value="">Nenhum — não é conta de funcionário</option>
+              {employees
+                .filter((e) => e.active || e.id === employeeId)
+                .map((e) => (
+                  <option key={e.id} value={e.id}>{e.name}{e.active ? "" : " (desativado)"}</option>
+                ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              Vinculada a um funcionário, cada baixa aparece em "Pagamentos" no painel dele.
+            </p>
           </div>
 
           <div>
@@ -482,6 +613,38 @@ const PayableFormModal: React.FC<{
           <div className="md:col-span-2">
             <label className="block text-sm font-medium mb-1">Observação</label>
             <textarea className={cls} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notas adicionais..." />
+          </div>
+
+          {/* Conta recorrente */}
+          <div className={`md:col-span-2 rounded-lg border p-3 ${recurring ? "border-blue-300 bg-blue-50" : "border-gray-200"}`}>
+            <label className="inline-flex items-center gap-2 cursor-pointer select-none text-sm font-semibold text-gray-800">
+              <input
+                type="checkbox"
+                checked={recurring}
+                onChange={(e) => setRecurring(e.target.checked)}
+                className="w-4 h-4 shrink-0"
+              />
+              <span>🔁 Conta recorrente (gasto fixo todo mês)</span>
+            </label>
+            {recurring && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-gray-700">
+                <span>Repetir por</span>
+                <input
+                  type="number"
+                  min={2}
+                  max={60}
+                  value={recurringMonths}
+                  onChange={(e) => setRecurringMonths(Math.min(60, Math.max(2, Number(e.target.value) || 2)))}
+                  className="w-20 px-2 py-1 border border-gray-300 rounded-lg bg-white"
+                />
+                <span>meses</span>
+                <p className="w-full text-xs text-gray-500">
+                  {dueDate
+                    ? `Cria uma conta por mês, de ${formatBR(dueDate)} até ${formatBR(addMonthsYMD(dueDate, recurringMonths - 1))}, sempre no mesmo dia. Cada mês é pago separado e pode ter o valor ajustado. Meses que já têm conta com esse nome são pulados.`
+                    : "Preencha a Data de Vencimento do primeiro mês."}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Parcelas */}
@@ -547,12 +710,14 @@ const PayableFormModal: React.FC<{
 // ─── PaymentModal ──────────────────────────────────────────────────────────────
 const PaymentModal: React.FC<{
   payable: Payable;
+  initialInstallmentId?: string | null;
   onClose: () => void;
   onPaid: (updated: Payable) => void;
-}> = ({ payable, onClose, onPaid }) => {
+}> = ({ payable, initialInstallmentId, onClose, onPaid }) => {
   const pendingInst = payable.installments.filter((i) => !i.paid);
   const [selectedInst, setSelectedInst] = useState<string>(
-    pendingInst.length > 0 ? pendingInst[0].id : "full"
+    pendingInst.find((i) => i.id === initialInstallmentId)?.id ??
+      (pendingInst.length > 0 ? pendingInst[0].id : "full")
   );
   const [paymentDate, setPaymentDate] = useState(todayISO());
   const [cfCategory, setCfCategory] = useState(Object.keys(SAIDA_PLAN)[0]);
@@ -605,20 +770,28 @@ const PaymentModal: React.FC<{
       const updated: Payable = { ...payable };
       if (selectedInst === "full" || payable.installments.length === 0) {
         updated.status = "paid";
-        // marca todas as parcelas como pagas também
+        updated.paidDate = paymentDate;
+        updated.paymentMethod = paymentMethod;
+        // marca as parcelas ainda em aberto como pagas também
         if (payable.installments.length > 0) {
-          updated.installments = payable.installments.map((i) => ({ ...i, paid: true, paidDate: paymentDate }));
+          updated.installments = payable.installments.map((i) =>
+            i.paid ? i : { ...i, paid: true, paidDate: paymentDate, paymentMethod }
+          );
         }
       } else {
         updated.installments = payable.installments.map((i) =>
-          i.id === selectedInst ? { ...i, paid: true, paidDate: paymentDate } : i
+          i.id === selectedInst ? { ...i, paid: true, paidDate: paymentDate, paymentMethod } : i
         );
         updated.status = updated.installments.every((i) => i.paid) ? "paid" : "partial";
       }
 
       const { data: updatedRows, error } = await supabase
         .from("payables")
-        .update({ status: updated.status, installments: updated.installments })
+        .update({
+          status: updated.status,
+          installments: updated.installments,
+          ...(updated.paidDate ? { paid_date: updated.paidDate, payment_method: updated.paymentMethod } : {}),
+        })
         .eq("id", payable.id)
         .select();
 
