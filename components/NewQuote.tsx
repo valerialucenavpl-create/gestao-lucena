@@ -418,6 +418,10 @@ const NewQuote: React.FC<NewQuoteProps> = ({
   const [measurementNotes, setMeasurementNotes] = useState<string>("");
   const [assemblyNotes, setAssemblyNotes] = useState<string>("");
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  // Item reaberto no formulário de cima (botão "Editar"): o próximo
+  // "Adicionar produto" substitui esse item em vez de criar outro.
+  const [formEditItemId, setFormEditItemId] = useState<string | null>(null);
+  const itemFormRef = React.useRef<HTMLDivElement | null>(null);
   // Peças (comprimento x largura x qtd) sendo editadas do item de mármore
   // aberto em editingItemId — cópia de trabalho, só grava no item ao clicar OK.
   const [editingMarmorePieces, setEditingMarmorePieces] = useState<
@@ -965,10 +969,10 @@ const NewQuote: React.FC<NewQuoteProps> = ({
       return;
     }
 
+    // Não pré-seleciona o primeiro produto: sem produto marcado, a montagem
+    // pode entrar sozinha como item (ex.: só montagem de porta).
     setAcSelectedProductId((prev) =>
-      prev && accessoryProducts.some((product) => product.id === prev)
-        ? prev
-        : accessoryProducts[0].id
+      prev && accessoryProducts.some((product) => product.id === prev) ? prev : ""
     );
   }, [accessoryProducts]);
 
@@ -1513,6 +1517,49 @@ const categories = [
     );
   };
 
+  // Montagem como item próprio do orçamento (sem produto/peça junto).
+  // Insumo vira "Custo matéria-prima" e mão de obra vira "Mão de obra"
+  // no detalhamento (Admin) — antes os dois entravam juntos só como
+  // laborCost, inflando "Mão de obra" com o valor do insumo E sem gerar
+  // nenhuma linha no "ver detalhamento" (que lê laborBreakdown, não
+  // existia aqui), fazendo o total não bater com a soma das linhas.
+  const addStandaloneMontagemItem = (montagem: (typeof montagens)[number]) => {
+    const materialBreakdown: QuoteItemMaterialLine[] = (montagem.insumos || []).map((insumo) => ({
+      name: insumo.name,
+      color: "Padrão",
+      unit: "un",
+      quantity: insumo.quantity ?? 1,
+      unitCost: insumo.unitValue ?? insumo.value,
+      totalCost: Number(insumo.value) || 0,
+    }));
+    const laborBreakdown: QuoteItemLaborLine[] = (montagem.labor || []).map((labor) => ({
+      role: labor.role,
+      count: labor.count,
+      hours: labor.hours,
+      rate: labor.rate,
+      total: Number(labor.total) || 0,
+    }));
+    const materialCost = materialBreakdown.reduce((s, l) => s + l.totalCost, 0);
+    const laborCost = laborBreakdown.reduce((s, l) => s + l.total, 0);
+    const newItem: QuoteItem = {
+      id: `qi-montagem-${Date.now()}`,
+      productId: montagem.id,
+      productName: montagem.name,
+      selectedColor: "",
+      description: "",
+      width: 0,
+      height: 0,
+      quantity: 1,
+      price: montagem.price,
+      cost: materialCost + laborCost,
+      materialCost,
+      materialBreakdown: materialBreakdown.length > 0 ? materialBreakdown : undefined,
+      laborCost,
+      laborBreakdown: laborBreakdown.length > 0 ? laborBreakdown : undefined,
+    };
+    setItems((prev) => [...prev, newItem]);
+  };
+
   // Montagem (Mármore): valor fixo somado ao preço da peça, sem o nome
   // aparecer pro cliente — só o insumo (custo) fica visível pro Admin.
   // Se não tem peça de mármore em andamento (ex.: só instalação de pia
@@ -1524,45 +1571,7 @@ const categories = [
     if (!montagem) return;
 
     if (!getMarmoreCalculations()) {
-      // Insumo vira "Custo matéria-prima" e mão de obra vira "Mão de obra"
-      // no detalhamento (Admin) — antes os dois entravam juntos só como
-      // laborCost, inflando "Mão de obra" com o valor do insumo E sem gerar
-      // nenhuma linha no "ver detalhamento" (que lê laborBreakdown, não
-      // existia aqui), fazendo o total não bater com a soma das linhas.
-      const materialBreakdown: QuoteItemMaterialLine[] = (montagem.insumos || []).map((insumo) => ({
-        name: insumo.name,
-        color: "Padrão",
-        unit: "un",
-        quantity: insumo.quantity ?? 1,
-        unitCost: insumo.unitValue ?? insumo.value,
-        totalCost: Number(insumo.value) || 0,
-      }));
-      const laborBreakdown: QuoteItemLaborLine[] = (montagem.labor || []).map((labor) => ({
-        role: labor.role,
-        count: labor.count,
-        hours: labor.hours,
-        rate: labor.rate,
-        total: Number(labor.total) || 0,
-      }));
-      const materialCost = materialBreakdown.reduce((s, l) => s + l.totalCost, 0);
-      const laborCost = laborBreakdown.reduce((s, l) => s + l.total, 0);
-      const newItem: QuoteItem = {
-        id: `qi-montagem-${Date.now()}`,
-        productId: montagem.id,
-        productName: montagem.name,
-        selectedColor: "",
-        description: "",
-        width: 0,
-        height: 0,
-        quantity: 1,
-        price: montagem.price,
-        cost: materialCost + laborCost,
-        materialCost,
-        materialBreakdown: materialBreakdown.length > 0 ? materialBreakdown : undefined,
-        laborCost,
-        laborBreakdown: laborBreakdown.length > 0 ? laborBreakdown : undefined,
-      };
-      setItems((prev) => [...prev, newItem]);
+      addStandaloneMontagemItem(montagem);
       setMrSelectedMontagemId("");
       return;
     }
@@ -1723,9 +1732,10 @@ const categories = [
       fixedCostValue: baseFixed,
       materialBreakdown,
       laborBreakdown,
+      composition: { category: "ALUMINIO", extraService: Number(alExtraService) || 0 },
     };
 
-    setItems((prev) => [...prev, newItem]);
+    commitItem(newItem);
   };
 
   const handleAddMarmoreItem = () => {
@@ -1848,9 +1858,15 @@ const categories = [
       piecesBreakdown: validPieces,
       extrasPriceTotal: montagemPriceTotal + cubaPriceTotal + accessoryPriceTotal,
       extrasCostTotal: assemblyCost + cubaCostTotal + accessoryCostTotal,
+      composition: {
+        category: "GRANITO",
+        cubas: mrCubas,
+        accessories: mrAccessories,
+        notes: mrDescription.trim() || undefined,
+      },
     };
 
-    setItems((prev) => [...prev, newItem]);
+    commitItem(newItem);
     setMrPieces([{ id: Date.now().toString(), length: 0, width: 0, quantity: 1 }]);
     setMrExtraService(0);
     setMrExtraServiceInput(formatMoneyInputBR(0));
@@ -1935,9 +1951,10 @@ const categories = [
       montagens: acMontagens.length > 0 ? acMontagens : undefined,
       assemblyCost: assemblyCost > 0 ? assemblyCost : undefined,
       assemblyBreakdown: assemblyBreakdown.length > 0 ? assemblyBreakdown : undefined,
+      composition: { category: "ACESSORIOS", extraService: totalExtra },
     };
 
-    setItems((prev) => [...prev, newItem]);
+    commitItem(newItem);
     setAcQuantity(1);
     setAcExtraService(0);
     setAcExtraServiceInput(formatMoneyInputBR(0));
@@ -1951,6 +1968,13 @@ const categories = [
     if (!acSelectedMontagemId) return;
     const montagem = montagens.find((m) => m.id === acSelectedMontagemId);
     if (!montagem) return;
+
+    // Sem produto marcado: a montagem vira item próprio no orçamento.
+    if (!acSelectedProductId) {
+      addStandaloneMontagemItem(montagem);
+      setAcSelectedMontagemId("");
+      return;
+    }
 
     setAcMontagens((prev) => [
       ...prev,
@@ -2101,9 +2125,18 @@ const categories = [
       fixedCostValue: baseFixed,
       materialBreakdown: fullMaterialBreakdown,
       laborBreakdown,
+      composition: {
+        category: "VIDROS",
+        estruturas: gwEstruturas,
+        acessoriosVidro: gwAcessoriosVidro,
+        extraService: Number(gwExtraService) || 0,
+        glassTypeId: gwGlassTypeId,
+        texture: gwTexture,
+        hardwareColor: gwHardwareColor,
+      },
     };
 
-    setItems((prev) => [...prev, newItem]);
+    commitItem(newItem);
     setGwEstruturas([]);
     setGwAcessoriosVidro([]);
     setLastGwGlassTypeId(gwGlassTypeId);
@@ -2190,7 +2223,185 @@ const categories = [
   // ============================
   //     ITENS E TOTAIS GERAIS
   // ============================
-  const handleRemoveItem = (id: string) => setItems((prev) => prev.filter((i) => i.id !== id));
+  const handleRemoveItem = (id: string) => {
+    setItems((prev) => prev.filter((i) => i.id !== id));
+    if (formEditItemId === id) setFormEditItemId(null);
+  };
+
+  // Adiciona o item novo ou, se um item foi reaberto no formulário pelo
+  // "Editar", substitui ele no mesmo lugar da lista (mantém o id).
+  const commitItem = (newItem: QuoteItem) => {
+    if (formEditItemId && items.some((i) => i.id === formEditItemId)) {
+      const targetId = formEditItemId;
+      setItems((prev) => prev.map((i) => (i.id === targetId ? { ...newItem, id: targetId } : i)));
+      setFormEditItemId(null);
+      return;
+    }
+    setFormEditItemId(null);
+    setItems((prev) => [...prev, newItem]);
+  };
+
+  // ── Reabrir item no formulário ──────────────────────────────────────────
+  // Itens antigos (sem `composition`) têm cuba/acessório/estrutura só no
+  // texto do detalhamento interno — reconstrói a partir dele; o custo vem
+  // da linha de mesmo nome no detalhamento de matéria-prima.
+  const parseDetailComponents = (item: QuoteItem, label: "Cuba" | "Acessório") => {
+    const re = new RegExp(`^${label}: (.+) \\((\\d+)x\\) — R\\$ ([\\d.]+)$`);
+    return String(item.internalDetail || "")
+      .split("\n")
+      .map((line) => line.trim().match(re))
+      .filter((m): m is RegExpMatchArray => Boolean(m))
+      .map((m, idx) => {
+        const name = m[1];
+        const line = (item.materialBreakdown || []).find((l) => l.name === name);
+        return {
+          id: `re-${label}-${Date.now()}-${idx}`,
+          productId: products.find((p) => p.name === name)?.id || "",
+          name,
+          quantity: Number(m[2]) || 1,
+          price: Number(m[3]) || 0,
+          cost: Number(line?.totalCost) || 0,
+        };
+      });
+  };
+
+  const parseDetailEstruturas = (item: QuoteItem) =>
+    String(item.internalDetail || "")
+      .split("\n")
+      .map((line) => line.trim().match(/^Estrutura: (.+) \((\d+)mm x (\d+)mm, (\d+)x\) — R\$ ([\d.]+)$/))
+      .filter((m): m is RegExpMatchArray => Boolean(m))
+      .map((m, idx) => {
+        const name = m[1];
+        const line = (item.materialBreakdown || []).find((l) => l.name === name);
+        return {
+          id: `re-est-${Date.now()}-${idx}`,
+          productId: products.find((p) => p.name === name)?.id || "",
+          name,
+          width: Number(m[2]) || 0,
+          height: Number(m[3]) || 0,
+          color: line?.color && line.color !== "Padrão" ? line.color : "",
+          quantity: Number(m[4]) || 1,
+          price: Number(m[5]) || 0,
+          cost: Number(line?.totalCost) || 0,
+        };
+      });
+
+  const parseExtraService = (item: QuoteItem) => {
+    const m = String(item.description || "").match(/Acréscimo por serviço: R\$ ([\d.]+)/);
+    return m ? Number(m[1]) || 0 : 0;
+  };
+
+  const getDescriptionField = (item: QuoteItem, label: string) => {
+    const part = String(item.description || "")
+      .split("|")
+      .map((p) => p.trim())
+      .find((p) => normalizeText(p).startsWith(normalizeText(label) + ":"));
+    return part ? part.slice(part.indexOf(":") + 1).trim() : undefined;
+  };
+
+  const getItemFormCategory = (item: QuoteItem): "GRANITO" | "VIDROS" | "ALUMINIO" | "ACESSORIOS" | null => {
+    if (item.composition?.category) return item.composition.category;
+    if (item.piecesBreakdown || marmoreProducts.some((p) => p.id === item.productId)) return "GRANITO";
+    if (glassProducts.some((p) => p.id === item.productId)) return "VIDROS";
+    if (aluminumProducts.some((p) => p.id === item.productId)) return "ALUMINIO";
+    if (accessoryProducts.some((p) => p.id === item.productId)) return "ACESSORIOS";
+    return null;
+  };
+
+  const loadItemIntoForm = (item: QuoteItem): boolean => {
+    const category = getItemFormCategory(item);
+    if (!category) return false;
+    const comp = item.composition;
+
+    setActiveCategory(category);
+    setSelectedColor(item.selectedColor || "");
+
+    if (category === "GRANITO") {
+      setMrProductSearch("");
+      setMrSelectedProductId(item.productId);
+      setMrPieces(
+        item.piecesBreakdown && item.piecesBreakdown.length > 0
+          ? item.piecesBreakdown.map((p) => ({ ...p }))
+          : [{ id: Date.now().toString(), length: 0, width: 0, quantity: 1 }]
+      );
+      setMrMontagens((item.montagens || []).map((m) => ({ ...m })));
+      setMrCubas(comp?.cubas ? comp.cubas.map((c) => ({ ...c })) : parseDetailComponents(item, "Cuba"));
+      setMrAccessories(
+        comp?.accessories ? comp.accessories.map((a) => ({ ...a })) : parseDetailComponents(item, "Acessório")
+      );
+      setMrDescription(
+        comp
+          ? comp.notes || ""
+          : String(item.internalDetail || "")
+              .split("\n")
+              .filter((l) => l.trim() && !/^(Peça \d+|Cuba|Acessório|Montagem):/.test(l.trim()))
+              .join("\n")
+      );
+      setMrSelectedMontagemId("");
+      setMrSelectedCubaId("");
+      setMrSelectedAccessoryId("");
+    } else if (category === "ACESSORIOS") {
+      const extra = comp?.extraService ?? parseExtraService(item);
+      setAcProductSearch("");
+      setAcSelectedProductId(item.productId);
+      setAcQuantity(item.quantity || 1);
+      setAcExtraService(extra);
+      setAcExtraServiceInput(formatMoneyInputBR(extra));
+      setAcMontagens((item.montagens || []).map((m) => ({ ...m })));
+      setAcSelectedMontagemId("");
+    } else if (category === "ALUMINIO") {
+      const extra = comp?.extraService ?? parseExtraService(item);
+      setAlProductSearch("");
+      setAlSelectedProductId(item.productId);
+      setAlWidth(item.width || 0);
+      setAlHeight(item.height || 0);
+      setAlQuantity(item.quantity || 1);
+      setAlExtraService(extra);
+      setAlExtraServiceInput(formatMoneyInputBR(extra));
+    } else if (category === "VIDROS") {
+      const extra = comp?.extraService ?? parseExtraService(item);
+      setGwProductSearch("");
+      setGwSelectedProduct(item.productId);
+      setGwGlassTypeId(comp?.glassTypeId || getGlassTypeIdFromDescription(item.description || "") || "");
+      setGwTexture(comp?.texture || getDescriptionField(item, "Textura") || "Liso");
+      setGwHardwareColor(comp?.hardwareColor || getHardwareColorFromDescription(item.description || "") || "Branco");
+      setGwWidth(item.width || 0);
+      setGwHeight(item.height || 0);
+      setGwQuantity(item.quantity || 1);
+      setGwExtraService(extra);
+      setGwExtraServiceInput(formatMoneyInputBR(extra));
+      setGwEstruturas(
+        comp?.estruturas
+          ? comp.estruturas.map((e) => ({ ...e, color: e.color || "" }))
+          : parseDetailEstruturas(item)
+      );
+      setGwAcessoriosVidro(
+        comp?.acessoriosVidro
+          ? comp.acessoriosVidro.map((a) => ({ ...a, color: a.color || "" }))
+          : parseDetailComponents(item, "Acessório").map((a) => ({ ...a, color: "" }))
+      );
+    }
+
+    setEditingItemId(null);
+    setFormEditItemId(item.id);
+    setTimeout(() => itemFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    return true;
+  };
+
+  const cancelFormEdit = () => {
+    setFormEditItemId(null);
+    setMrPieces([{ id: Date.now().toString(), length: 0, width: 0, quantity: 1 }]);
+    setMrMontagens([]);
+    setMrCubas([]);
+    setMrAccessories([]);
+    setMrDescription("");
+    setAcQuantity(1);
+    setAcExtraService(0);
+    setAcExtraServiceInput(formatMoneyInputBR(0));
+    setAcMontagens([]);
+    setGwEstruturas([]);
+    setGwAcessoriosVidro([]);
+  };
 
   const getGlassTypeIdFromDescription = (description: string): string | undefined => {
     const glassTypeToken = description
@@ -3485,7 +3696,22 @@ const handleSavePDF = async () => {
       </div>
 
       {/* PRODUCT BUILDER + CATEGORIAS EM CARDS */}
-      <div className="bg-white p-6 rounded-xl shadow-md">
+      <div ref={itemFormRef} className="bg-white p-6 rounded-xl shadow-md scroll-mt-4">
+        {formEditItemId && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
+            <p className="text-sm text-amber-900">
+              ✏️ Editando <b>{items.find((i) => i.id === formEditItemId)?.productName || "item"}</b> — altere o que
+              precisar (medidas, cubas, montagens, acessórios) e clique em <b>Salvar alteração</b>.
+            </p>
+            <button
+              type="button"
+              onClick={cancelFormEdit}
+              className="px-3 py-1.5 text-xs font-semibold border border-amber-400 text-amber-800 rounded-lg hover:bg-amber-100"
+            >
+              Cancelar edição
+            </button>
+          </div>
+        )}
         <div className="mb-6">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-gray-700">Selecione o tipo de orçamento</h3>
@@ -4001,7 +4227,7 @@ const handleSavePDF = async () => {
                 onClick={handleAddMarmoreItem}
                 className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg"
               >
-                Adicionar produto de mármore
+                {formEditItemId ? "Salvar alteração" : "Adicionar produto de mármore"}
               </button>
             </div>
           </div>
@@ -4026,7 +4252,7 @@ const handleSavePDF = async () => {
                   <button
                     key={product.id}
                     type="button"
-                    onClick={() => setAcSelectedProductId(product.id)}
+                    onClick={() => setAcSelectedProductId((prev) => (prev === product.id ? "" : product.id))}
                     className={`p-3 border rounded-lg text-left flex gap-3 items-center ${
                       acSelectedProductId === product.id
                         ? "border-green-700 bg-green-100"
@@ -4164,7 +4390,9 @@ const handleSavePDF = async () => {
                 </div>
               )}
               <p className="text-[11px] text-gray-400 mt-1">
-                O valor da montagem entra dentro do valor do item — aparece só no detalhamento interno, o cliente não vê separado.
+                {acSelectedProductId
+                  ? "O valor da montagem entra dentro do valor do produto selecionado — o cliente não vê separado."
+                  : "Nenhum produto marcado: a montagem entra direto como item próprio no orçamento."}
               </p>
             </div>
 
@@ -4174,7 +4402,7 @@ const handleSavePDF = async () => {
                 onClick={handleAddAccessoryItem}
                 className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg"
               >
-                Adicionar produto
+                {formEditItemId ? "Salvar alteração" : "Adicionar produto"}
               </button>
             </div>
           </div>
@@ -4302,7 +4530,7 @@ const handleSavePDF = async () => {
                 onClick={handleAddAluminumItem}
                 className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg"
               >
-                Adicionar produto de alumínio
+                {formEditItemId ? "Salvar alteração" : "Adicionar produto de alumínio"}
               </button>
             </div>
           </div>
@@ -4473,7 +4701,7 @@ const handleSavePDF = async () => {
                 onClick={handleAddGlassItem}
                 className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg"
               >
-                Adicionar produto de vidro
+                {formEditItemId ? "Salvar alteração" : "Adicionar produto de vidro"}
               </button>
             </div>
 
@@ -4903,8 +5131,16 @@ const handleSavePDF = async () => {
                       </tr>
                     )
                   ) : (
-                    <tr key={item.id} className="border-t hover:bg-gray-50">
-                      <td className="px-3 py-2 font-medium text-gray-800">{item.productName}</td>
+                    <tr
+                      key={item.id}
+                      className={`border-t ${formEditItemId === item.id ? "bg-amber-50" : "hover:bg-gray-50"}`}
+                    >
+                      <td className="px-3 py-2 font-medium text-gray-800">
+                        {item.productName}
+                        {formEditItemId === item.id && (
+                          <span className="ml-2 text-[10px] font-bold uppercase text-amber-700">em edição ↑</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-gray-600">{item.selectedColor || "—"}</td>
                       <td className="px-3 py-2 text-center text-gray-600">{item.height || "—"}</td>
                       <td className="px-3 py-2 text-center text-gray-600">{item.width || "—"}</td>
@@ -4916,6 +5152,10 @@ const handleSavePDF = async () => {
                         <button
                           type="button"
                           onClick={() => {
+                            // Produto de catálogo: sobe pro formulário com tudo
+                            // carregado. Itens avulsos (montagem/cuba soltas)
+                            // continuam com a edição aqui na linha.
+                            if (loadItemIntoForm(item)) return;
                             setEditingItemId(item.id);
                             setEditingMarmorePieces(
                               item.piecesBreakdown

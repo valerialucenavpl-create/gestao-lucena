@@ -554,7 +554,8 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
   // ------------------ comemoração de meta batida ------------------
   // Quando uma vendedora chega a 100% da meta do mês, abre o card com
   // confetes — uma vez por vendedora por mês neste navegador. Pra ver de
-  // novo/testar: ?testeMeta=Joyce na URL.
+  // novo/testar: ?testeMeta=Joyce na URL. Só aparece no login da própria
+  // vendedora — admin/gerência não recebem o card.
   const [celebrationQueue, setCelebrationQueue] = useState<string[]>([]);
 
   useEffect(() => {
@@ -563,7 +564,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
   }, []);
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || userRole !== "Sales") return;
     const monthKey = `${currentYear}-${String(currentMonth + 1).padStart(2, "0")}`;
     const reached: string[] = [];
     displayableSellers.forEach((seller) => {
@@ -583,7 +584,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
     });
     if (reached.length > 0) setCelebrationQueue((q) => [...q, ...reached]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, salesBySeller, displayableSellers.length]);
+  }, [loading, salesBySeller, displayableSellers.length, userRole]);
 
   const closeCelebration = useCallback(() => setCelebrationQueue((q) => q.slice(1)), []);
 

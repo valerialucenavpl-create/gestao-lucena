@@ -70,6 +70,12 @@ const formatBR = (ymd?: string) => {
   return `${d}/${m}/${y}`;
 };
 
+const addDaysYMD = (ymd: string, days: number) => {
+  const [y, m, d] = ymd.split("-").map((x) => Number(x));
+  const dt = new Date(y, m - 1, d + days);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+};
+
 const formatTimeBR = (isoCreatedAt?: string) => {
   if (!isoCreatedAt) return "—";
   const d = new Date(isoCreatedAt);
@@ -165,15 +171,26 @@ const CashFlowForm: React.FC<Props> = ({ cashFlow, setCashFlow }) => {
 
     const list = Array.isArray(cashFlow) ? cashFlow : [];
 
-    // Lançamentos ANTES do período (saldo anterior)
-    const beforePeriod = list.filter((e) => ymdToTime(e.date) < fromT);
-    const prevEntradas = beforePeriod
-      .filter((e) => e.type === "Entrada")
-      .reduce((s, e) => s + Number(e.amount || 0), 0);
-    const prevSaidas = beforePeriod
-      .filter((e) => e.type === "Saída")
-      .reduce((s, e) => s + Number(e.amount || 0), 0);
-    const prevSaldo = prevEntradas - prevSaidas;
+    // Mesma regra dos cards de saldo por conta: parte do saldo inicial de
+    // cada conta e só soma lançamento COM conta e DEPOIS da data de corte.
+    // Antes o relatório somava todo o histórico desde sempre (inclusive o que
+    // já está embutido no saldo inicial e transferências), e o saldo não
+    // batia com o da tela.
+    const accById = new Map<string, BankAccount>(accounts.map((a) => [a.id, a]));
+    const affectsBalance = (e: CashFlowEntry) => {
+      if (!e.accountId) return false;
+      const acc = accById.get(e.accountId);
+      if (!acc) return false;
+      const cutoff = ymdToTime(acc.initialBalanceDate);
+      const t = ymdToTime(e.date);
+      return Number.isNaN(cutoff) || Number.isNaN(t) || t > cutoff;
+    };
+    const signed = (e: CashFlowEntry) => (e.type === "Saída" ? -1 : 1) * Number(e.amount || 0);
+
+    // Saldo anterior = saldo das contas no fim do dia anterior ao período
+    const prevSaldo =
+      accounts.reduce((s, a) => s + Number(a.initialBalance || 0), 0) +
+      list.filter((e) => ymdToTime(e.date) < fromT && affectsBalance(e)).reduce((s, e) => s + signed(e), 0);
 
     // Lançamentos DO período
     const inPeriod = list
@@ -188,17 +205,26 @@ const CashFlowForm: React.FC<Props> = ({ cashFlow, setCashFlow }) => {
         return String(b.id).localeCompare(String(a.id));
       });
 
-    const periodEntradas = inPeriod
-      .filter((e) => e.type === "Entrada")
+    // Transferência entre contas não é receita/despesa (só move saldo).
+    const periodCounted = inPeriod.filter((e) => affectsBalance(e) && !e.isTransfer);
+    const periodEntradas = periodCounted
+      .filter((e) => e.type !== "Saída")
       .reduce((s, e) => s + Number(e.amount || 0), 0);
-    const periodSaidas = inPeriod
+    const periodSaidas = periodCounted
       .filter((e) => e.type === "Saída")
       .reduce((s, e) => s + Number(e.amount || 0), 0);
     const periodSaldo = periodEntradas - periodSaidas;
 
     const saldoAtual = prevSaldo + periodSaldo;
-    const saldoAtualEntradas = prevEntradas + periodEntradas;
-    const saldoAtualSaidas = prevSaidas + periodSaidas;
+
+    // Saldo linha a linha (como extrato): calculado em ordem cronológica e
+    // mostrado na ordem da tabela (mais recente primeiro).
+    const runningById = new Map<string, number>();
+    let running = prevSaldo;
+    [...inPeriod].reverse().forEach((e) => {
+      if (affectsBalance(e)) running += signed(e);
+      runningById.set(String(e.id), running);
+    });
 
     const fmt = (n: number) =>
       Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -215,11 +241,12 @@ const CashFlowForm: React.FC<Props> = ({ cashFlow, setCashFlow }) => {
           <td style="padding:8px 10px">${displaySubcategory(e)}</td>
           <td style="padding:8px 10px">${e.description || "-"}</td>
           <td style="padding:8px 10px;text-align:right;font-weight:600;${e.type === "Entrada" ? "color:#16a34a" : "color:#dc2626"}">${fmt(Number(e.amount || 0))}</td>
+          <td style="padding:8px 10px;text-align:right;white-space:nowrap;${colorSaldo(runningById.get(String(e.id)) ?? 0)}">${fmt(runningById.get(String(e.id)) ?? 0)}</td>
         </tr>`
       )
       .join("");
 
-    const noRows = `<tr><td colspan="6" style="padding:24px;text-align:center;color:#6b7280">Nenhum lançamento no período selecionado.</td></tr>`;
+    const noRows = `<tr><td colspan="7"style="padding:24px;text-align:center;color:#6b7280">Nenhum lançamento no período selecionado.</td></tr>`;
 
     const html = `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -267,6 +294,7 @@ const CashFlowForm: React.FC<Props> = ({ cashFlow, setCashFlow }) => {
         <th>Subcategoria</th>
         <th>Descrição</th>
         <th style="text-align:right">Valor</th>
+        <th style="text-align:right">Saldo</th>
       </tr>
     </thead>
     <tbody>
@@ -276,24 +304,24 @@ const CashFlowForm: React.FC<Props> = ({ cashFlow, setCashFlow }) => {
 
   <div class="summary-grid">
     <div class="summary-box">
-      <h3>Saldo Anterior ao Período</h3>
-      <div class="summary-row"><span style="color:#6b7280">Entradas:</span><span style="color:#16a34a">${fmt(prevEntradas)}</span></div>
-      <div class="summary-row"><span style="color:#6b7280">Saídas:</span><span style="color:#dc2626">${fmt(prevSaidas)}</span></div>
+      <h3>Saldo Anterior</h3>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:8px">Dinheiro nas contas no fim de ${formatBR(addDaysYMD(reportFrom, -1))}</div>
       <div class="summary-row total"><span>Saldo anterior:</span><span style="${colorSaldo(prevSaldo)}">${fmt(prevSaldo)}</span></div>
     </div>
 
     <div class="summary-box">
-      <h3>Resumo do Período (${formatBR(reportFrom)} — ${formatBR(reportTo)})</h3>
+      <h3>Saldo do Período (${formatBR(reportFrom)} — ${formatBR(reportTo)})</h3>
       <div class="summary-row"><span style="color:#6b7280">Entradas:</span><span style="color:#16a34a">${fmt(periodEntradas)}</span></div>
       <div class="summary-row"><span style="color:#6b7280">Saídas:</span><span style="color:#dc2626">${fmt(periodSaidas)}</span></div>
-      <div class="summary-row total"><span>Saldo do período:</span><span style="${colorSaldo(periodSaldo)}">${fmt(periodSaldo)}</span></div>
+      <div class="summary-row total"><span>Saldo do período:</span><span style="white-space:nowrap;${colorSaldo(periodSaldo)}">${fmt(periodSaldo)}</span></div>
     </div>
 
     <div class="summary-box" style="background:#f0f9ff;border-color:#bae6fd">
-      <h3 style="color:#0369a1">Saldo Atual (Acumulado)</h3>
-      <div class="summary-row"><span style="color:#6b7280">Total entradas:</span><span style="color:#16a34a">${fmt(saldoAtualEntradas)}</span></div>
-      <div class="summary-row"><span style="color:#6b7280">Total saídas:</span><span style="color:#dc2626">${fmt(saldoAtualSaidas)}</span></div>
-      <div class="summary-row total"><span style="color:#0369a1">Saldo atual:</span><span style="${colorSaldo(saldoAtual)}">${fmt(saldoAtual)}</span></div>
+      <h3 style="color:#0369a1">Saldo Final</h3>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:8px">Dinheiro nas contas no fim de ${formatBR(reportTo)}</div>
+      <div class="summary-row"><span style="color:#6b7280">Saldo anterior:</span><span style="white-space:nowrap;${colorSaldo(prevSaldo)}">${fmt(prevSaldo)}</span></div>
+      <div class="summary-row"><span style="color:#6b7280">+ Saldo do período:</span><span style="white-space:nowrap;${colorSaldo(periodSaldo)}">${fmt(periodSaldo)}</span></div>
+      <div class="summary-row total"><span style="color:#0369a1">Saldo final:</span><span style="white-space:nowrap;${colorSaldo(saldoAtual)}">${fmt(saldoAtual)}</span></div>
     </div>
   </div>
 

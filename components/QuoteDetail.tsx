@@ -1018,7 +1018,9 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
           {backLabel}
         </button>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {onGenerateSale && (
+          {/* Venda já feita (registro de venda ou orçamento Aprovado, que já
+              aparece no painel de Vendas): some o botão. */}
+          {onGenerateSale && !hasSale && localQuote.status !== "Aprovado" && (
             <button
               onClick={handleGenerateSale}
               disabled={hasSale || generatingSale}

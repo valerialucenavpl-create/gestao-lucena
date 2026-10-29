@@ -165,13 +165,17 @@ const Receivables: React.FC = () => {
       // o título é só uma previsão — não vence de verdade até a entrega.
       const saleStatus = getSaleStatus(quote);
       const awaitingDelivery = saleStatus === "Aguardando";
+      // O nome gravado no título é uma cópia de quando o pedido foi aprovado
+      // e não acompanha correções (ex.: pedidos salvos como "Cliente
+      // Desconhecido" e depois corrigidos) — vale o nome atual do pedido.
+      const customerName = quote?.customerName || row.customerName;
 
       if (remaining <= 0.005 && totalPaid > 0) {
-        return { ...row, status: "received" as const, receivedAt: lastPaymentDate, awaitingDelivery };
+        return { ...row, customerName, status: "received" as const, receivedAt: lastPaymentDate, awaitingDelivery };
       }
       // Venda cancelada: o que faltava receber não é mais devido.
       if (cancelled) return null;
-      return { ...row, amount: remaining, status: "pending" as const, receivedAt: undefined, awaitingDelivery };
+      return { ...row, customerName, amount: remaining, status: "pending" as const, receivedAt: undefined, awaitingDelivery };
     }).filter((r): r is NonNullable<typeof r> => r !== null);
   }, [rows, cashFlow, quotes, cancelledQuoteIds]);
 
@@ -195,30 +199,29 @@ const Receivables: React.FC = () => {
     [computedRows]
   );
 
-  // ─── Vencidos por idade ────────────────────────────────────────────────────
-  const AGE_BANDS = ["Até 30 dias", "31–60 dias", "61–90 dias", "Mais de 90 dias"] as const;
-  type AgeBand = (typeof AGE_BANDS)[number];
-  const ageBandOf = (days: number): AgeBand =>
-    days <= 30 ? "Até 30 dias" : days <= 60 ? "31–60 dias" : days <= 90 ? "61–90 dias" : "Mais de 90 dias";
-
+  // ─── Vencidos / a vencer ───────────────────────────────────────────────────
   const overdueRows = useMemo(() => {
     const today = toISO(new Date());
-    return computedRows
-      .filter((r) => r.status === "pending" && !r.awaitingDelivery && r.dueDate && r.dueDate < today)
-      .map((r) => {
-        const days = Math.max(0, Math.round((new Date(today).getTime() - new Date(r.dueDate + "T00:00:00").getTime()) / 86400000));
-        return { ...r, overdueDays: days, band: ageBandOf(days) };
-      });
+    return computedRows.filter((r) => r.status === "pending" && !r.awaitingDelivery && r.dueDate && r.dueDate < today);
   }, [computedRows]);
 
   const totalOverdue = overdueRows.reduce((s, r) => s + r.amount, 0);
 
-  const overdueByBand = useMemo(() => {
-    const map = new Map<AgeBand, number>();
-    AGE_BANDS.forEach((b) => map.set(b, 0));
-    overdueRows.forEach((r) => map.set(r.band, (map.get(r.band) || 0) + r.amount));
-    return map;
-  }, [overdueRows]);
+  // Recebimentos futuros: só as faixas de até 30 e 31–60 dias (o que passa
+  // disso não é usado no dia a dia).
+  const upcoming = useMemo(() => {
+    const today = toISO(new Date());
+    const todayT = new Date(today + "T00:00:00").getTime();
+    let upTo30 = 0;
+    let upTo60 = 0;
+    computedRows.forEach((r) => {
+      if (r.status !== "pending" || !r.dueDate || r.dueDate < today) return;
+      const days = Math.round((new Date(r.dueDate + "T00:00:00").getTime() - todayT) / 86400000);
+      if (days <= 30) upTo30 += r.amount;
+      else if (days <= 60) upTo60 += r.amount;
+    });
+    return { upTo30, upTo60 };
+  }, [computedRows]);
 
   const overdueByClient = useMemo(() => {
     const map = new Map<string, number>();
@@ -288,28 +291,31 @@ const Receivables: React.FC = () => {
         </div>
       )}
 
-      {/* VENCIDOS POR IDADE */}
+      {/* VENCIDOS / A VENCER */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
         <div className="flex items-center justify-between mb-3">
-          <div>
-            <h4 className="text-base font-bold text-gray-800">Vencidos por Idade</h4>
-            <p className="text-xs text-gray-500">Total vencido: <span className="font-bold text-red-600">{money(totalOverdue)}</span></p>
-          </div>
+          <h4 className="text-base font-bold text-gray-800">Vencidos e a Vencer</h4>
           <button
             type="button"
             onClick={() => setShowOverdueDetail((v) => !v)}
             className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50"
           >
-            {showOverdueDetail ? "Ocultar por cliente" : "Ver por cliente"}
+            {showOverdueDetail ? "Ocultar vencidos por cliente" : "Ver vencidos por cliente"}
           </button>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {AGE_BANDS.map((band) => (
-            <div key={band} className="border rounded-lg p-3 text-center">
-              <p className="text-xs text-gray-500">{band}</p>
-              <p className="text-lg font-bold text-red-600">{money(overdueByBand.get(band) || 0)}</p>
-            </div>
-          ))}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="rounded-lg p-3 text-center border border-red-200 bg-red-50">
+            <p className="text-xs font-semibold text-red-700">Total vencido</p>
+            <p className="text-lg font-bold text-red-600">{money(totalOverdue)}</p>
+          </div>
+          <div className="rounded-lg p-3 text-center border border-green-200 bg-green-50">
+            <p className="text-xs font-semibold text-green-700">A vencer — até 30 dias</p>
+            <p className="text-lg font-bold text-green-600">{money(upcoming.upTo30)}</p>
+          </div>
+          <div className="rounded-lg p-3 text-center border border-green-200 bg-green-50">
+            <p className="text-xs font-semibold text-green-700">A vencer — 31 a 60 dias</p>
+            <p className="text-lg font-bold text-green-600">{money(upcoming.upTo60)}</p>
+          </div>
         </div>
         {showOverdueDetail && (
           <div className="mt-4 border-t pt-3 space-y-1">

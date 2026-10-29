@@ -335,6 +335,30 @@ export interface QuoteItem {
   // perder esses valores no recálculo do preço.
   extrasPriceTotal?: number;
   extrasCostTotal?: number;
+  // Composição guardada pra reabrir o item no formulário de cima ("Editar")
+  // com cubas/acessórios/estruturas já carregados. Itens antigos não têm —
+  // nesse caso a edição tenta reconstruir a partir do internalDetail.
+  composition?: {
+    category: "GRANITO" | "VIDROS" | "ALUMINIO" | "ACESSORIOS";
+    cubas?: QuoteItemComponent[];
+    accessories?: QuoteItemComponent[];
+    estruturas?: (QuoteItemComponent & { width: number; height: number; color?: string })[];
+    acessoriosVidro?: (QuoteItemComponent & { color?: string })[];
+    notes?: string;
+    extraService?: number;
+    glassTypeId?: string;
+    texture?: string;
+    hardwareColor?: string;
+  };
+}
+
+export interface QuoteItemComponent {
+  id: string;
+  productId: string;
+  name: string;
+  quantity: number;
+  price: number;
+  cost: number;
 }
 // ---------------------------------------------
 // Orçamentos
