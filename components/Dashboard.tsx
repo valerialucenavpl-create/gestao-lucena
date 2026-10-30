@@ -620,6 +620,8 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveView, currentUser }) => 
       .filter((q: any) => {
         if (!q.next_contact_date) return false;
         if (q.status === "Aprovado" || q.status === "Recusado") return false;
+        // Marcado como "Não fechou" no painel de Orçamentos: sai da lista.
+        if (q.not_closed ?? q.notClosed) return false;
         if (userRole === "Sales") {
           return (q.salesperson || "").toLowerCase().trim() === (currentUser?.name || "").toLowerCase().trim();
         }
